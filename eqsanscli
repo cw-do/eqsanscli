@@ -1,0 +1,9 @@
+#!/bin/bash
+SCRIPT_DIR="/SNS/EQSANS/shared/script/eqsanstools-cli"
+
+source "$SCRIPT_DIR/.venv/bin/activate"
+
+export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
+export EQSANSCLI_ROOT="$SCRIPT_DIR"
+
+exec python -m eqsanscli "$@"

@@ -1,0 +1,732 @@
+from __future__ import annotations
+
+import os
+import threading
+
+from rich.table import Table
+from rich.text import Text
+
+from textual.app import App, ComposeResult
+from textual.containers import VerticalScroll
+from textual.widgets import RichLog
+from textual import work
+
+from eqsanscli.tui.widgets.completable_input import CommandSubmitted, CompletableInput, CompletionHint
+from eqsanscli.tui.widgets.status_bar import FooterBar, HeaderBar
+
+from eqsanscli import __version__
+from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts
+from eqsanscli.commands.autopilot import handle_autopilot
+from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
+from eqsanscli.commands.calibrate import handle_calibrate
+from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
+from eqsanscli.commands.export import handle_export_script
+from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
+from eqsanscli.commands.models import handle_models
+from eqsanscli.commands.preset import handle_apply_preset, handle_compare, handle_show_preset, handle_show_presets
+from eqsanscli.commands.reduction import handle_reduce
+from eqsanscli.commands.router import CommandResult, CommandRouter
+from eqsanscli.commands.shell import (
+    handle_ls, handle_cd, handle_pwd, handle_mkdir,
+    handle_cat, handle_head, handle_tail,
+    handle_cp, handle_mv, handle_rm, handle_shell,
+)
+from eqsanscli.commands.stitch import handle_stitch
+from eqsanscli.commands.tables import handle_move, handle_table
+from eqsanscli.commands.session import handle_save, handle_load, handle_list_tables
+from eqsanscli.commands.settings import handle_settings
+from eqsanscli.models.session_state import SessionState
+
+
+class EQSANSApp(App):
+
+    TITLE = "EQSANS CLI"
+    SUB_TITLE = f"v{__version__}"
+
+    CSS = """
+    Screen {
+        layout: vertical;
+        padding: 0 1;
+    }
+    #output-scroll {
+        height: 1fr;
+        overflow-y: auto;
+        overflow-x: auto;
+        scrollbar-gutter: stable;
+    }
+    #output {
+        height: auto;
+        min-height: 1;
+        border: none;
+        overflow-x: hidden;
+        overflow-y: hidden;
+    }
+    #cmd-input {
+        dock: bottom;
+        height: 5;
+        border: round $accent;
+        margin-bottom: 1;
+    }
+    """
+
+    BINDINGS = [
+        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+l", "clear_log", "Clear"),
+        ("ctrl+x", "cancel_job", "Cancel Job"),
+        ("escape", "focus_input", "Focus Input"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.state = SessionState()
+        self.state.output_directory = os.path.abspath(self.state.output_directory)
+        self.router = CommandRouter()
+        self._register_commands()
+        self._cancel_event: threading.Event = threading.Event()
+        self._job_running: bool = False
+        self._prompt_event: threading.Event = threading.Event()
+        self._prompt_response: str = ""
+        self._prompt_pending: bool = False
+
+    def cancel_job(self) -> None:
+        if self._job_running:
+            self._cancel_event.set()
+            log = self.query_one("#output", RichLog)
+            log.write(Text.from_markup("[bold yellow]⚠ Cancel requested — stopping after current run...[/bold yellow]"))
+
+    def _set_job_running(self, running: bool) -> None:
+        self._job_running = running
+        if not running:
+            self._cancel_event.clear()
+        footer = self.query_one("#footer-bar", FooterBar)
+        footer.set_job_running(running)
+
+    def _register_commands(self) -> None:
+        """Register all command handlers with the router."""
+        self.router.register("show", handle_show)
+        self.router.register("show table", handle_show_table)
+        self.router.register("matchruns", handle_matchruns)
+        self.router.register("set", handle_set)
+        self.router.register("set config", handle_set_config)
+        self.router.register("show config", handle_show_config)
+        self.router.register("list configs", handle_list_configs)
+        self.router.register("show presets", handle_show_presets)
+        self.router.register("show preset", handle_show_preset)
+        self.router.register("apply preset", handle_apply_preset)
+        self.router.register("compare", handle_compare)
+        self.router.register("assign", handle_assign)
+        self.router.register("reduce", handle_reduce)
+        self.router.register("remove", handle_remove)
+        self.router.register("export script", handle_export_script)
+        self.router.register("plot", handle_plot)
+        self.router.register("list iq", handle_list_iq)
+        self.router.register("list iqxqy", handle_list_iqxqy)
+        self.router.register("calibrate", handle_calibrate)
+        self.router.register("stitch", handle_stitch)
+        self.router.register("table", handle_table)
+        self.router.register("move", handle_move)
+        self.router.register("save", handle_save)
+        self.router.register("load", handle_load)
+        self.router.register("list tables", handle_list_tables)
+        self.router.register("list ipts", handle_list_ipts)
+        self.router.register("list", self._handle_list)
+        self.router.register("models", handle_models)
+        self.router.register("autopilot", handle_autopilot)
+        self.router.register("settings", handle_settings)
+        self.router.register("help", self._handle_help)
+        self.router.alias("quit", "exit")
+        self.router.alias("q", "exit")
+        self.router.register("exit", self._handle_exit)
+        
+        self.router.register("ls", handle_ls)
+        self.router.register("cd", handle_cd)
+        self.router.register("pwd", handle_pwd)
+        self.router.register("mkdir", handle_mkdir)
+        self.router.register("cat", handle_cat)
+        self.router.register("head", handle_head)
+        self.router.register("tail", handle_tail)
+        self.router.register("cp", handle_cp)
+        self.router.register("mv", handle_mv)
+        self.router.register("rm", handle_rm)
+        self.router.register("sh", handle_shell)
+        self.router.alias("dir", "ls")
+        self.router.alias("shell", "sh")
+
+    def compose(self) -> ComposeResult:
+        yield HeaderBar(id="header-bar")
+        with VerticalScroll(id="output-scroll"):
+            yield RichLog(id="output", highlight=True, markup=True)
+        yield CompletableInput(placeholder="eqsans> Type a command or ask in natural language...", id="cmd-input")
+        yield FooterBar(id="footer-bar")
+
+    def on_mount(self) -> None:
+        log = self.query_one("#output", RichLog)
+        logo = (
+            "\n"
+            "[bold cyan]"
+            "  ███████╗ ██████╗ ███████╗ █████╗ ███╗   ██╗███████╗\n"
+            "  ██╔════╝██╔═══██╗██╔════╝██╔══██╗████╗  ██║██╔════╝\n"
+            "  █████╗  ██║   ██║███████╗███████║██╔██╗ ██║███████╗\n"
+            "  ██╔══╝  ██║▄▄ ██║╚════██║██╔══██║██║╚██╗██║╚════██║\n"
+            "  ███████╗╚██████╔╝███████║██║  ██║██║ ╚████║███████║\n"
+            "  ╚══════╝ ╚══▀▀═╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝\n"
+            "[/bold cyan]"
+            f"  [dim]Extended Q-Range Small-Angle Neutron Scattering[/dim]  v{__version__}\n"
+            "  [dim]SNS · ORNL · Oak Ridge, TN[/dim]\n"
+            "\n"
+            "  [bold]Getting Started:[/bold]\n"
+            "    1. [cyan]/load ipts <number>[/cyan]     Load experiment catalog from ONCat\n"
+            "    2. [cyan]/matchruns[/cyan]              Auto-match trans/bkg/empty runs\n"
+            "    3. [cyan]/show table[/cyan]             Review matched runs\n"
+            "    4. [cyan]/show presets[/cyan]           Browse preset configurations\n"
+            "    5. [cyan]/apply preset <name> <config>[/cyan]  Apply parameters\n"
+            "    6. [cyan]/reduce all[/cyan]             Run data reduction\n"
+            "\n"
+            "  [dim]Type [bold]/help[/bold] for all commands, or just ask in natural language.[/dim]\n"
+        )
+        log.write(Text.from_markup(logo))
+        self.query_one("#cmd-input", CompletableInput).focus()
+        self.query_one("#footer-bar", FooterBar).update_model()
+        self._refresh_completions()
+        self._update_status_bars()
+
+    def _refresh_completions(self) -> None:
+        completions: list[str] = []
+        for cmd in self.router.commands:
+            completions.append(f"/{cmd}")
+        for cfg in self.state.current_table.configurations:
+            completions.append(cfg)
+        from eqsanscli.services.preset_service import list_presets
+        for p in list_presets():
+            completions.append(p["name"])
+        self.query_one("#cmd-input", CompletableInput).update_completions(completions)
+
+    def _update_status_bars(self) -> None:
+        self.query_one("#header-bar", HeaderBar).update_from_state(self.state)
+
+    async def on_command_submitted(self, event: CommandSubmitted) -> None:
+        value = event.value.strip()
+        if not value:
+            return
+
+        if self._prompt_pending:
+            self._prompt_response = value
+            self._prompt_pending = False
+            self._prompt_event.set()
+            log = self.query_one("#output", RichLog)
+            log.write(Text.from_markup(f"\n[dim]>[/] [bold]{value}[/]"))
+            return
+
+        log = self.query_one("#output", RichLog)
+        footer = self.query_one("#footer-bar", FooterBar)
+
+        log.write(Text.from_markup(f"\n[dim]>[/] [bold]{value}[/]"))
+
+        is_nl = not value.startswith("/")
+        if is_nl:
+            footer.set_llm_thinking()
+
+        result = await self.router.dispatch(value, self.state)
+
+        if is_nl:
+            footer.set_llm_idle()
+
+        if not result.success:
+            log.write(Text.from_markup(f"[red]{result.message}[/]"))
+        else:
+            if result.message:
+                log.write(Text.from_markup(f"[green]{result.message}[/]"))
+            if result.data:
+                self._render_data(log, result.data)
+
+        self.query_one("#output-scroll", VerticalScroll).scroll_end()
+        self.query_one("#cmd-input", CompletableInput).focus()
+        self._refresh_completions()
+        self._update_status_bars()
+
+    def on_completion_hint(self, event: CompletionHint) -> None:
+        log = self.query_one("#output", RichLog)
+        options = "  ".join(f"[cyan]{o}[/cyan]" for o in event.options)
+        log.write(Text.from_markup(f"[dim]Tab options:[/dim] {options}"))
+        self.query_one("#output-scroll", VerticalScroll).scroll_end()
+
+    @work(thread=True)
+    def run_reduction_batch(self, table, indices: list[int], state) -> None:
+        import time
+        from eqsanscli.services.reduction_service import reduce_row
+        from eqsanscli.commands.reduction import _format_time, _summarize_error
+
+        log = self.query_one("#output", RichLog)
+        scroll = self.query_one("#output-scroll", VerticalScroll)
+
+        def write(msg: str) -> None:
+            self.call_from_thread(log.write, Text.from_markup(msg))
+            self.call_from_thread(scroll.scroll_end)
+
+        self.call_from_thread(self._set_job_running, True)
+        self._cancel_event.clear()
+
+        output_dir = state.output_directory
+        total = len(indices)
+        n_success = 0
+        n_fail = 0
+        n_cancelled = 0
+        elapsed_times: list[float] = []
+        batch_start = time.time()
+
+        write(f"[bold]Reducing {total} run(s) → {output_dir}[/bold]")
+        write(f"[dim]Running in background — press [bold]^X[/bold] or click [bold]✕ Cancel[/bold] to stop.[/dim]\n")
+
+        for i, idx in enumerate(indices):
+            if self._cancel_event.is_set():
+                write(f"[yellow]⚠ Cancelled — skipping remaining {total - i} run(s)[/yellow]")
+                n_cancelled = total - i
+                break
+
+            row = table.get_row(idx)
+            if row is None:
+                continue
+
+            remaining = total - i
+            eta_str = ""
+            if elapsed_times:
+                avg = sum(elapsed_times) / len(elapsed_times)
+                eta_str = f"  ETA ~{_format_time(avg * remaining)}"
+
+            output_name = f"{row.sample_name}_{row.configuration}"
+            row.status = "reducing"
+            write(
+                f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
+                f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                f"→ {output_name}.json  "
+                f"[dim]{remaining} left{eta_str}[/dim]"
+            )
+
+            result = reduce_row(
+                row=row, ipts=state.ipts,
+                user_configs=state.configurations, output_dir=output_dir,
+                cancel_event=self._cancel_event,
+            )
+
+            elapsed_times.append(result.elapsed_seconds)
+
+            if result.cancelled:
+                n_cancelled += 1
+                write(
+                    f"  [dim][{i+1}/{total}][/dim] [yellow]⊘[/yellow] "
+                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) — cancelled"
+                )
+                break
+            elif result.success:
+                n_success += 1
+                state.reduced_files.append(result.output_file)
+                write(
+                    f"  [dim][{i+1}/{total}][/dim] [green]✓[/green] "
+                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                    f"— {_format_time(result.elapsed_seconds)}  "
+                    f"[dim]→ {output_name}_Iq.dat[/dim]"
+                )
+            else:
+                n_fail += 1
+                error_summary = _summarize_error(result.log_file, result.err_file)
+                write(
+                    f"  [dim][{i+1}/{total}][/dim] [red]✗[/red] "
+                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                    f"— FAILED after {_format_time(result.elapsed_seconds)}"
+                )
+                write(f"      [red]{error_summary}[/red]")
+                if result.log_file:
+                    write(f"      [dim]Logs: {result.log_file}[/dim]")
+
+        total_elapsed = time.time() - batch_start
+        cancelled_str = f"  [yellow]{n_cancelled} cancelled[/yellow]  " if n_cancelled else ""
+        write(
+            f"\n[bold]━━━ Reduction complete ━━━[/bold]\n"
+            f"  [green]{n_success} succeeded[/green]  [red]{n_fail} failed[/red]  "
+            f"{cancelled_str}total {_format_time(total_elapsed)}\n"
+            f"  Output: {output_dir}"
+        )
+        self.call_from_thread(self._set_job_running, False)
+        self.call_from_thread(self._update_status_bars)
+
+    def _render_data(self, log: RichLog, data: dict) -> None:
+        """Render structured command result data to the output log."""
+        data_type = data.get("type")
+
+        if data_type == "catalog":
+            self._render_table(
+                log,
+                columns=["Run #", "Title", "Dist (m)", "λ (Å)", "Count", "Time(s)"],
+                rows=data["rows"],
+                title=f"IPTS-{data.get('ipts', '?')} Catalog",
+            )
+
+        elif data_type == "working_table":
+            self._render_working_table(log, data["rows"])
+
+        elif data_type == "config_table":
+            self._render_config_table(log, data["rows"], data.get("config_id", ""))
+
+        elif data_type == "preset_list":
+            self._render_preset_list(log, data["rows"])
+
+        elif data_type == "compare_table":
+            self._render_compare_table(
+                log, data["rows"], data.get("name_a", "A"), data.get("name_b", "B")
+            )
+
+        elif data_type == "image":
+            log.write(Text.from_markup(f"[dim]Plot saved: {data.get('path', '')}[/dim]"))
+
+        elif data_type == "stitch_table":
+            self._render_stitch_table(log, data["groups"])
+
+        elif data_type == "model_changed":
+            footer = self.query_one("#footer-bar", FooterBar)
+            footer.model_name = data["model"]
+
+        elif data_type == "start_reduction":
+            self.run_reduction_batch(
+                self.state.current_table,
+                data["indices"],
+                self.state,
+            )
+
+        elif data_type == "start_autopilot":
+            self.run_autopilot_worker(data["ipts"], data.get("samples"))
+
+    def action_cancel_job(self) -> None:
+        self.cancel_job()
+
+    @work(thread=True)
+    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None) -> None:
+        import asyncio
+        from eqsanscli.services.autopilot import run_autopilot_sync
+
+        log = self.query_one("#output", RichLog)
+        scroll = self.query_one("#output-scroll", VerticalScroll)
+
+        def write(msg: str) -> None:
+            self.call_from_thread(log.write, Text.from_markup(msg))
+            self.call_from_thread(scroll.scroll_end)
+
+        def prompt_user(question: str) -> str:
+            self._prompt_event.clear()
+            self._prompt_response = ""
+            self._prompt_pending = True
+            write(question)
+            self._prompt_event.wait()
+            return self._prompt_response.strip()
+
+        self.call_from_thread(self._set_job_running, True)
+        self._cancel_event.clear()
+        loop = asyncio.new_event_loop()
+
+        def dispatch_sync(cmd: str):
+            return loop.run_until_complete(self.router.dispatch(cmd, self.state))
+
+        try:
+            run_autopilot_sync(
+                ipts=ipts,
+                state=self.state,
+                dispatch_sync=dispatch_sync,
+                write=write,
+                cancel_event=self._cancel_event,
+                prompt_user=prompt_user,
+                sample_filter=samples,
+            )
+        finally:
+            loop.close()
+        self.call_from_thread(self._set_job_running, False)
+        self.call_from_thread(self._update_status_bars)
+
+    def _render_table(
+        self, log: RichLog, columns: list[str], rows: list[dict], title: str = ""
+    ) -> None:
+        """Render a Rich table to the output log."""
+        table = Table(title=title, show_lines=False, padding=(0, 1))
+        for col in columns:
+            justify = "right" if col in (
+                "Run #", "Idx", "Count", "Time(s)"
+            ) else "left"
+            table.add_column(col, justify=justify)
+
+        for row_data in rows:
+            table.add_row(*[row_data.get(c, "") for c in columns])
+
+        log.write(table)
+
+    def _render_working_table(self, log: RichLog, rows: list[dict]) -> None:
+        """Render working table with Config next to Sample and two-line run cells."""
+        table = Table(
+            title="Working Table",
+            show_lines=True,
+            padding=(0, 1),
+            row_styles=["", ""],
+        )
+
+        # Column order: Idx, Sample, Config, then run numbers, Status
+        table.add_column("Idx", justify="right", style="bold", width=4)
+        table.add_column("Sample", justify="left", min_width=14)
+        table.add_column("Config", justify="left", style="cyan", min_width=10)
+        table.add_column("Scatt", justify="left", min_width=10)
+        table.add_column("Trans", justify="left", min_width=10)
+        table.add_column("Bkg", justify="left", min_width=10)
+        table.add_column("BkgTr", justify="left", min_width=10)
+        table.add_column("Empty", justify="left", min_width=10)
+        table.add_column("Status", justify="left", style="green", width=8)
+
+        columns = ["Idx", "Sample", "Config", "Scatt", "Trans", "Bkg", "BkgTr", "Empty", "Status"]
+        for row_data in rows:
+            table.add_row(*[row_data.get(c, "") for c in columns])
+
+        log.write(table)
+
+    def _render_preset_list(self, log: RichLog, rows: list[dict]) -> None:
+        """Render preset list as a table."""
+        table = Table(title="Available Presets", show_lines=False, padding=(0, 1))
+        table.add_column("Name", justify="left", style="bold cyan", min_width=30)
+        table.add_column("Description", justify="left", min_width=40)
+        for row_data in rows:
+            table.add_row(row_data["Name"], row_data["Description"])
+        log.write(table)
+
+    def _render_compare_table(
+        self, log: RichLog, rows: list[dict], name_a: str, name_b: str,
+    ) -> None:
+        """Render side-by-side config comparison with diff highlighting."""
+        table = Table(
+            title=f"Compare: {name_a} vs {name_b}",
+            show_lines=False,
+            padding=(0, 1),
+        )
+        table.add_column("Parameter", justify="left", style="bold", min_width=35)
+        table.add_column(name_a, justify="left", min_width=22)
+        table.add_column(name_b, justify="left", min_width=22)
+
+        for row_data in rows:
+            diff = row_data["diff"]
+            if diff == "same":
+                continue  # Skip identical rows — only show differences
+            param = row_data["param"]
+            val_a = row_data["value_a"]
+            val_b = row_data["value_b"]
+
+            if diff == "diff":
+                # Highlight differences in red/green
+                table.add_row(
+                    f"[bold]{param}[/bold]",
+                    f"[red]{val_a}[/red]",
+                    f"[green]{val_b}[/green]",
+                )
+            elif diff == "only_a":
+                table.add_row(
+                    f"[dim]{param}[/dim]",
+                    f"[yellow]{val_a}[/yellow]",
+                    "[dim]—[/dim]",
+                )
+            elif diff == "only_b":
+                table.add_row(
+                    f"[dim]{param}[/dim]",
+                    "[dim]—[/dim]",
+                    f"[yellow]{val_b}[/yellow]",
+                )
+
+        log.write(table)
+
+    def _render_stitch_table(self, log: RichLog, groups: list[dict]) -> None:
+        table = Table(title="Stitch Table", show_lines=True, padding=(0, 1))
+        table.add_column("Sample", style="bold", min_width=16)
+        table.add_column("Configs", min_width=20)
+        table.add_column("Files", min_width=30)
+        table.add_column("Overlap Q", min_width=20)
+        table.add_column("Target", justify="center", width=6)
+        table.add_column("Status", width=10)
+
+        for g in groups:
+            configs_str = "\n".join(g.get("configs", []))
+            files_str = "\n".join(os.path.basename(f) for f in g.get("files", []))
+            overlaps = g.get("overlaps", [])
+            if overlaps:
+                pairs = [f"[{overlaps[i]:.4f}, {overlaps[i+1]:.4f}]" for i in range(0, len(overlaps), 2)]
+                overlap_str = "\n".join(pairs)
+            else:
+                overlap_str = "—"
+
+            status = g.get("status", "ready")
+            status_styled = {"done": "[green]done[/green]", "error": "[red]error[/red]", "1 config": "[dim]1 config[/dim]"}.get(status, status)
+
+            table.add_row(
+                g.get("sample_name", ""),
+                configs_str,
+                files_str,
+                overlap_str,
+                str(g.get("target_profile_index", 0)),
+                status_styled,
+            )
+
+        log.write(table)
+
+    def _render_config_table(self, log: RichLog, rows: list[dict], config_id: str) -> None:
+        """Render configuration parameters as a table."""
+        table = Table(title=f"Config: {config_id}", show_lines=False, padding=(0, 1))
+        table.add_column("Parameter", justify="left", style="bold", min_width=30)
+        table.add_column("Value", justify="left", min_width=20)
+        table.add_column("", justify="center", width=3)  # source marker
+
+        for row_data in rows:
+            table.add_row(row_data["Parameter"], row_data["Value"], row_data.get("Src", ""))
+
+        log.write(table)
+
+    async def _handle_help(self, args: list[str], state: SessionState) -> CommandResult:
+        """Handle /help — show available commands."""
+        help_text = (
+            "[bold]Available Commands:[/]\n"
+            "\n"
+            "[bold cyan]Catalog & Data Loading:[/]\n"
+            "  /load ipts <number>           — Fetch catalog from ONCat\n"
+            "  /list ipts *                  — List all EQSANS experiments from ONCat\n"
+            "  /list ipts <text>             — Search by title or team member name\n"
+            "  /show catalog                 — Display loaded catalog\n"
+            "  /show ipts                    — Show current IPTS number\n"
+            "  /save catalog <file>          — Export catalog to CSV\n"
+            "  /load catalog <file>          — Load catalog from CSV\n"
+            "\n"
+            "[bold cyan]Working Table:[/]\n"
+            "  /show table                   — Show current working table\n"
+            "  /matchruns                    — Auto-match trans/bkg/empty runs\n"
+            "  /assign bkg <sample>          — Reassign background sample for all rows\n"
+            "  /set <run> <field> <value>    — Set run association (use 'none' to clear)\n"
+            "  /remove <rows>               — Remove rows (1,3,5 or 2-8 or all --keep sample)\n"
+            "  /save table <name>            — Save working table\n"
+            "  /load table <name>            — Load working table\n"
+            "\n"
+            "[bold cyan]Multi-Table:[/]\n"
+            "  /table list                   — List all tables\n"
+            "  /table new <name>             — Create and switch to new table\n"
+            "  /table <name>                 — Switch active table\n"
+            "  /table clone <src> <dst>      — Clone a table\n"
+            "  /table rename <old> <new>     — Rename a table\n"
+            "  /table delete <name>          — Delete a table\n"
+            "  /move <rows> <table>          — Move rows to another table\n"
+            "\n"
+            "[bold cyan]Configuration:[/]\n"
+            "  /list configs                 — List configurations in current table\n"
+            "  /show config <id>             — Show reduction parameters for config\n"
+            '  /set config <id> <param> <val> — Set config parameter\n'
+            "  /show outputdir               — Show output directory\n"
+            "  /set outputdir <path>         — Set output directory\n"
+            "  /set ipts <number>            — Set IPTS number\n"
+            "\n"
+            "[bold cyan]Presets:[/]\n"
+            "  /show presets                 — List available preset configurations\n"
+            "  /show preset <name>           — Show preset parameters\n"
+            '  /apply preset <name> <config_id> — Copy preset to active config\n'
+            "  /compare <a> <b>              — Side-by-side diff of two configs/presets\n"
+            "\n"
+            "[bold cyan]Reduction:[/]\n"
+            "  /reduce <idx|range|all>       — Run data reduction\n"
+            "  /export script [filename]     — Generate standalone .py script\n"
+            "\n"
+            "[bold cyan]Data & Plotting:[/]\n"
+            "  /list iq                      — List reduced I(Q) files\n"
+            "  /list iqxqy                   — List I(Qx,Qy) files\n"
+            "  /plot <file|pattern> [flags]  — Plot I(Q) data\n"
+            "    Axes:  --logx --logy --linx --liny --loglog --linlin\n"
+            "    Types: --kratky --guinier --porod\n"
+            "    Range: --xmin/xmax/ymin/ymax <val>\n"
+            "    Style: --noerror --grid --offset <factor> --title <text>\n"
+            "    Save:  --save <path> --dpi <val>\n"
+            "  /calibrate <porsil_file> [--ref NG3|NG7] [--qmin 0.01] [--qmax 0.1]\n"
+            "                                — Calculate absolute scale from porsil\n"
+            "\n"
+            "[bold cyan]Stitch/Merge:[/]\n"
+            "  /stitch build                 — Auto-build stitch table from reduced files\n"
+            "  /stitch show                  — Display stitch table\n"
+            "  /stitch set <sample> overlap <vals> — Set overlap Q range\n"
+            "  /stitch set <sample> target <idx>   — Set normalization target\n"
+            "  /stitch run [sample]          — Execute stitching\n"
+            "  /stitch removerow <idx|all>   — Remove row(s)\n"
+            "  /stitch removeconfig <idx|all> <config> — Remove config from row(s)\n"
+            "  /stitch reorder <idx|all> <c1,c2,...> — Reorder configs (lower-Q first)\n"
+            "  /stitch script [filename]     — Export stitch script\n"
+            "  /stitch save <name>           — Save stitch table\n"
+            "  /stitch load <name>           — Load stitch table\n"
+            "\n"
+            "[bold cyan]Autopilot:[/]\n"
+            "  /autopilot <ipts>             — Full automated reduction pipeline\n"
+            "  /autopilot <ipts> --samples <name1,name2,...>\n"
+            "                                — Autopilot for specific samples only\n"
+            "\n"
+            "[bold cyan]LLM:[/]\n"
+            "  /models                       — List available LLM models\n"
+            "  /models <name>                — Switch LLM model\n"
+            "\n"
+            "[bold cyan]Settings:[/]\n"
+            "  /settings                     — Show current settings\n"
+            "  /settings textwrap <width>    — Set text wrap width (40-200)\n"
+            "  /settings figsize <w> <h>     — Set default plot size (e.g. 8 6)\n"
+            "  /settings dpi <value>         — Set default plot DPI (50-600)\n"
+            "  /settings plotscale <scale>   — Default axis scale (loglog/linlin/loglin/linlog)\n"
+            "  /settings errorbars <on|off>  — Toggle default error bars\n"
+            "  /settings linestyle <style>   — Default style (line/marker/line+marker)\n"
+            "\n"
+            "[bold cyan]Session:[/]\n"
+            "  /save session <name>          — Save full session state\n"
+            "  /load session <name>          — Restore session\n"
+            "  /help                         — This message\n"
+            "  /quit                         — Exit\n"
+            "\n"
+            "[bold cyan]Shell Commands:[/]\n"
+            "  /ls [path]                    — List directory contents\n"
+            "  /cd <path>                    — Change directory\n"
+            "  /pwd                          — Print working directory\n"
+            "  /mkdir <path>                 — Create directory\n"
+            "  /cat <file>                   — Display file contents\n"
+            "  /head <file> [n]              — Show first n lines (default 10)\n"
+            "  /tail <file> [n]              — Show last n lines (default 10)\n"
+            "  /cp <src> <dst>               — Copy file or directory\n"
+            "  /mv <src> <dst>               — Move/rename file\n"
+            "  /rm <file> [file2...]         — Remove files or directories\n"
+            "  /sh <command>                 — Run shell command\n"
+            "\n"
+            "[dim]Or type in natural language — e.g., 'show me runs from IPTS 35520'[/]\n"
+            "[dim]Use ↑/↓ arrows to navigate command history[/]"
+        )
+        return CommandResult(success=True, message=help_text)
+
+    async def _handle_list(self, args: list[str], state: SessionState) -> CommandResult:
+        return CommandResult(
+            success=False,
+            message="Usage: /list <target>\n"
+            "  /list iq                   — List reduced I(Q) files\n"
+            "  /list iqxqy                — List I(Qx,Qy) files\n"
+            "  /list configs              — List configurations\n"
+            "  /list tables               — List saved and active tables",
+        )
+
+    async def _handle_exit(self, args: list[str], state: SessionState) -> CommandResult:
+        """Handle /exit and /quit."""
+        try:
+            state.save(SessionState.auto_save_path())
+        except Exception:
+            pass
+        self.exit()
+        return CommandResult(success=True)
+
+    def action_focus_input(self) -> None:
+        """Refocus the command input."""
+        self.query_one("#cmd-input", CompletableInput).focus()
+
+    def action_clear_log(self) -> None:
+        """Clear the output log."""
+        self.query_one("#output", RichLog).clear()
+
+    def action_quit(self) -> None:
+        """Quit with auto-save."""
+        try:
+            self.state.save(SessionState.auto_save_path())
+        except Exception:
+            pass
+        self.exit()

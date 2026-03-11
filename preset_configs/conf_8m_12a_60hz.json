@@ -1,0 +1,119 @@
+{
+    "schemaStamp": "2025-10-29T18:30:37.455225",
+    "instrumentName": "EQSANS",
+    "iptsNumber": "35884",
+    "sample": {
+        "runNumber": "172838",
+        "thickness": 0.1,
+        "transmission": {
+            "runNumber": "172827",
+            "value": ""
+        }
+    },
+    "background": {
+        "runNumber": "172835",
+        "transmission": {
+            "runNumber": "172824",
+            "value": ""
+        }
+    },
+    "emptyTransmission": {
+        "runNumber": "172824",
+        "value": null
+    },
+    "beamCenter": {
+        "runNumber": "172824"
+    },
+    "outputFileName": "s0_conf1_8m",
+    "configuration": {
+        "outputDir": "./output/",
+        "instrumentConfigurationDir": "/SNS/EQSANS/shared/instrument_configuration",
+        "useTimeSlice": false,
+        "timeSliceInterval": 300,
+        "timeSliceOffset": 0.0,
+        "timeSlicePeriod": null,
+        "useLogSlice": false,
+        "logSliceName": null,
+        "logSliceInterval": 10,
+        "cutTOFmin": 1000,
+        "cutTOFmax": 3000,
+        "wavelengthStep": 0.1,
+        "wavelengthStepType": "constant Delta lambda",
+        "sampleOffset": 290,
+        "useDetectorOffset": true,
+        "detectorOffset": 60.9995821,
+        "sampleApertureSize": 10,
+        "sourceApertureDiameter": null,
+        "usePixelCalibration": null,
+        "maskFileName": "/SNS/EQSANS/shared/script/eqsanstools/mask_4m.nxs",
+        "useDefaultMask": true,
+        "defaultMask": null,
+        "useMaskBackTubes": false,
+        "darkFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025B_mp/EQSANS_167516.nxs.h5",
+        "normalization": "Total charge",
+        "fluxMonitorRatioFile": null,
+        "beamFluxFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025B_mp/bl6_flux_2025B_Aug_rebinned_4m.txt",
+        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025B_mp/Sensitivity_patched_thinPMMA_4m_167517.nxs",
+        "useSolidAngleCorrection": true,
+        "useThetaDepTransCorrection": true,
+        "mmRadiusForTransmission": 25,
+        "absoluteScaleMethod": "standard",
+        "StandardAbsoluteScale": 1.5520224214791642,
+        "numQxQyBins": 60,
+        "1DQbinType": "scalar",
+        "QbinType": "log",
+        "numQBins": 40,
+        "LogQBinsPerDecade": null,
+        "useLogQBinsDecadeCenter": false,
+        "useLogQBinsEvenDecade": false,
+        "WedgeMinAngles": "-30, 60",
+        "WedgeMaxAngles": "30, 120",
+        "autoWedgeQmin": null,
+        "autoWedgeQmax": null,
+        "autoWedgeQdelta": null,
+        "autoWedgeAzimuthalDelta": null,
+        "autoWedgePeakWidth": null,
+        "autoWedgeBackgroundWidth": null,
+        "autoWedgeSignalToNoiseMin": null,
+        "AnnularAngleBin": 5.0,
+        "Qmin": 0.002,
+        "Qmax": 0.1,
+        "useErrorWeighting": false,
+        "smearingPixelSizeX": null,
+        "smearingPixelSizeY": null,
+        "useSubpixels": null,
+        "subpixelsX": null,
+        "subpixelsY": null,
+        "useSliceIDxAsSuffix": null,
+        "fitInelasticIncoh": false,
+        "selectMinIncoh": true,
+        "incohfit_qmin": 0.05,
+        "incohfit_qmax": 0.09,
+        "incohfit_factor": null,
+        "outputWavelengthDependentProfile": true,
+        "incohfit_intensityweighted": false,
+        "elasticReference": {
+            "runNumber": "",
+            "thickness": "1.0",
+            "transmission": {
+                "runNumber": null,
+                "value": "0.9"
+            }
+        },
+        "elasticReferenceBkgd": {
+            "runNumber": "",
+            "transmission": {
+                "runNumber": null,
+                "value": "0.9"
+            }
+        },
+        "scaleComponents": {
+            "detector1": [
+                1.021,
+                1.0204066565386,
+                1
+            ]
+        }
+    },
+    "dataDirectories": "/SNS/EQSANS/IPTS-35884/shared/output_bkgsub/"
+}
