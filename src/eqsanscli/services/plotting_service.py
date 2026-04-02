@@ -101,7 +101,14 @@ opts = args["opts"]
 plot_type = args["type"]
 
 import matplotlib
-matplotlib.use("TkAgg")
+import os
+if os.environ.get("DISPLAY"):
+    try:
+        matplotlib.use("TkAgg")
+    except Exception:
+        matplotlib.use("Agg")
+else:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 if plot_type == "2d":

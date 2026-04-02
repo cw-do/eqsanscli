@@ -146,6 +146,11 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
     if not files:
         return CommandResult(success=False, message="No files specified. Use /list iq to see available files.")
 
+    # Auto-save when no display is available (headless/SSH) even without --save
+    no_display = not os.environ.get("DISPLAY")
+    if not opts.save and no_display:
+        opts.save = "__auto__"
+
     if opts.save == "__auto__":
         if len(files) == 1:
             stem = Path(files[0]).stem
@@ -170,6 +175,18 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
 
     if opts.save:
         msg += f"\n  Saved: [bold cyan]{os.path.abspath(result_path)}[/bold cyan]"
+
+    # In headless/no-display mode, auto-share the saved plot via here.now
+    if no_display and opts.save and os.path.exists(result_path):
+        try:
+            from eqsanscli.services.share_service import share_files
+            ok, url, err = share_files([result_path])
+            if ok and url:
+                msg += f"\n  Shared: {url}"
+            elif err:
+                msg += f"\n  [dim]Share failed: {err}[/dim]"
+        except Exception as e:
+            msg += f"\n  [dim]Share failed: {e}[/dim]"
 
     return CommandResult(success=True, message=msg)
 
