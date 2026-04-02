@@ -118,6 +118,10 @@ def _register_commands(router: CommandRouter, state: SessionState) -> None:
     router.alias("dir", "ls")
     router.alias("shell", "sh")
 
+    async def _handle_version(args, state):
+        from eqsanscli import __version__
+        return CommandResult(success=True, message=f"eqsanscli v{__version__}")
+
     async def _handle_exit(args, state):
         return CommandResult(success=True, message="exit")
 
@@ -131,6 +135,7 @@ def _register_commands(router: CommandRouter, state: SessionState) -> None:
 
     router.register("exit", _handle_exit)
     router.register("help", _handle_help)
+    router.register("version", _handle_version)
     router.register("list", _handle_list)
 
 

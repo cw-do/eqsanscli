@@ -138,6 +138,7 @@ class EQSANSApp(App):
         self.router.register("settings", handle_settings)
         self.router.register("share", handle_share)
         self.router.register("help", self._handle_help)
+        self.router.register("version", self._handle_version)
         self.router.alias("quit", "exit")
         self.router.alias("q", "exit")
         self.router.register("exit", self._handle_exit)
@@ -807,6 +808,9 @@ class EQSANSApp(App):
             "[dim]Use ↑/↓ arrows to navigate command history[/]"
         )
         return CommandResult(success=True, message=help_text)
+
+    async def _handle_version(self, args: list[str], state: SessionState) -> CommandResult:
+        return CommandResult(success=True, message=f"eqsanscli v{__version__}")
 
     async def _handle_list(self, args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(
