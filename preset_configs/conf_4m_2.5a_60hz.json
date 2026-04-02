@@ -1,30 +1,30 @@
 {
-    "schemaStamp": "2025-03-29T22:47:56.559182",
+    "schemaStamp": "2026-03-27T16:41:06.343023",
     "instrumentName": "EQSANS",
-    "iptsNumber": "34155",
+    "iptsNumber": "36571",
     "sample": {
-        "runNumber": "163778",
+        "runNumber": "177135",
         "thickness": 0.1,
         "transmission": {
-            "runNumber": "163768",
+            "runNumber": "177130",
             "value": ""
         }
     },
     "background": {
-        "runNumber": "163685",
+        "runNumber": "177134",
         "transmission": {
-            "runNumber": "163676",
+            "runNumber": "177129",
             "value": ""
         }
     },
     "emptyTransmission": {
-        "runNumber": "163673",
+        "runNumber": "177128",
         "value": null
     },
     "beamCenter": {
-        "runNumber": "163673"
+        "runNumber": "177128"
     },
-    "outputFileName": "L-dPMMA_conf2_tofcut",
+    "outputFileName": "porsil_36571_20C_4m",
     "configuration": {
         "outputDir": "./output/",
         "instrumentConfigurationDir": "/SNS/EQSANS/shared/instrument_configuration",
@@ -36,33 +36,33 @@
         "logSliceName": null,
         "logSliceInterval": 10,
         "cutTOFmin": 1000,
-        "cutTOFmax": 2000,
+        "cutTOFmax": 3000,
         "wavelengthStep": 0.1,
         "wavelengthStepType": "constant Delta lambda",
-        "sampleOffset": 290,
+        "sampleOffset": 285.0,
         "useDetectorOffset": true,
-        "detectorOffset": 84.38081,
+        "detectorOffset": 77.244,
         "sampleApertureSize": 10,
         "sourceApertureDiameter": null,
         "usePixelCalibration": null,
-        "maskFileName": "/SNS/EQSANS/shared/script/eqsanstools/mask_4m.nxs",
+        "maskFileName": "/SNS/EQSANS/IPTS-36571/shared/mask_4m2.nxs",
         "useDefaultMask": true,
         "defaultMask": null,
         "useMaskBackTubes": false,
-        "darkFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025A_mp/EQSANS_158584.nxs.h5",
+        "darkFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/EQSANS_176665.nxs.h5",
         "normalization": "Total charge",
         "fluxMonitorRatioFile": null,
-        "beamFluxFileName": "/SNS/EQSANS/shared/mp_tools/2025A_flux/bl6_flux_2025A_Jan_rebinned.txt",
-        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025A_mp/Sensitivity_patched_thinPMMA_4m_158598.nxs",
+        "beamFluxFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/bl6_flux_2026a_mar_rebinned.txt",
+        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/Sensitivity_patched_thinPMMA_4m_176667.nxs",
         "useSolidAngleCorrection": true,
         "useThetaDepTransCorrection": true,
         "mmRadiusForTransmission": 25,
         "absoluteScaleMethod": "standard",
-        "StandardAbsoluteScale": 0.19152036088541433,
+        "StandardAbsoluteScale": 1,
         "numQxQyBins": 80,
         "1DQbinType": "scalar",
-        "QbinType": "log",
-        "numQBins": 60,
+        "QbinType": "linear",
+        "numQBins": 80,
         "LogQBinsPerDecade": null,
         "useLogQBinsDecadeCenter": false,
         "useLogQBinsEvenDecade": false,
@@ -76,9 +76,9 @@
         "autoWedgeBackgroundWidth": null,
         "autoWedgeSignalToNoiseMin": null,
         "AnnularAngleBin": 5.0,
-        "Qmin": 0.01,
-        "Qmax": 0.3,
-        "useErrorWeighting": false,
+        "Qmin": null,
+        "Qmax": null,
+        "useErrorWeighting": true,
         "smearingPixelSizeX": null,
         "smearingPixelSizeY": null,
         "useSubpixels": null,
@@ -87,10 +87,10 @@
         "useSliceIDxAsSuffix": null,
         "fitInelasticIncoh": false,
         "selectMinIncoh": true,
-        "incohfit_qmin": 0.1,
+        "incohfit_qmin": 0.2,
         "incohfit_qmax": 0.3,
         "incohfit_factor": null,
-        "outputWavelengthDependentProfile": true,
+        "outputWavelengthDependentProfile": false,
         "incohfit_intensityweighted": false,
         "elasticReference": {
             "runNumber": "",
@@ -109,11 +109,11 @@
         },
         "scaleComponents": {
             "detector1": [
-                1.021,
-                1.0204066565386,
+                1.003571,
+                1.052902,
                 1
             ]
         }
     },
-    "dataDirectories": "/SNS/EQSANS/IPTS-34155/shared/output/"
+    "dataDirectories": "/SNS/EQSANS/IPTS-36571/shared/porsil/"
 }

@@ -34,11 +34,12 @@ def _summarize_error(out_file: str, err_file: str) -> str:
 
 
 async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
-    if not args:
+    if not args or args[0].lower() == "help":
         return CommandResult(
             success=False,
-            message="Usage: /reduce <idx|range|all>\n"
-            "  Examples: /reduce 1  |  /reduce 1-4  |  /reduce 1,3,5  |  /reduce all",
+            message="Usage: /reduce <row>\n"
+            "  <row> = index, run number, range, or all\n"
+            "  Examples: /reduce 1  |  /reduce 172815  |  /reduce 1-4  |  /reduce 1,3,5  |  /reduce all",
         )
 
     table = state.current_table

@@ -11,32 +11,61 @@ if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
 
 
+def _colorize(name: str, p: Path) -> str:
+    if p.is_dir():
+        return f"[bold blue]{name}/[/bold blue]"
+    s = p.suffix.lower()
+    if s in (".py", ".sh"):
+        return f"[green]{name}[/green]"
+    if s in (".dat", ".txt", ".csv", ".json"):
+        return f"[cyan]{name}[/cyan]"
+    if s in (".png", ".pdf", ".svg"):
+        return f"[magenta]{name}[/magenta]"
+    return name
+
+
+def _format_columns(names: list[str], styled: list[str], width: int = 90) -> str:
+    if not names:
+        return "[dim](empty)[/dim]"
+    max_len = max(len(n) for n in names) + 2
+    cols = max(1, width // max_len)
+    rows = []
+    for i in range(0, len(names), cols):
+        parts = []
+        for j in range(i, min(i + cols, len(names))):
+            pad = max_len - len(names[j])
+            parts.append(styled[j] + " " * pad)
+        rows.append("".join(parts).rstrip())
+    return "\n".join(rows)
+
+
 async def handle_ls(args: list[str], state: SessionState) -> CommandResult:
+    import glob as globmod
+
     path = args[0] if args else "."
     try:
+        if any(c in path for c in ("*", "?", "[")):
+            matches = sorted(globmod.glob(path))
+            if not matches:
+                return CommandResult(success=False, message=f"No matches: {path}")
+            names = [str(Path(m)) for m in matches]
+            styled = [_colorize(str(Path(m)), Path(m)) for m in matches]
+            return CommandResult(success=True, message=_format_columns(names, styled, width=getattr(state, "wrap_width", 90)))
+
         target = Path(path).expanduser().resolve()
         if not target.exists():
             return CommandResult(success=False, message=f"No such file or directory: {path}")
         if not target.is_dir():
             return CommandResult(success=True, message=str(target))
-        
+
         entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-        lines = []
-        for entry in entries:
-            if entry.is_dir():
-                lines.append(f"[bold blue]{entry.name}/[/bold blue]")
-            elif entry.suffix in (".py", ".sh"):
-                lines.append(f"[green]{entry.name}[/green]")
-            elif entry.suffix in (".dat", ".txt", ".csv", ".json"):
-                lines.append(f"[cyan]{entry.name}[/cyan]")
-            else:
-                lines.append(entry.name)
-        
-        if not lines:
+        names = [entry.name + ("/" if entry.is_dir() else "") for entry in entries]
+        styled = [_colorize(entry.name, entry) for entry in entries]
+
+        if not names:
             return CommandResult(success=True, message=f"[dim](empty directory)[/dim]")
-        
-        output = "  ".join(lines)
-        return CommandResult(success=True, message=output)
+
+        return CommandResult(success=True, message=_format_columns(names, styled, width=getattr(state, "wrap_width", 90)))
     except PermissionError:
         return CommandResult(success=False, message=f"Permission denied: {path}")
     except Exception as e:

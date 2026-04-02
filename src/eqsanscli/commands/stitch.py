@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
+from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.merge_service import (
     StitchGroup,
     build_stitch_table,
@@ -423,10 +424,28 @@ async def _handle_removerow(args: list[str], state: SessionState) -> CommandResu
     if not args:
         return CommandResult(
             success=False,
-            message="Usage: /stitch removerow <idx> | /stitch removerow all",
+            message="Usage: /stitch removerow <idx|all|--sample name>\n"
+            "  /stitch removerow 2              — Remove row 2\n"
+            "  /stitch removerow all            — Remove all rows\n"
+            "  /stitch removerow --sample SDS   — Remove rows matching sample name (substring)",
         )
 
     target = args[0].lower()
+
+    if target == "--sample":
+        if len(args) < 2:
+            return CommandResult(success=False, message="Usage: /stitch removerow --sample <name>")
+        pattern = args[1]
+        matching = [g for g in groups if sample_matches(pattern, g.sample_name)]
+        if not matching:
+            return CommandResult(success=False, message=f"No stitch groups matching sample '{pattern}'")
+        remaining = [g for g in groups if not sample_matches(pattern, g.sample_name)]
+        state.stitch_groups = remaining
+        names = ", ".join(g.sample_name for g in matching)
+        return CommandResult(
+            success=True,
+            message=f"Removed {len(matching)} stitch group(s): {names}",
+        )
 
     if target == "all":
         count = len(groups)
@@ -436,7 +455,7 @@ async def _handle_removerow(args: list[str], state: SessionState) -> CommandResu
     try:
         idx = int(target)
     except ValueError:
-        return CommandResult(success=False, message=f"Invalid index: {target}")
+        return CommandResult(success=False, message=f"Invalid index: {target}. Use a number, 'all', or '--sample <name>'.")
 
     if idx < 0 or idx >= len(groups):
         return CommandResult(

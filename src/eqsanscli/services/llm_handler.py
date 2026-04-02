@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from eqsanscli.config.settings import AppSettings
+from eqsanscli.models.config_id import make_config_id
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -80,8 +81,9 @@ Available commands:
 
 CATALOG:
 /load ipts <number>             - Fetch catalog from ONCat
-/list ipts *                    - List all EQSANS experiments from ONCat
-/list ipts <text>               - Search experiments by title or team member name
+/list ipts *                    - List all EQSANS experiments (cached after first fetch)
+/list ipts <text>               - Search experiments by title or team member name (searches cache)
+/list ipts refresh              - Re-fetch experiment list from ONCat (clears cache)
 /show catalog                   - Display loaded catalog
 /show ipts                      - Show current IPTS number
 /save catalog <file>            - Save catalog CSV
@@ -89,11 +91,13 @@ CATALOG:
 
 WORKING TABLE:
 /show table                     - Show working table
+/show table --sample <name>     - Show only rows matching sample name (read-only filter, no deletion)
 /matchruns                      - Auto-match trans/bkg/empty runs
-/assign bkg <sample>            - Reassign background sample
-/set <run> <field> <value>      - Set run field (trans, bkg, bkgtrans, emp, thickness)
-/set <run> <field> none         - Clear a field
-/remove <rows>                  - Remove rows (1, 1-3, 1,4,7)
+/assign bkg <sample>            - Reassign background for ALL rows (config-aware, sets both bkg+bkgtrans) — PREFER this over per-row /set for background
+/set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness). <row> = index, run number, range (1-5, 1,3,5), or all
+/set <row> <field> none         - Clear a field
+/set --sample <name> <field> <value> - Set field for ALL rows matching sample name (case-insensitive substring)
+/remove <row>                   - Remove rows. <row> = index, run number, range (1-5, 1,3,5), or all
 /remove all --keep <sample>     - Remove all rows EXCEPT named sample
 /remove --sample <name>         - Remove all rows matching sample name
 /save table <name>              - Save table
@@ -105,18 +109,20 @@ CONFIGURATION:
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a)
 /set config <id> <param> <val>  - Set config parameter
 /show outputdir                 - Show output directory
-/set outputdir <path>           - Set output directory
+/set outputdir <path>            - Set output directory
 /set ipts <number>              - Set IPTS number
+/set drtsans <version>          - Set drtsans version (default, dev, qa)
 /show ipts                      - Show IPTS number
 
 PRESETS:
 /show presets                   - List preset configurations
 /show preset <name>             - Show preset params
 /apply preset <name> <config>   - Apply preset to config
+/apply preset auto              - Auto-match closest preset to each config in the table
 /compare <a> <b>                - Compare two configs/presets
 
 REDUCTION:
-/reduce <idx|range|all>         - Run reduction (1, 1-4, 1,3,5, all)
+/reduce <row>                   - Run reduction. <row> = index, run number, range (1-4, 1,3,5), or all
 /export script [filename]       - Export .py reduction script
 
 DATA & PLOTTING:
@@ -133,43 +139,21 @@ STITCH:
 /stitch set <sample|all> target <idx|config_id> - Set target (accepts index like 0,1,2 or config_id like 4m10a)
 /stitch run [sample]            - Run stitching
 /stitch removerow <idx|all>     - Remove a stitch group row entirely
+/stitch removerow --sample <name> - Remove stitch rows matching sample name (substring)
 /stitch removeconfig <idx|all> <config_id> - Remove one config from stitch group(s)
 /stitch reorder <idx|all> <config1,config2,...> - Reorder configs in stitch group(s)
 /stitch script [file]           - Export stitch script
 /stitch save <name>             - Save stitch table
 /stitch load <name>             - Load stitch table
 
-STITCH EXAMPLES (important for natural language):
-- "set all stitch target to 1" → /stitch set all target 1
-- "set all stitch target to 4m10a" → /stitch set all target 4m10a
-- "set stitch target for all samples to 4m10a" → /stitch set all target 4m10a
-- "set target index to 0 for all" → /stitch set all target 0
-- "change the reference target to 2.5m2.5a for all samples" → /stitch set all target 2.5m2.5a
-- "set overlap for all to 0.01 0.02" → /stitch set all overlap 0.01 0.02
-- "auto overlap for all" → /stitch set all overlap auto
-- "set mysample target to 4m10a" → /stitch set mysample target 4m10a
-- "remove 4m10a from the stitch table" → /stitch removeconfig all 4m10a
-- "remove 4m2.5a config from stitch" → /stitch removeconfig all 4m2.5a
-- "remove 4m10a from row 2" → /stitch removeconfig 2 4m10a
-- "remove row 3 from stitch" → /stitch removerow 3
-- "remove row 3 from stitch, then auto overlap, then run" →
-  /stitch removerow 3
-  /stitch set all overlap auto
-  /stitch run
-- "reorder configs to conf0,conf1" → /stitch reorder all conf0,conf1
-- "swap the config order in row 2 to highq,lowq" → /stitch reorder 2 highq,lowq
-- "reorder all stitch groups to 8m12a,4m10a,4m2.5a" → /stitch reorder all 8m12a,4m10a,4m2.5a
-- "change config order for row 0" → /stitch reorder 0 <configs in desired order>
-
-NOTE: When user says "all" or "the stitch table" in context of stitch, use literal "all" as the sample/idx parameter.
-The target can be either an integer index (0, 1, 2) or a config_id string (4m10a, 2.5m2.5a).
-When removing a config by name, ALWAYS use "all" as the index unless the user specifies a row number.
+SHARE:
+/share <file|pattern>           - Share files via here.now (anonymous, 24h expiry, returns URL)
 
 LLM:
 /models                         - List available LLM models
 /models <name>                  - Switch model (gpt-5-mini, gemini-3-flash, claude-opus-4.6, gpt-4o)
 
-SHELL:
+SHELL (read-only — never generate /sh, /rm, or /mv):
 /ls [path]                      - List directory
 /cd <path>                      - Change directory
 /pwd                            - Print working directory
@@ -178,9 +162,6 @@ SHELL:
 /head <file> [n]                - Show first n lines
 /tail <file> [n]                - Show last n lines
 /cp <src> <dst>                 - Copy file/directory
-/mv <src> <dst>                 - Move/rename
-/rm <file>                      - Remove file/directory
-/sh <command>                   - Run shell command
 
 CALIBRATION:
 /calibrate <porsil_file>        - Calculate absolute scale
@@ -190,13 +171,10 @@ CALIBRATION:
 AUTOPILOT:
 /autopilot <ipts>               - Full automated reduction (load, match, configure, reduce, calibrate, stitch, plot)
 /autopilot <ipts> --samples <name1,name2,...>  - Autopilot only for specific samples (case-insensitive, comma-separated)
-
-AUTOPILOT EXAMPLES (important for natural language):
-- "autopilot ipts 34648" → /autopilot 34648
-- "run autopilot for ipts 34648 only for Bi1 samples" → /autopilot 34648 --samples Bi1
-- "reduce only Bi1 and Bi2 in ipts 34648 using autopilot" → /autopilot 34648 --samples Bi1,Bi2
-- "autopilot 35884 just sample S1" → /autopilot 35884 --samples S1
-NOTE: When user mentions specific sample names with autopilot, ALWAYS use --samples flag.
+/autopilot <ipts> --exclude <name1,name2,...>  - Autopilot all samples except named ones
+/autopilot <ipts> --thickness <cm>  - Set sample thickness (default is 0.1 cm — only set if different)
+/autopilot <ipts> --bkg <sample>    - Use named sample as background for all rows (config-aware)
+/autopilot <ipts> --config <id>     - Reduce only the specified configuration (e.g. 8m12a)
 
 SETTINGS:
 /settings                       - Show current settings
@@ -206,15 +184,19 @@ SETTINGS:
 /settings plotscale <scale>     - Set default axis scale (loglog, linlin, loglin, linlog)
 /settings errorbars <on|off>    - Toggle default error bars
 /settings linestyle <style>     - Set default line style (line, marker, line+marker)
+/settings multiprocessing <n>   - Set parallel reduction jobs (1-4, default 1)
 
 SESSION:
-/save session <name>            - Save session
-/load session <name>            - Load session
+/continue                       - Resume most recent session (autosave or named)
+/session list                   - List saved sessions
+/session save [name]            - Save current session
+/session load <name>            - Load a saved session
 /help                           - Help
 /quit                           - Exit
 
 For multi-step requests, return one command per line.
 Config IDs are compact: 4m10a, 4m2.5a, 2.5m2.5a, 8m12a30hz
+<row> everywhere means: row index, run number, range (1-5, 1,3,5), or "all".
 """
 
 
@@ -236,6 +218,22 @@ def _build_context(state: SessionState) -> str:
                     f"wavelength={meta['wavelength']}A, "
                     f"frequency={meta['frequency']}Hz"
                 )
+        row_lines = []
+        for r in table.rows:
+            missing = []
+            if not r.transmission_run:
+                missing.append("trans")
+            if not r.background_scatt:
+                missing.append("bkg")
+            if not r.empty_beam:
+                missing.append("emp")
+            status = "⚠MISSING:" + ",".join(missing) if missing else "✓"
+            row_lines.append(
+                f"  Row {r.index}: run={r.scattering_run} sample={r.sample_name} "
+                f"cfg={r.configuration} trans={r.transmission_run or '—'} "
+                f"bkg={r.background_scatt or '—'} emp={r.empty_beam or '—'} [{status}]"
+            )
+        parts.append("Working table rows:\n" + "\n".join(row_lines))
     _KEY_PARAMS = [
         "usedefaultmask", "usemask", "usedarkfilename", "usethetadependenttransmission",
         "usesensitivityfilename", "fitframeskipping", "useslicer",
@@ -250,6 +248,10 @@ def _build_context(state: SessionState) -> str:
         interesting = {k: v for k, v in params.items() if k.lower() in _KEY_PARAMS and v not in (None, "", "None")}
         if interesting:
             parts.append(f"  {cfg_id} params: {interesting}")
+    if state.max_workers > 1:
+        parts.append(f"Multiprocessing: {state.max_workers} parallel jobs")
+    else:
+        parts.append("Multiprocessing: off (sequential, 1 job)")
     if state.output_directory != "./output/":
         parts.append(f"Output dir: {state.output_directory}")
     stitch_groups = getattr(state, "stitch_groups", [])
@@ -259,15 +261,39 @@ def _build_context(state: SessionState) -> str:
         parts.append(f"Stitch table: {len(stitch_groups)} groups (samples: {', '.join(sample_names)}{'...' if len(stitch_groups) > 5 else ''})")
         if configs_example:
             parts.append(f"Available configs in stitch: {', '.join(configs_example)}")
+    catalog = state.catalog
+    if catalog is not None and not catalog.empty:
+        cat_lines = []
+        for _, crow in catalog.iterrows():
+            rn = str(int(crow["run_number"]))
+            title = str(crow.get("title", ""))
+            dist = float(crow.get("detector_distance") or 0)
+            wl = float(crow.get("wavelength") or 0)
+            freq = int(crow.get("frequency") or 60)
+            cfg = make_config_id(dist, wl, freq) if dist and wl else "?"
+            cat_lines.append(f"  {rn} {title} [{cfg}]")
+        if len(cat_lines) > _MAX_CATALOG_ROWS:
+            cat_lines = cat_lines[:_MAX_CATALOG_ROWS]
+            cat_lines.append(f"  ... ({len(catalog) - _MAX_CATALOG_ROWS} more rows omitted)")
+        parts.append(
+            f"Full catalog runs ({len(catalog)} total — use these to look up run numbers by title):\n"
+            + "\n".join(cat_lines)
+        )
     if parts:
         return "Current session state:\n" + "\n".join(parts)
     return "Session is empty. No IPTS loaded, no working table, no configurations. User needs to /load ipts <number> first."
 
 
+_BLOCKED_COMMANDS = frozenset({"sh", "shell", "rm", "mv"})
+"""Commands that the LLM is not allowed to generate for safety."""
+
+_MAX_CATALOG_ROWS = 300
+"""Maximum catalog rows to include in LLM context to avoid token overflow."""
+
+
 async def parse_natural_language(user_input: str, state: SessionState) -> list[str]:
     """Runs the LLM call in a thread so the Textual event loop stays responsive."""
     import asyncio
-    from concurrent.futures import ThreadPoolExecutor
 
     settings = AppSettings.load()
     if not settings.llm.is_configured:
@@ -282,6 +308,7 @@ async def parse_natural_language(user_input: str, state: SessionState) -> list[s
     client = OpenAI(
         base_url=settings.llm.base_url,
         api_key=settings.llm.api_key,
+        timeout=120.0,
     )
 
     context = _build_context(state)
@@ -302,19 +329,33 @@ async def parse_natural_language(user_input: str, state: SessionState) -> list[s
                     model=model,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=500,
+                    max_tokens=32000,
                 )
                 if response.usage:
                     state.llm_tokens_used += response.usage.total_tokens
                 state.llm_calls += 1
                 text = response.choices[0].message.content.strip()
                 commands = [line.strip() for line in text.split("\n") if line.strip()]
-                if commands:
-                    return commands
+                truncated = getattr(response.choices[0], "finish_reason", None) == "length"
+                if truncated and commands:
+                    dropped = commands.pop()
+                    logger.warning("LLM output truncated — dropped incomplete last line: %s", dropped)
+                    commands.append("⚠ Output was truncated. Some commands may be missing — try a more specific request.")
+                # Filter out blocked commands the LLM should not generate
+                safe_commands: list[str] = []
+                for cmd in commands:
+                    if cmd.startswith("/"):
+                        first_word = cmd[1:].split()[0].lower() if len(cmd) > 1 else ""
+                        if first_word in _BLOCKED_COMMANDS:
+                            logger.warning("LLM generated blocked command: %s", cmd)
+                            safe_commands.append(f"⚠ Blocked unsafe command: {cmd}")
+                            continue
+                    safe_commands.append(cmd)
+                if safe_commands:
+                    return safe_commands
             except Exception as e:
                 logger.warning("LLM call failed with %s: %s", model, e)
                 continue
         return []
 
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(ThreadPoolExecutor(max_workers=1), _call_llm)
+    return await asyncio.to_thread(_call_llm)

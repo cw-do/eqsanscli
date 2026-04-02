@@ -8,6 +8,7 @@ from eqsanscli.commands.router import CommandResult
 from eqsanscli.services.config_manager import get_config, list_config_params
 from eqsanscli.services.preset_service import (
     compare_configs,
+    find_closest_preset,
     get_preset_name_from_path,
     list_presets,
     load_preset,
@@ -73,15 +74,76 @@ async def handle_show_preset(args: list[str], state: SessionState) -> CommandRes
 async def handle_apply_preset(args: list[str], state: SessionState) -> CommandResult:
     """Handle /apply preset <preset_name> <config_id> — copy preset to active config.
 
+    Special case: /apply preset auto — auto-match presets to all configs in the table.
+
     Examples:
-        /apply preset conf_4m_10a_60hz 4.0m 10.0A 60Hz
-        /apply preset 8m_12a_60hz_inc 8.0m 12.0A 60Hz
+        /apply preset conf_4m_10a_60hz 4m10a
+        /apply preset 8m_12a_60hz_inc 8m12a
+        /apply preset auto
     """
+    if not args:
+        return CommandResult(
+            success=False,
+            message="Usage: /apply preset <preset_name> <config_id>\n"
+            "       /apply preset auto    — auto-match presets to all configs\n"
+            "  Example: /apply preset conf_4m_10a_60hz 4m10a",
+        )
+
+    # --- /apply preset auto ---
+    if args[0].lower() == "auto":
+        table = state.current_table
+        configs = table.configurations
+        if not configs:
+            return CommandResult(
+                success=False,
+                message="No configurations in the working table. Use /matchruns first.",
+            )
+
+        presets = list_presets()
+        if not presets:
+            return CommandResult(
+                success=False,
+                message="No presets found. Place JSON files in preset_configs/ folder.",
+            )
+
+        preset_names = [p["name"] for p in presets]
+        lines: list[str] = []
+        applied = 0
+
+        for cfg in configs:
+            best, match_type = find_closest_preset(cfg, preset_names)
+            if best:
+                resolved = get_preset_name_from_path(best)
+                if resolved:
+                    params = load_preset(resolved)
+                    if params:
+                        if cfg not in state.configurations:
+                            state.configurations[cfg] = {}
+                        for key, value in params.items():
+                            state.configurations[cfg][key] = value
+                        applied += 1
+                        if match_type == "exact":
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved}")
+                        elif match_type == "partial":
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]")
+                        elif match_type == "distance":
+                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]")
+                        continue
+            lines.append(f"  [yellow]⚠[/yellow] {cfg} — no matching preset found")
+
+        header = f"Auto-applied presets to {applied}/{len(configs)} config(s):"
+        return CommandResult(
+            success=True,
+            message=header + "\n" + "\n".join(lines),
+        )
+
+    # --- /apply preset <name> <config_id> ---
     if len(args) < 2:
         return CommandResult(
             success=False,
             message="Usage: /apply preset <preset_name> <config_id>\n"
-            '  Example: /apply preset conf_4m_10a_60hz 4.0m 10.0A 60Hz',
+            "       /apply preset auto    — auto-match presets to all configs\n"
+            "  Example: /apply preset conf_4m_10a_60hz 4m10a",
         )
 
     preset_name = args[0]

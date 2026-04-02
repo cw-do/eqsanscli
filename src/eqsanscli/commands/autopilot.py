@@ -13,26 +13,49 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
     if not args:
         return CommandResult(
             success=False,
-            message="Usage: /autopilot <ipts_number> [--samples <name1,name2,...>]\n"
-            "  /autopilot 35884                    — Full automated reduction\n"
-            "  /autopilot 35884 --samples Bi1      — Only reduce Bi1 samples\n"
-            "  /autopilot 35884 --samples Bi1,Bi2  — Only reduce Bi1 and Bi2\n\n"
-            "  Or in natural language:\n"
-            "  'autopilot 35884'\n"
-            "  'run autopilot for ipts 34648 only for Bi1 samples'",
+            message="Usage: /autopilot <ipts_number> [options]\n"
+            "  /autopilot 35884                              — Full automated reduction\n"
+            "  /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples\n"
+            "  /autopilot 35884 --exclude Y5                 — Reduce all except Y5\n"
+            "  /autopilot 35884 --thickness 0.2              — Set thickness to 0.2 cm\n"
+            "  /autopilot 35884 --bkg banjo                  — Use banjo as background\n"
+            "  /autopilot 35884 --config 8m12a               — Reduce only 8m12a config\n"
+            "  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined",
         )
 
     ipts = None
     samples: list[str] = []
+    excludes: list[str] = []
+    thickness: float | None = None
+    bkg_sample: str | None = None
+    config_filter: str | None = None
 
-    # Parse args: extract IPTS number and --samples flag
     i = 0
     while i < len(args):
         a = args[i]
         if a == "--samples" and i + 1 < len(args):
-            # Next arg is comma-separated sample names
             raw = args[i + 1]
             samples = [s.strip() for s in raw.split(",") if s.strip()]
+            i += 2
+            continue
+        if a == "--exclude" and i + 1 < len(args):
+            raw = args[i + 1]
+            excludes = [s.strip() for s in raw.split(",") if s.strip()]
+            i += 2
+            continue
+        if a == "--thickness" and i + 1 < len(args):
+            try:
+                thickness = float(args[i + 1])
+            except ValueError:
+                return CommandResult(success=False, message=f"Invalid thickness: {args[i + 1]}")
+            i += 2
+            continue
+        if a == "--bkg" and i + 1 < len(args):
+            bkg_sample = args[i + 1]
+            i += 2
+            continue
+        if a == "--config" and i + 1 < len(args):
+            config_filter = args[i + 1]
             i += 2
             continue
         if ipts is None:
@@ -48,6 +71,14 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
     data: dict = {"type": "start_autopilot", "ipts": ipts}
     if samples:
         data["samples"] = samples
+    if excludes:
+        data["excludes"] = excludes
+    if thickness is not None:
+        data["thickness"] = thickness
+    if bkg_sample is not None:
+        data["bkg_sample"] = bkg_sample
+    if config_filter is not None:
+        data["config_filter"] = config_filter
 
     return CommandResult(
         success=True,

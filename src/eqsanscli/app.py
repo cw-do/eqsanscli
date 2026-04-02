@@ -33,7 +33,8 @@ from eqsanscli.commands.shell import (
 )
 from eqsanscli.commands.stitch import handle_stitch
 from eqsanscli.commands.tables import handle_move, handle_table
-from eqsanscli.commands.session import handle_save, handle_load, handle_list_tables
+from eqsanscli.commands.session import handle_save, handle_load, handle_list_tables, handle_continue, handle_session
+from eqsanscli.commands.share import handle_share
 from eqsanscli.commands.settings import handle_settings
 from eqsanscli.models.session_state import SessionState
 
@@ -58,7 +59,7 @@ class EQSANSApp(App):
         height: auto;
         min-height: 1;
         border: none;
-        overflow-x: hidden;
+        overflow-x: auto;
         overflow-y: hidden;
     }
     #cmd-input {
@@ -128,11 +129,14 @@ class EQSANSApp(App):
         self.router.register("save", handle_save)
         self.router.register("load", handle_load)
         self.router.register("list tables", handle_list_tables)
+        self.router.register("continue", handle_continue)
+        self.router.register("session", handle_session)
         self.router.register("list ipts", handle_list_ipts)
         self.router.register("list", self._handle_list)
         self.router.register("models", handle_models)
         self.router.register("autopilot", handle_autopilot)
         self.router.register("settings", handle_settings)
+        self.router.register("share", handle_share)
         self.router.register("help", self._handle_help)
         self.router.alias("quit", "exit")
         self.router.alias("q", "exit")
@@ -185,6 +189,14 @@ class EQSANSApp(App):
             "  [dim]Type [bold]/help[/bold] for all commands, or just ask in natural language.[/dim]\n"
         )
         log.write(Text.from_markup(logo))
+
+        autosave = SessionState.auto_save_path()
+        if os.path.exists(autosave):
+            log.write(Text.from_markup(
+                "  [bold yellow]↩ Previous session found.[/bold yellow] "
+                "Type [bold cyan]/continue[/bold cyan] to resume where you left off.\n"
+            ))
+
         self.query_one("#cmd-input", CompletableInput).focus()
         self.query_one("#footer-bar", FooterBar).update_model()
         self._refresh_completions()
@@ -239,6 +251,11 @@ class EQSANSApp(App):
             if result.data:
                 self._render_data(log, result.data)
 
+        try:
+            self.state.save(SessionState.auto_save_path())
+        except Exception:
+            pass
+
         self.query_one("#output-scroll", VerticalScroll).scroll_end()
         self.query_one("#cmd-input", CompletableInput).focus()
         self._refresh_completions()
@@ -253,6 +270,7 @@ class EQSANSApp(App):
     @work(thread=True)
     def run_reduction_batch(self, table, indices: list[int], state) -> None:
         import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         from eqsanscli.services.reduction_service import reduce_row
         from eqsanscli.commands.reduction import _format_time, _summarize_error
 
@@ -273,70 +291,139 @@ class EQSANSApp(App):
         n_cancelled = 0
         elapsed_times: list[float] = []
         batch_start = time.time()
+        max_workers = state.max_workers
 
-        write(f"[bold]Reducing {total} run(s) → {output_dir}[/bold]")
+        parallel_label = f" ({max_workers} parallel)" if max_workers > 1 else ""
+        write(f"[bold]Reducing {total} run(s) → {output_dir}{parallel_label}[/bold]")
         write(f"[dim]Running in background — press [bold]^X[/bold] or click [bold]✕ Cancel[/bold] to stop.[/dim]\n")
 
-        for i, idx in enumerate(indices):
-            if self._cancel_event.is_set():
-                write(f"[yellow]⚠ Cancelled — skipping remaining {total - i} run(s)[/yellow]")
-                n_cancelled = total - i
-                break
+        if max_workers <= 1:
+            for i, idx in enumerate(indices):
+                if self._cancel_event.is_set():
+                    write(f"[yellow]⚠ Cancelled — skipping remaining {total - i} run(s)[/yellow]")
+                    n_cancelled = total - i
+                    break
 
-            row = table.get_row(idx)
-            if row is None:
-                continue
+                row = table.get_row(idx)
+                if row is None:
+                    continue
 
-            remaining = total - i
-            eta_str = ""
-            if elapsed_times:
-                avg = sum(elapsed_times) / len(elapsed_times)
-                eta_str = f"  ETA ~{_format_time(avg * remaining)}"
+                remaining = total - i
+                eta_str = ""
+                if elapsed_times:
+                    avg = sum(elapsed_times) / len(elapsed_times)
+                    eta_str = f"  ETA ~{_format_time(avg * remaining)}"
 
-            output_name = f"{row.sample_name}_{row.configuration}"
-            row.status = "reducing"
-            write(
-                f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
-                f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
-                f"→ {output_name}.json  "
-                f"[dim]{remaining} left{eta_str}[/dim]"
-            )
-
-            result = reduce_row(
-                row=row, ipts=state.ipts,
-                user_configs=state.configurations, output_dir=output_dir,
-                cancel_event=self._cancel_event,
-            )
-
-            elapsed_times.append(result.elapsed_seconds)
-
-            if result.cancelled:
-                n_cancelled += 1
+                output_name = f"{row.sample_name}_{row.configuration}"
+                row.status = "reducing"
                 write(
-                    f"  [dim][{i+1}/{total}][/dim] [yellow]⊘[/yellow] "
-                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) — cancelled"
-                )
-                break
-            elif result.success:
-                n_success += 1
-                state.reduced_files.append(result.output_file)
-                write(
-                    f"  [dim][{i+1}/{total}][/dim] [green]✓[/green] "
+                    f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
                     f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
-                    f"— {_format_time(result.elapsed_seconds)}  "
-                    f"[dim]→ {output_name}_Iq.dat[/dim]"
+                    f"→ {output_name}.json  "
+                    f"[dim]{remaining} left{eta_str}[/dim]"
                 )
-            else:
-                n_fail += 1
-                error_summary = _summarize_error(result.log_file, result.err_file)
-                write(
-                    f"  [dim][{i+1}/{total}][/dim] [red]✗[/red] "
-                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
-                    f"— FAILED after {_format_time(result.elapsed_seconds)}"
+
+                result = reduce_row(
+                    row=row, ipts=state.ipts,
+                    user_configs=state.configurations, output_dir=output_dir,
+                    cancel_event=self._cancel_event,
+                    drtsans_version=state.drtsans_version,
                 )
-                write(f"      [red]{error_summary}[/red]")
-                if result.log_file:
-                    write(f"      [dim]Logs: {result.log_file}[/dim]")
+
+                elapsed_times.append(result.elapsed_seconds)
+
+                if result.cancelled:
+                    n_cancelled += 1
+                    write(
+                        f"  [dim][{i+1}/{total}][/dim] [yellow]⊘[/yellow] "
+                        f"[bold]{row.sample_name}[/bold] ({row.configuration}) — cancelled"
+                    )
+                    break
+                elif result.success:
+                    n_success += 1
+                    state.reduced_files.append(result.output_file)
+                    write(
+                        f"  [dim][{i+1}/{total}][/dim] [green]✓[/green] "
+                        f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                        f"— {_format_time(result.elapsed_seconds)}  "
+                        f"[dim]→ {output_name}_Iq.dat[/dim]"
+                    )
+                else:
+                    n_fail += 1
+                    error_summary = _summarize_error(result.log_file, result.err_file)
+                    write(
+                        f"  [dim][{i+1}/{total}][/dim] [red]✗[/red] "
+                        f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                        f"— FAILED after {_format_time(result.elapsed_seconds)}"
+                    )
+                    write(f"      [red]{error_summary}[/red]")
+                    if result.log_file:
+                        write(f"      [dim]Logs: {result.log_file}[/dim]")
+        else:
+            rows_to_reduce = []
+            for idx in indices:
+                row = table.get_row(idx)
+                if row is not None:
+                    rows_to_reduce.append((idx, row))
+
+            completed_count = 0
+
+            def _do_reduce(idx_row):
+                idx, row = idx_row
+                return idx, row, reduce_row(
+                    row=row, ipts=state.ipts,
+                    user_configs=state.configurations, output_dir=output_dir,
+                    cancel_event=self._cancel_event,
+                    drtsans_version=state.drtsans_version,
+                )
+
+            for idx, row in rows_to_reduce:
+                row.status = "reducing"
+
+            write(f"  [dim]Submitting {len(rows_to_reduce)} jobs to {max_workers} workers...[/dim]")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_do_reduce, item): item
+                    for item in rows_to_reduce
+                }
+
+                for future in as_completed(futures):
+                    completed_count += 1
+                    idx, row, result = future.result()
+                    elapsed_times.append(result.elapsed_seconds)
+
+                    if result.cancelled:
+                        n_cancelled += 1
+                        write(
+                            f"  [dim][{completed_count}/{total}][/dim] [yellow]⊘[/yellow] "
+                            f"[bold]{row.sample_name}[/bold] ({row.configuration}) — cancelled"
+                        )
+                    elif result.success:
+                        n_success += 1
+                        state.reduced_files.append(result.output_file)
+                        remaining = total - completed_count
+                        eta_str = ""
+                        if elapsed_times:
+                            avg = sum(elapsed_times) / len(elapsed_times)
+                            eta_str = f"  ETA ~{_format_time(avg * remaining / max_workers)}"
+                        write(
+                            f"  [dim][{completed_count}/{total}][/dim] [green]✓[/green] "
+                            f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                            f"— {_format_time(result.elapsed_seconds)}  "
+                            f"[dim]{remaining} left{eta_str}[/dim]"
+                        )
+                    else:
+                        n_fail += 1
+                        error_summary = _summarize_error(result.log_file, result.err_file)
+                        write(
+                            f"  [dim][{completed_count}/{total}][/dim] [red]✗[/red] "
+                            f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                            f"— FAILED after {_format_time(result.elapsed_seconds)}"
+                        )
+                        write(f"      [red]{error_summary}[/red]")
+                        if result.log_file:
+                            write(f"      [dim]Logs: {result.log_file}[/dim]")
 
         total_elapsed = time.time() - batch_start
         cancelled_str = f"  [yellow]{n_cancelled} cancelled[/yellow]  " if n_cancelled else ""
@@ -393,13 +480,16 @@ class EQSANSApp(App):
             )
 
         elif data_type == "start_autopilot":
-            self.run_autopilot_worker(data["ipts"], data.get("samples"))
+            self.run_autopilot_worker(
+                data["ipts"], data.get("samples"), data.get("excludes"),
+                data.get("thickness"), data.get("bkg_sample"), data.get("config_filter"),
+            )
 
     def action_cancel_job(self) -> None:
         self.cancel_job()
 
     @work(thread=True)
-    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None) -> None:
+    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None) -> None:
         import asyncio
         from eqsanscli.services.autopilot import run_autopilot_sync
 
@@ -434,6 +524,10 @@ class EQSANSApp(App):
                 cancel_event=self._cancel_event,
                 prompt_user=prompt_user,
                 sample_filter=samples,
+                exclude_filter=excludes,
+                thickness=thickness,
+                bkg_sample=bkg_sample,
+                config_filter=config_filter,
             )
         finally:
             loop.close()
@@ -454,7 +548,7 @@ class EQSANSApp(App):
         for row_data in rows:
             table.add_row(*[row_data.get(c, "") for c in columns])
 
-        log.write(table)
+        log.write(table, shrink=False)
 
     def _render_working_table(self, log: RichLog, rows: list[dict]) -> None:
         """Render working table with Config next to Sample and two-line run cells."""
@@ -471,16 +565,17 @@ class EQSANSApp(App):
         table.add_column("Config", justify="left", style="cyan", min_width=10)
         table.add_column("Scatt", justify="left", min_width=10)
         table.add_column("Trans", justify="left", min_width=10)
+        table.add_column("Thick", justify="right", width=5)
         table.add_column("Bkg", justify="left", min_width=10)
         table.add_column("BkgTr", justify="left", min_width=10)
         table.add_column("Empty", justify="left", min_width=10)
         table.add_column("Status", justify="left", style="green", width=8)
 
-        columns = ["Idx", "Sample", "Config", "Scatt", "Trans", "Bkg", "BkgTr", "Empty", "Status"]
+        columns = ["Idx", "Sample", "Config", "Scatt", "Trans", "Thick", "Bkg", "BkgTr", "Empty", "Status"]
         for row_data in rows:
             table.add_row(*[row_data.get(c, "") for c in columns])
 
-        log.write(table)
+        log.write(table, shrink=False)
 
     def _render_preset_list(self, log: RichLog, rows: list[dict]) -> None:
         """Render preset list as a table."""
@@ -489,7 +584,7 @@ class EQSANSApp(App):
         table.add_column("Description", justify="left", min_width=40)
         for row_data in rows:
             table.add_row(row_data["Name"], row_data["Description"])
-        log.write(table)
+        log.write(table, shrink=False)
 
     def _render_compare_table(
         self, log: RichLog, rows: list[dict], name_a: str, name_b: str,
@@ -532,10 +627,11 @@ class EQSANSApp(App):
                     f"[yellow]{val_b}[/yellow]",
                 )
 
-        log.write(table)
+        log.write(table, shrink=False)
 
     def _render_stitch_table(self, log: RichLog, groups: list[dict]) -> None:
         table = Table(title="Stitch Table", show_lines=True, padding=(0, 1))
+        table.add_column("Idx", justify="right", style="bold", width=4)
         table.add_column("Sample", style="bold", min_width=16)
         table.add_column("Configs", min_width=20)
         table.add_column("Files", min_width=30)
@@ -543,7 +639,7 @@ class EQSANSApp(App):
         table.add_column("Target", justify="center", width=6)
         table.add_column("Status", width=10)
 
-        for g in groups:
+        for idx, g in enumerate(groups):
             configs_str = "\n".join(g.get("configs", []))
             files_str = "\n".join(os.path.basename(f) for f in g.get("files", []))
             overlaps = g.get("overlaps", [])
@@ -557,6 +653,7 @@ class EQSANSApp(App):
             status_styled = {"done": "[green]done[/green]", "error": "[red]error[/red]", "1 config": "[dim]1 config[/dim]"}.get(status, status)
 
             table.add_row(
+                str(idx),
                 g.get("sample_name", ""),
                 configs_str,
                 files_str,
@@ -565,7 +662,7 @@ class EQSANSApp(App):
                 status_styled,
             )
 
-        log.write(table)
+        log.write(table, shrink=False)
 
     def _render_config_table(self, log: RichLog, rows: list[dict], config_id: str) -> None:
         """Render configuration parameters as a table."""
@@ -577,7 +674,7 @@ class EQSANSApp(App):
         for row_data in rows:
             table.add_row(row_data["Parameter"], row_data["Value"], row_data.get("Src", ""))
 
-        log.write(table)
+        log.write(table, shrink=False)
 
     async def _handle_help(self, args: list[str], state: SessionState) -> CommandResult:
         """Handle /help — show available commands."""
@@ -618,6 +715,7 @@ class EQSANSApp(App):
             "  /show outputdir               — Show output directory\n"
             "  /set outputdir <path>         — Set output directory\n"
             "  /set ipts <number>            — Set IPTS number\n"
+            "  /set drtsans <version>        — Set drtsans version (default, dev, qa)\n"
             "\n"
             "[bold cyan]Presets:[/]\n"
             "  /show presets                 — List available preset configurations\n"
@@ -659,6 +757,9 @@ class EQSANSApp(App):
             "  /autopilot <ipts> --samples <name1,name2,...>\n"
             "                                — Autopilot for specific samples only\n"
             "\n"
+            "[bold cyan]Share:[/]\n"
+            "  /share <file|pattern>         — Share files via here.now (24h link)\n"
+            "\n"
             "[bold cyan]LLM:[/]\n"
             "  /models                       — List available LLM models\n"
             "  /models <name>                — Switch LLM model\n"
@@ -671,10 +772,13 @@ class EQSANSApp(App):
             "  /settings plotscale <scale>   — Default axis scale (loglog/linlin/loglin/linlog)\n"
             "  /settings errorbars <on|off>  — Toggle default error bars\n"
             "  /settings linestyle <style>   — Default style (line/marker/line+marker)\n"
+            "  /settings multiprocessing <n> — Parallel reduction jobs (1-4, default 1)\n"
             "\n"
             "[bold cyan]Session:[/]\n"
-            "  /save session <name>          — Save full session state\n"
-            "  /load session <name>          — Restore session\n"
+            "  /continue                     — Resume most recent session (autosave or named)\n"
+            "  /session list                 — List saved sessions\n"
+            "  /session save [name]          — Save current session\n"
+            "  /session load <name>          — Load a saved session\n"
             "  /help                         — This message\n"
             "  /quit                         — Exit\n"
             "\n"
@@ -703,7 +807,10 @@ class EQSANSApp(App):
             "  /list iq                   — List reduced I(Q) files\n"
             "  /list iqxqy                — List I(Qx,Qy) files\n"
             "  /list configs              — List configurations\n"
-            "  /list tables               — List saved and active tables",
+            "  /list tables               — List saved and active tables\n"
+            "  /list ipts *               — List all EQSANS experiments\n"
+            "  /list ipts <text>          — Search experiments by title or member\n"
+            "  /list ipts refresh         — Re-fetch experiment list from ONCat",
         )
 
     async def _handle_exit(self, args: list[str], state: SessionState) -> CommandResult:

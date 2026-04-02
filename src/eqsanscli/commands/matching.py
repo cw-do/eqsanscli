@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.commands.catalog import build_working_table_display
-from eqsanscli.services.matching_service import assign_background, match_runs
+from eqsanscli.models.config_id import make_config_id
+from eqsanscli.models.sample_match import sample_matches
+from eqsanscli.services.matching_service import (
+    assign_background, match_runs, _classify_catalog,
+)
+from eqsanscli.services.reduction_service import parse_row_selection
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -30,11 +35,14 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             message="No scattering runs found to match. Check catalog titles.",
         )
 
-    # Store as the active table
     state.tables[state.active_table] = table
     table.name = state.active_table
 
-    # Build summary
+    for cfg in table.configurations:
+        if cfg not in state.configurations:
+            state.configurations[cfg] = {}
+        state.configurations[cfg].setdefault("outputdir", os.path.abspath(state.output_directory))
+
     configs = table.configurations
     matched_trans = sum(1 for r in table.rows if r.transmission_run)
     matched_bkg = sum(1 for r in table.rows if r.background_scatt)
@@ -47,6 +55,54 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
         f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
         f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
     )
+
+    missing_trans = [r for r in table.rows if not r.transmission_run]
+    missing_bkg = [r for r in table.rows if not r.background_scatt]
+    missing_empty = [r for r in table.rows if not r.empty_beam]
+
+    if missing_trans or missing_bkg or missing_empty:
+        classified = _classify_catalog(catalog)
+
+        used_runs: set[str] = set()
+        for r in table.rows:
+            used_runs.add(r.scattering_run)
+            if r.transmission_run:
+                used_runs.add(r.transmission_run)
+            if r.background_scatt:
+                used_runs.add(r.background_scatt)
+            if r.background_trans:
+                used_runs.add(r.background_trans)
+            if r.empty_beam:
+                used_runs.add(r.empty_beam)
+
+        lines: list[str] = []
+
+        if missing_trans:
+            lines.append(f"\n⚠ {len(missing_trans)} row(s) missing transmission:")
+            for r in missing_trans:
+                lines.append(f"  Row {r.index}: {r.sample_name} ({r.configuration})")
+            avail_trans = [
+                cr for cr in classified
+                if cr.run_type == "transmission" and str(cr.run_number) not in used_runs
+            ]
+            if avail_trans:
+                lines.append("  Available transmission runs (unused):")
+                for cr in avail_trans:
+                    cfg = make_config_id(cr.config_key[0], cr.config_key[1], cr.config_key[2])
+                    lines.append(f"    {cr.run_number}  {cr.title}  [{cfg}]")
+
+        if missing_bkg:
+            lines.append(f"\n⚠ {len(missing_bkg)} row(s) missing background:")
+            for r in missing_bkg:
+                lines.append(f"  Row {r.index}: {r.sample_name} ({r.configuration})")
+
+        if missing_empty:
+            lines.append(f"\n⚠ {len(missing_empty)} row(s) missing empty beam:")
+            for r in missing_empty:
+                lines.append(f"  Row {r.index}: {r.sample_name} ({r.configuration})")
+
+        summary += "\n" + "\n".join(lines)
+        summary += "\n\nTip: Use /set --sample <name> <field> <value> to fix unmatched rows in bulk."
 
     rows = build_working_table_display(state)
 
@@ -117,17 +173,89 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             return CommandResult(success=False, message=f"Invalid IPTS number: {args[1]}")
         return CommandResult(success=True, message=f"IPTS set to: {state.ipts}")
 
+    if first == "drtsans":
+        from eqsanscli.integrations.drtsans_runner import DRTSANS_VERSIONS
+        valid = ", ".join(DRTSANS_VERSIONS.keys())
+        if len(args) < 2:
+            return CommandResult(success=True, message=f"drtsans version = {state.drtsans_version}\n  Available: {valid}")
+        version = args[1].lower()
+        if version not in DRTSANS_VERSIONS:
+            return CommandResult(success=False, message=f"Unknown version: {version}. Available: {valid}")
+        state.drtsans_version = version
+        cmd = " ".join(DRTSANS_VERSIONS[version])
+        return CommandResult(success=True, message=f"drtsans version set to: {version} ({cmd})")
+
+    # Bulk set: /set --sample <name> <field> <value>
+    # Matches all rows whose sample_name contains <name> (case-insensitive).
+    if first == "--sample":
+        if len(args) < 4:
+            return CommandResult(
+                success=False,
+                message="Usage: /set --sample <name> <field> <value>\n"
+                "  Example: /set --sample 3b trans 172804\n"
+                "  Matches all rows whose sample name contains <name> (case-insensitive).",
+            )
+        sample_pattern = args[1]
+        field_name = args[2].lower()
+        value_str = " ".join(args[3:])
+
+        if field_name not in SETTABLE_FIELDS:
+            return CommandResult(
+                success=False,
+                message=f"Unknown field: {field_name}. Valid fields: {', '.join(SETTABLE_FIELDS.keys())}",
+            )
+
+        attr_name = SETTABLE_FIELDS[field_name]
+        table = state.current_table
+
+        matching_rows = [
+            r for r in table.rows if sample_matches(sample_pattern, r.sample_name)
+        ]
+        if not matching_rows:
+            return CommandResult(
+                success=False,
+                message=f"No rows with sample name containing '{args[1]}' in table '{table.name}'.",
+            )
+
+        if value_str.lower() in ("none", "null", '""', "''", ""):
+            if attr_name == "thickness":
+                return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
+            for row in matching_rows:
+                setattr(row, attr_name, "")
+            return CommandResult(
+                success=True,
+                message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching '{args[1]}'.",
+            )
+
+        if attr_name == "thickness":
+            try:
+                parsed_value: str | float = float(value_str)
+            except ValueError:
+                return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
+        else:
+            parsed_value = value_str
+
+        for row in matching_rows:
+            setattr(row, attr_name, parsed_value)
+
+        sample_list = ", ".join(sorted(set(r.sample_name for r in matching_rows)))
+        return CommandResult(
+            success=True,
+            message=f"Set {field_name}={value_str} for {len(matching_rows)} row(s) matching '{args[1]}'.\n"
+            f"  Samples: {sample_list}",
+        )
+
     if len(args) < 3:
         return CommandResult(
             success=False,
-            message="Usage: /set <run> <field> <value> | /set outputdir <path> | /set ipts <number>\n"
+            message="Usage: /set <row> <field> <value> | /set outputdir <path> | /set ipts <number>\n"
+            "  <row> = index, run number, range, or all\n"
             "  Use 'none' to clear a value.\n"
             f"  Row fields: {', '.join(SETTABLE_FIELDS.keys())}",
         )
 
     run_id = args[0]
     field_name = args[1].lower()
-    # Join remaining args to support quoted multi-run strings
     value_str = " ".join(args[2:])
 
     if field_name not in SETTABLE_FIELDS:
@@ -137,30 +265,24 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         )
 
     attr_name = SETTABLE_FIELDS[field_name]
-
-    # Find the row by scattering run number (string match)
     table = state.current_table
-    target_row = None
-    for row in table.rows:
-        if row.scattering_run == run_id:
-            target_row = row
-            break
 
-    if target_row is None:
+    indices = parse_row_selection(run_id, table)
+    target_rows = [r for r in table.rows if r.index in indices]
+
+    if not target_rows:
         return CommandResult(
             success=False,
-            message=f"Run {run_id} not found in working table '{table.name}'.",
+            message=f"'{run_id}' not found as row index, range, or scattering run in table '{table.name}'.",
         )
 
-    # Parse value — support "none"/"null"/"" to clear
     if value_str.lower() in ("none", "null", '""', "''", ""):
         if attr_name == "thickness":
             return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
-        setattr(target_row, attr_name, "")
-        return CommandResult(
-            success=True,
-            message=f"Cleared {field_name} for run {run_id} ({target_row.sample_name}).",
-        )
+        for r in target_rows:
+            setattr(r, attr_name, "")
+        label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
+        return CommandResult(success=True, message=f"Cleared {field_name} for {label}.")
 
     if attr_name == "thickness":
         try:
@@ -168,14 +290,15 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         except ValueError:
             return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
     else:
-        # Run number fields are strings — accept as-is (supports "111, 112")
         parsed_value = value_str
 
-    setattr(target_row, attr_name, parsed_value)
+    for r in target_rows:
+        setattr(r, attr_name, parsed_value)
 
+    label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
     return CommandResult(
         success=True,
-        message=f"Set {field_name}={value_str} for run {run_id} ({target_row.sample_name}).",
+        message=f"Set {field_name}={value_str} for {label}.",
     )
 
 
@@ -191,8 +314,9 @@ async def handle_remove(args: list[str], state: SessionState) -> CommandResult:
     if not args:
         return CommandResult(
             success=False,
-            message="Usage: /remove <rows|all> [--keep <sample>] | /remove --sample <name>\n"
-            "  /remove 3  |  /remove 1-5  |  /remove all --keep porsil  |  /remove --sample banjo",
+            message="Usage: /remove <row> [--keep <sample>] | /remove --sample <name>\n"
+            "  <row> = index, run number, range, or all\n"
+            "  /remove 3  |  /remove 172815  |  /remove 1-5  |  /remove all --keep porsil  |  /remove --sample banjo",
         )
 
     table = state.current_table
@@ -207,24 +331,23 @@ async def handle_remove(args: list[str], state: SessionState) -> CommandResult:
         a = args[i].lower()
         if a in ("--keep", "--except", "--but") and i + 1 < len(args):
             i += 1
-            keep_sample = args[i].lower()
+            keep_sample = args[i]
         elif a == "--sample" and i + 1 < len(args):
             i += 1
-            remove_sample = args[i].lower()
+            remove_sample = args[i]
         elif row_spec is None:
             row_spec = args[i]
         i += 1
 
     if remove_sample:
-        indices = [r.index for r in table.rows if r.sample_name.lower() == remove_sample]
+        indices = [r.index for r in table.rows if sample_matches(remove_sample, r.sample_name)]
         if not indices:
-            return CommandResult(success=False, message=f"No rows with sample name: {remove_sample}")
+            return CommandResult(success=False, message=f"No rows with sample name matching: {remove_sample}")
     elif row_spec and row_spec.lower() == "all" and keep_sample:
-        indices = [r.index for r in table.rows if r.sample_name.lower() != keep_sample]
+        indices = [r.index for r in table.rows if not sample_matches(keep_sample, r.sample_name)]
         if not indices:
             return CommandResult(success=True, message=f"Nothing to remove — all rows match '{keep_sample}'.")
     elif row_spec:
-        from eqsanscli.services.reduction_service import parse_row_selection
         indices = parse_row_selection(row_spec, table)
         if not indices:
             return CommandResult(success=False, message=f"No valid rows for: {row_spec}")

@@ -17,6 +17,7 @@ def reduce_row(
     output_dir: str = "./output/",
     filename_suffix: str = "",
     cancel_event: threading.Event | None = None,
+    drtsans_version: str = "default",
 ) -> ReductionResult:
     config_params = get_config(row.configuration, user_configs)
 
@@ -42,7 +43,7 @@ def reduce_row(
     json_path = os.path.join(output_dir, f"{output_name}.json")
     save_reduction_json(json_data, json_path)
 
-    result = run_reduction(json_path, cancel_event=cancel_event)
+    result = run_reduction(json_path, cancel_event=cancel_event, drtsans_version=drtsans_version)
 
     standard_output = os.path.join(output_dir, f"{output_name}_Iq.dat")
     frame0_output = os.path.join(output_dir, f"{output_name}_frame_0_Iq.dat")
@@ -64,18 +65,37 @@ def reduce_row(
 
 
 def parse_row_selection(selection: str, table: WorkingTable) -> list[int]:
-    """Parse row selection: "1", "1-4", "1,3,5", "all" → list of 1-based indices."""
+    """Parse row selection: "1", "1-4", "1,3,5", "all" → list of 1-based indices.
+
+    Accepts row index, run number, range, or "all".  For a single token that
+    parses as an integer, tries row index first; if no row has that index,
+    falls back to matching by scattering run number.
+    """
     if selection.lower() == "all":
         return [r.index for r in table.rows]
 
-    indices = []
+    valid = {r.index for r in table.rows}
+    run_to_index = {r.scattering_run: r.index for r in table.rows}
+
+    indices: list[int] = []
     for part in selection.split(","):
         part = part.strip()
-        if "-" in part:
-            start, end = part.split("-", 1)
-            indices.extend(range(int(start), int(end) + 1))
-        else:
-            indices.append(int(part))
+        try:
+            if "-" in part:
+                start, end = part.split("-", 1)
+                indices.extend(range(int(start), int(end) + 1))
+            else:
+                val = int(part)
+                if val in valid:
+                    indices.append(val)
+                elif part in run_to_index:
+                    indices.append(run_to_index[part])
+                else:
+                    indices.append(val)  # keep for "not found" feedback
+        except ValueError:
+            # Non-numeric token — try as run number
+            if part in run_to_index:
+                indices.append(run_to_index[part])
+            continue
 
-    valid = {r.index for r in table.rows}
     return [i for i in indices if i in valid]

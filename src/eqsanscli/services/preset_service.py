@@ -139,6 +139,42 @@ def get_preset_name_from_path(name: str) -> str | None:
     return None
 
 
+def find_closest_preset(config_id: str, preset_names: list[str]) -> tuple[str | None, str]:
+    """Find the best matching preset for a config ID.
+
+    Returns (preset_name, match_type) where match_type is
+    'exact', 'partial', 'distance', or '' (no match).
+
+    Priority:
+      1. Exact match after normalization (e.g., 4m10a == conf_4m_10a_60hz)
+      2. Substring match (e.g., 4m10a in conf_4m_10a_60hz)
+      3. Same distance match (e.g., 4m2.5a → use 4m10a preset because both 4m)
+    """
+    import re
+    from eqsanscli.models.config_id import normalize_config_id
+
+    norm = normalize_config_id(config_id)
+
+    for name in preset_names:
+        if normalize_config_id(name) == norm:
+            return name, "exact"
+
+    for name in preset_names:
+        n = normalize_config_id(name)
+        if norm in n or n in norm:
+            return name, "partial"
+
+    dist_match = re.search(r"(\d+\.?\d*m)", norm)
+    if dist_match:
+        config_dist = dist_match.group(1)
+        for name in preset_names:
+            n = normalize_config_id(name)
+            if config_dist in n:
+                return name, "distance"
+
+    return None, ""
+
+
 def compare_configs(
     params_a: dict[str, object],
     params_b: dict[str, object],

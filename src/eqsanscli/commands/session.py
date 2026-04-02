@@ -35,15 +35,15 @@ async def handle_save(args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(
             success=False,
             message="Usage: /save <target>\n"
-            "  /save session myexp        — Save full session\n"
-            "  /save table mytable        — Save working table\n"
-            "  /save catalog data.csv     — Export catalog to CSV",
+            "  /save table [name]         — Save active table (name defaults to table name)\n"
+            "  /save catalog data.csv     — Export catalog to CSV\n"
+            "  (use /session save for sessions)",
         )
     sub = args[0].lower()
     if sub == "table":
         return await handle_save_table(args[1:], state)
     if sub == "session":
-        return await handle_save_session(args[1:], state)
+        return CommandResult(success=False, message="Use /session save [name] instead.")
     if sub == "catalog":
         return await handle_save_catalog(args[1:], state)
     return CommandResult(success=False, message=f"Unknown /save target: {sub}")
@@ -55,11 +55,10 @@ async def handle_load(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Usage: /load <target>\n"
             "  /load ipts 35884           — Fetch catalog from ONCat\n"
-            "  /load session              — List saved sessions\n"
-            "  /load session myexp        — Load a session\n"
             "  /load table                — List saved tables\n"
             "  /load table mytable        — Load a table\n"
-            "  /load catalog data.csv     — Load catalog from CSV",
+            "  /load catalog data.csv     — Load catalog from CSV\n"
+            "  (use /session load for sessions)",
         )
     sub = args[0].lower()
     if sub == "ipts":
@@ -68,7 +67,7 @@ async def handle_load(args: list[str], state: SessionState) -> CommandResult:
     if sub == "table":
         return await handle_load_table(args[1:], state)
     if sub == "session":
-        return await handle_load_session(args[1:], state)
+        return CommandResult(success=False, message="Use /session load <name> or /session list instead.")
     if sub == "catalog":
         return await handle_load_catalog(args[1:], state)
     return CommandResult(success=False, message=f"Unknown /load target: {sub}")
@@ -81,12 +80,15 @@ async def handle_save_table(args: list[str], state: SessionState) -> CommandResu
         return CommandResult(success=False, message=f"Table '{table.name}' is empty, nothing to save.")
 
     path = _tables_dir() / f"{name}.json"
+    data = table.to_dict()
+    data["name"] = name  # use the save name, not the in-memory table name
     with open(path, "w") as f:
-        json.dump(table.to_dict(), f, indent=2, default=str)
+        json.dump(data, f, indent=2, default=str)
 
+    source_note = f" (from active table '{table.name}')" if name != table.name else ""
     return CommandResult(
         success=True,
-        message=f"Table '{table.name}' saved to {path} ({len(table.rows)} rows).",
+        message=f"Table saved as '{name}'{source_note} to {path} ({len(table.rows)} rows).",
     )
 
 
@@ -101,8 +103,7 @@ async def handle_load_table(args: list[str], state: SessionState) -> CommandResu
                 with open(p) as f:
                     data = json.load(f)
                 n_rows = len(data.get("rows", []))
-                name = data.get("name", p.stem)
-                lines.append(f"  [cyan]{name}[/cyan]  ({n_rows} rows)")
+                lines.append(f"  [cyan]{p.stem}[/cyan]  ({n_rows} rows)")
             except Exception:
                 lines.append(f"  [dim]{p.stem}[/dim]  (corrupt)")
         lines.append(f"\n[dim]Usage: /load table <name>[/dim]")
@@ -119,15 +120,28 @@ async def handle_load_table(args: list[str], state: SessionState) -> CommandResu
         data = json.load(f)
 
     table = WorkingTable.from_dict(data)
-    state.tables[table.name] = table
-    state.active_table = table.name
+    # Use the filename stem as the canonical table name so that
+    # /load table <name> always round-trips with /save table <name>.
+    canonical_name = path.stem if path.suffix == ".json" else table.name
+    table.name = canonical_name
+
+    overwrite_note = ""
+    if canonical_name in state.tables and state.tables[canonical_name].rows:
+        old_rows = len(state.tables[canonical_name].rows)
+        overwrite_note = (
+            f"\n  ⚠ Replaced in-memory table '{canonical_name}' "
+            f"({old_rows} rows) with saved version ({len(table.rows)} rows)."
+        )
+
+    state.tables[canonical_name] = table
+    state.active_table = canonical_name
 
     from eqsanscli.commands.catalog import build_working_table_display
     rows = build_working_table_display(state)
 
     return CommandResult(
         success=True,
-        message=f"Loaded table '{table.name}' ({len(table.rows)} rows) from {path}.",
+        message=f"Loaded table '{canonical_name}' ({len(table.rows)} rows) from {path}.{overwrite_note}",
         data={"type": "working_table", "rows": rows},
     )
 
@@ -141,8 +155,7 @@ async def handle_list_tables(args: list[str], state: SessionState) -> CommandRes
             with open(p) as f:
                 data = json.load(f)
             n_rows = len(data.get("rows", []))
-            name = data.get("name", p.stem)
-            lines.append(f"  {name:<20} {n_rows} rows  ({p.name})")
+            lines.append(f"  {p.stem:<20} {n_rows} rows  ({p.name})")
         except Exception:
             lines.append(f"  {p.stem:<20} (corrupt)")
 
@@ -187,21 +200,79 @@ async def handle_load_session(args: list[str], state: SessionState) -> CommandRe
     except FileNotFoundError as e:
         return CommandResult(success=False, message=str(e))
 
-    state.name = loaded.name
-    state.ipts = loaded.ipts
-    state.catalog_data = loaded.catalog_data
-    state.tables = loaded.tables
-    state.active_table = loaded.active_table
-    state.configurations = loaded.configurations
-    state.calibration = loaded.calibration
-    state.output_directory = loaded.output_directory
-    state.reduced_files = loaded.reduced_files
-    state.command_history = loaded.command_history
+    state.restore_from(loaded)
 
     return CommandResult(
         success=True,
         message=f"Session '{loaded.name}' loaded (IPTS-{loaded.ipts}, "
         f"{len(loaded.tables)} tables, {sum(len(t.rows) for t in loaded.tables.values())} total rows).",
+    )
+
+
+async def handle_continue(args: list[str], state: SessionState) -> CommandResult:
+    """Load the most recent session — autosave first, then newest named session."""
+    from eqsanscli.models.session_state import SessionState as SS
+
+    autosave = Path(SS.auto_save_path())
+    candidates: list[tuple[float, Path]] = []
+
+    if autosave.exists():
+        candidates.append((autosave.stat().st_mtime, autosave))
+
+    for p in _list_saved_files(_sessions_dir()):
+        if p.stem.startswith("_"):
+            continue
+        candidates.append((p.stat().st_mtime, p))
+
+    if not candidates:
+        return CommandResult(
+            success=False,
+            message="No saved sessions found. Nothing to continue.",
+        )
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _, best = candidates[0]
+
+    try:
+        loaded = SS.load(str(best))
+    except Exception as e:
+        return CommandResult(success=False, message=f"Failed to load {best.name}: {e}")
+
+    state.restore_from(loaded)
+
+    source = "autosave" if best.stem.startswith("_") else f"session '{loaded.name}'"
+    return CommandResult(
+        success=True,
+        message=f"Continued from {source} (IPTS-{loaded.ipts}, "
+        f"{len(loaded.tables)} tables, "
+        f"{sum(len(t.rows) for t in loaded.tables.values())} total rows).",
+    )
+
+
+async def handle_session(args: list[str], state: SessionState) -> CommandResult:
+    """Handle /session list|save|load — unified session management."""
+    if not args:
+        return CommandResult(
+            success=False,
+            message="Usage: /session <subcommand>\n"
+            "  /session list              — List saved sessions\n"
+            "  /session save              — Save session using current name (default: 'default')\n"
+            "  /session save <name>       — Save session as <name> (e.g. /session save myexp)\n"
+            "  /session load <name>       — Load a saved session by name\n"
+            "  /continue                  — Resume most recent session (autosave or named)",
+        )
+
+    sub = args[0].lower()
+    if sub == "list":
+        return await handle_load_session([], state)
+    if sub == "save":
+        return await handle_save_session(args[1:], state)
+    if sub == "load":
+        return await handle_load_session(args[1:], state)
+
+    return CommandResult(
+        success=False,
+        message=f"Unknown /session subcommand: {sub}. Use list, save, or load.",
     )
 
 

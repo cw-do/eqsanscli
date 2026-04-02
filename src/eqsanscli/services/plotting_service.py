@@ -211,7 +211,8 @@ save_path = opts.get("save")
 if save_path:
     fig.savefig(save_path, dpi=opts.get("dpi", 150))
     print(f"Saved: {save_path}")
-plt.show()
+else:
+    plt.show()
 """
 
 
@@ -236,11 +237,22 @@ def _run_plot_subprocess(files: list[str], options: PlotOptions, plot_type: str)
 
     payload = json.dumps({"files": files, "opts": _opts_to_dict(options), "type": plot_type})
 
-    subprocess.Popen(
-        [_get_python(), script_path, payload],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    if options.save:
+        proc = subprocess.run(
+            [_get_python(), script_path, payload],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=120,
+        )
+        if proc.returncode != 0:
+            err = proc.stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"Plot subprocess failed: {err[:300]}")
+    else:
+        subprocess.Popen(
+            [_get_python(), script_path, payload],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     return options.save or "(window)"
 

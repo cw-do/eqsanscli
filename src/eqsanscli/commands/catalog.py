@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
+from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.catalog_service import CatalogService
 
 if TYPE_CHECKING:
@@ -146,8 +147,7 @@ def _run_cell(run_str: str, lookup: dict[str, str]) -> str:
     # Single run — look up title
     title = lookup.get(run_str.strip(), "")
     if title:
-        title_short = title[:22] + ("…" if len(title) > 22 else "")
-        return f"{run_str}\n[dim]{title_short}[/dim]"
+        return f"{run_str}\n[dim]{title}[/dim]"
     return run_str
 
 
@@ -169,6 +169,7 @@ def build_working_table_display(state: SessionState) -> list[dict]:
                 "Config": row.configuration,
                 "Scatt": _run_cell(row.scattering_run, lookup),
                 "Trans": _run_cell(row.transmission_run, lookup),
+                "Thick": str(row.thickness),
                 "Bkg": _run_cell(row.background_scatt, lookup),
                 "BkgTr": _run_cell(row.background_trans, lookup),
                 "Empty": _run_cell(row.empty_beam, lookup),
@@ -185,23 +186,32 @@ async def handle_list_ipts(args: list[str], state: SessionState) -> CommandResul
             message="Usage: /list ipts <search>\n"
             "  /list ipts *           — List all EQSANS experiments\n"
             "  /list ipts polymer     — Search by title or team member name\n"
-            "  /list ipts Stanley     — Find experiments with team member",
+            "  /list ipts Stanley     — Find experiments with team member\n"
+            "  /list ipts refresh     — Re-fetch from ONCat (clears cache)",
         )
 
-    search = " ".join(args)
+    refresh = args[0].lower() == "refresh"
+    search = "" if refresh else " ".join(args)
+
     try:
         from eqsanscli.integrations.oncat import list_experiments
-        experiments = list_experiments(search)
+        experiments, from_cache = list_experiments(search, refresh=refresh)
     except ImportError as e:
         return CommandResult(success=False, message=str(e))
     except Exception as e:
         return CommandResult(success=False, message=f"ONCat error: {e}")
 
+    if refresh and not search:
+        header = f"EQSANS experiments ({len(experiments)} found) [dim][refreshed][/dim]:"
+    elif from_cache:
+        header = f"EQSANS experiments ({len(experiments)} found) [dim][from cache — /list ipts refresh to update][/dim]:"
+    else:
+        header = f"EQSANS experiments ({len(experiments)} found) [dim][cached for this session][/dim]:"
+
     if not experiments:
         return CommandResult(success=True, message=f"No EQSANS experiments matching '{search}'")
 
-    lines = [f"EQSANS experiments ({len(experiments)} found):"]
-    lines.append("")
+    lines = [header, ""]
     for exp in experiments:
         ipts = exp["ipts"]
         title = exp["title"][:60] if exp["title"] else "(no title)"
@@ -226,7 +236,11 @@ async def handle_list_ipts(args: list[str], state: SessionState) -> CommandResul
 
 
 async def handle_show_table(args: list[str], state: SessionState) -> CommandResult:
-    """Handle /show table — display current working table."""
+    """Handle /show table [--sample <name>] — display current working table.
+
+    With --sample, filters to rows whose sample_name contains <name> (case-insensitive).
+    This is read-only — no rows are removed.
+    """
     table = state.current_table
     if not table.rows:
         return CommandResult(
@@ -234,10 +248,25 @@ async def handle_show_table(args: list[str], state: SessionState) -> CommandResu
             message=f"Working table '{table.name}' is empty. Use /load ipts <number> then /matchruns.",
         )
 
+    sample_filter = None
+    if args and args[0].lower() == "--sample" and len(args) >= 2:
+        sample_filter = " ".join(args[1:])
+
     rows = build_working_table_display(state)
+
+    if sample_filter:
+        rows = [r for r in rows if sample_matches(sample_filter, r["Sample"])]
+        if not rows:
+            return CommandResult(
+                success=True,
+                message=f"No rows matching sample '{args[1]}' in table '{table.name}'.",
+            )
+        label = f"Working Table: {table.name} — {len(rows)} row(s) matching '{args[1]}'"
+    else:
+        label = f"Working Table: {table.name} ({len(table.rows)} rows)"
 
     return CommandResult(
         success=True,
-        message=f"Working Table: {table.name} ({len(table.rows)} rows)",
+        message=label,
         data={"type": "working_table", "rows": rows},
     )

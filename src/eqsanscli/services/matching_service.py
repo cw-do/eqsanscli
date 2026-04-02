@@ -69,13 +69,6 @@ def _classify_run(
     else:
         run_type = "scattering"
 
-    sample_name = title.strip()
-    sample_name = re.sub(r"^[sStT][-\s]+", "", sample_name)
-    sample_name = re.sub(r"\s+\d+\.?\d*m\s*\d+\.?\d*[aA].*$", "", sample_name)
-    sample_name = re.sub(r"\s+\d+C\s*$", "", sample_name)
-    sample_name = sample_name.strip()
-    sample_name = sample_name.replace(" ", "_")
-
     return ClassifiedRun(
         run_number=run_number,
         title=title,
@@ -83,11 +76,50 @@ def _classify_run(
         wavelength=wavelength,
         frequency=frequency,
         run_type=run_type,
-        sample_name=sample_name,
+        sample_name=_extract_sample_name(title),
         config_key=_round_config(distance, wavelength, frequency),
         is_background=is_background,
         is_empty=is_empty,
     )
+
+
+def _extract_sample_name(title: str) -> str:
+    """Extract a clean sample name from an ONCat run title.
+
+    Handles variable ordering:
+      "r0.1 8m 12A 90C"  → "r0.1_90C"
+      "r1 110C 4m 10A"   → "r1_110C"
+      "r1 temp=110c 4m 10A" → "r1_110C"
+      "S-abc 4m 10A 1.5C" → "abc" (thickness stripped)
+    """
+    s = title.strip()
+    s = re.sub(r"^[sStT][-\s]+", "", s)
+
+    # Extract temperature before stripping config — preserve for sample name.
+    # "110C", "90C" (≥10 whole number) or "temp=XXX", "temp XXX".
+    temp = ""
+    m = re.search(r"\btemp\s*[=:]?\s*(\d+)\s*[cC]?\b", s, re.IGNORECASE)
+    if not m:
+        m = re.search(r"\b(\d{2,3})\s*[cC]\b", s)
+    if m:
+        temp = m.group(1) + "C"
+        s = s[:m.start()] + s[m.end():]
+
+    # Strip detector/wavelength/frequency config: "4m 10A", "2.5m 2.5a", "4m 10a 60Hz", etc.
+    # Handles various orderings and is non-greedy (stops at next token boundary).
+    s = re.sub(r"\s*\d+\.?\d*\s*m\s+\d+\.?\d*\s*[aA]\s*(?:\d+Hz)?", " ", s)
+
+    # Strip thickness: small decimals at end like "1.5C", "0.1C" (≤10.0, at least one digit after dot or 0.x).
+    s = re.sub(r"\s+\d+\.\d+\s*[cC]\s*$", "", s)
+    s = re.sub(r"\s+0\.\d+\s*[cC]\s*$", "", s)
+
+    s = re.sub(r"\s+", " ", s).strip()
+    parts = [p for p in s.split(" ") if p]
+    if temp:
+        parts.append(temp)
+    result = "_".join(parts)
+    result = re.sub(r"_+", "_", result).strip("_")
+    return result or title.strip()
 
 
 def _classify_catalog(catalog: pd.DataFrame) -> list[ClassifiedRun]:
@@ -142,12 +174,19 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
         # Transmission lookup: ALL transmission-type runs indexed by sample name.
         # This ensures bkg/empty scattering runs find their T-banjo/T-empty matches.
         trans_lookup: dict[str, str] = {}
+        trans_lookup_base: dict[str, str] = {}  # fallback: strip temperature for matching
         for r in runs:
             if r.run_type in ("transmission", "bkg_trans", "empty_trans"):
                 trans_lookup[r.sample_name.lower()] = str(r.run_number)
+                base = re.sub(r"_?\d{2,3}C$", "", r.sample_name, flags=re.IGNORECASE).lower()
+                trans_lookup_base[base] = str(r.run_number)
 
         for s in all_scattering:
             trans_run = trans_lookup.get(s.sample_name.lower(), "")
+            if not trans_run:
+                # Fallback: strip temperature, match on base name
+                s_base = re.sub(r"_?\d{2,3}C$", "", s.sample_name, flags=re.IGNORECASE).lower()
+                trans_run = trans_lookup_base.get(s_base, "")
 
             if s.is_background or s.is_empty:
                 row_bkg_scatt = default_empty

@@ -21,6 +21,8 @@ def _show_all(state: SessionState) -> str:
         f"  plotscale    {scale}",
         f"  errorbars    {'on' if state.plot_errorbars else 'off'}",
         f"  linestyle    {state.plot_linestyle}",
+        f"  multiprocessing  {state.max_workers}",
+        f"  drtsans        {state.drtsans_version}",
     ]
     return "\n".join(lines)
 
@@ -142,8 +144,29 @@ async def handle_settings(args: list[str], state: SessionState) -> CommandResult
             message=f"Default line style set to [bold]{choice}[/bold]",
         )
 
+    if sub == "multiprocessing":
+        if len(args) < 2:
+            return CommandResult(
+                success=True,
+                message=f"multiprocessing = {state.max_workers}\n"
+                "Usage: /settings multiprocessing <1-4>  (parallel reduction jobs)",
+            )
+        try:
+            n = int(args[1])
+        except ValueError:
+            return CommandResult(success=False, message=f"Invalid value: {args[1]} (must be integer 1-4)")
+        if n < 1 or n > 4:
+            return CommandResult(success=False, message=f"Must be between 1 and 4 (got {n})")
+        state.max_workers = n
+        if n == 1:
+            return CommandResult(success=True, message="Parallel reduction [bold]disabled[/bold] (sequential)")
+        return CommandResult(
+            success=True,
+            message=f"Parallel reduction set to [bold]{n}[/bold] simultaneous jobs",
+        )
+
     return CommandResult(
         success=False,
         message=f"Unknown setting: {sub}\n"
-        "Available: textwrap, figsize, dpi, plotscale, errorbars, linestyle",
+        "Available: textwrap, figsize, dpi, plotscale, errorbars, linestyle, multiprocessing",
     )

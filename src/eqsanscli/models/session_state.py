@@ -67,6 +67,8 @@ class SessionState:
     plot_logy: bool = True
     plot_errorbars: bool = True
     plot_linestyle: str = "line+marker"
+    max_workers: int = 1
+    drtsans_version: str = "default"
     llm_tokens_used: int = 0
     llm_calls: int = 0
 
@@ -96,6 +98,20 @@ class SessionState:
         """Append a command to history."""
         self.command_history.append(command)
 
+    def restore_from(self, other: SessionState) -> None:
+        """Copy all persistent state from *other* into this instance.
+
+        Used by /session load and /continue so that every field is restored
+        without manually listing them (which is error-prone when new fields
+        are added).
+        """
+        # Fields that should NOT be overwritten (transient / runtime-only)
+        _skip = {"llm_tokens_used", "llm_calls"}
+        for fld in self.__dataclass_fields__:
+            if fld in _skip:
+                continue
+            setattr(self, fld, getattr(other, fld))
+
     def save(self, path: str | None = None) -> str:
         if path is None:
             path = str(_sessions_dir() / f"{self.name}.json")
@@ -117,6 +133,8 @@ class SessionState:
             "plot_logy": self.plot_logy,
             "plot_errorbars": self.plot_errorbars,
             "plot_linestyle": self.plot_linestyle,
+            "max_workers": self.max_workers,
+            "drtsans_version": self.drtsans_version,
             "command_history": self.command_history[-500:],  # keep last 500
         }
         with open(path, "w") as f:
@@ -151,6 +169,8 @@ class SessionState:
             plot_logy=data.get("plot_logy", True),
             plot_errorbars=data.get("plot_errorbars", True),
             plot_linestyle=data.get("plot_linestyle", "line+marker"),
+            max_workers=data.get("max_workers", 1),
+            drtsans_version=data.get("drtsans_version", "default"),
             command_history=data.get("command_history", []),
         )
         state.tables = {

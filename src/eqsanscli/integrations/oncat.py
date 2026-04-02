@@ -142,13 +142,12 @@ def fetch_catalog(ipts: int) -> pd.DataFrame:
 
 _EXPERIMENT_PROJECTION = ["id", "title", "members", "rank", "size", "activity"]
 
+# Module-level cache: stores the full list of experiment dicts fetched from ONCat.
+# Persists for the lifetime of the process. Use list_experiments(refresh=True) to bust it.
+_experiment_cache: list[dict] | None = None
 
-def list_experiments(search: str = "") -> list[dict]:
-    """List all EQSANS experiments from ONCat, optionally filtered by text.
 
-    Returns list of dicts with keys: ipts, title, members, runs, dates.
-    If search is provided, filters by title or member names (case-insensitive).
-    """
+def _fetch_all_experiments() -> list[dict]:
     try:
         import pyoncat
     except ImportError:
@@ -170,12 +169,6 @@ def list_experiments(search: str = "") -> list[dict]:
     )
 
     results = []
-    raw = search.strip().lower()
-
-    # Split on "+" or " and " (case-insensitive) → all terms must match
-    import re as _re
-    terms = [t.strip() for t in _re.split(r"\+|\band\b", raw) if t.strip()]
-
     for exp in experiments:
         d = exp.to_dict()
         ipts_num = d.get("rank", 0)
@@ -186,12 +179,6 @@ def list_experiments(search: str = "") -> list[dict]:
         activity = d.get("activity") or {}
         dates = activity.get("acquisition") or []
         date_range = f"{dates[0]} — {dates[-1]}" if dates else ""
-
-        if terms and terms != ["*"]:
-            searchable = (title + " " + " ".join(member_names)).lower()
-            if not all(t in searchable for t in terms):
-                continue
-
         results.append({
             "ipts": ipts_num,
             "title": title,
@@ -201,5 +188,44 @@ def list_experiments(search: str = "") -> list[dict]:
         })
 
     results.sort(key=lambda r: r["ipts"])
-    logger.info("Found %d experiments (filter=%r)", len(results), search)
+    logger.info("Fetched %d total EQSANS experiments from ONCat", len(results))
     return results
+
+
+def list_experiments(search: str = "", refresh: bool = False) -> tuple[list[dict], bool]:
+    """List EQSANS experiments, optionally filtered by text.
+
+    Results are cached in memory after the first fetch. Subsequent calls with
+    a different search term filter the cache without hitting the network.
+
+    Args:
+        search: Filter string. Use "*" or "" for all. Supports multi-term via
+                "and" or "+" (e.g. "changwoo and sds"). Case-insensitive.
+        refresh: If True, discard cache and re-fetch from ONCat.
+
+    Returns:
+        (results, from_cache) — matched experiment dicts, and whether cache was used.
+    """
+    global _experiment_cache
+
+    if refresh or _experiment_cache is None:
+        _experiment_cache = _fetch_all_experiments()
+        was_cached = False
+    else:
+        was_cached = True
+
+    import re as _re
+    raw = search.strip().lower()
+    terms = [t.strip() for t in _re.split(r"\+|\band\b", raw) if t.strip()]
+
+    if not terms or terms == ["*"]:
+        results = list(_experiment_cache)
+    else:
+        results = []
+        for exp in _experiment_cache:
+            searchable = (exp["title"] + " " + " ".join(exp["members"])).lower()
+            if all(t in searchable for t in terms):
+                results.append(exp)
+
+    logger.info("Found %d experiments (filter=%r, cached=%s)", len(results), search, was_cached)
+    return results, was_cached

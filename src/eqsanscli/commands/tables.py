@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from eqsanscli.commands.catalog import build_working_table_display
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.working_table import WorkingTable
+from eqsanscli.services.reduction_service import parse_row_selection
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -47,8 +48,9 @@ async def handle_move(args: list[str], state: SessionState) -> CommandResult:
     if len(args) < 2:
         return CommandResult(
             success=False,
-            message="Usage: /move <rows> <target_table>\n"
-            "  Examples: /move 1,3,5 porsil  |  /move 1-4 samples",
+            message="Usage: /move <row> <target_table>\n"
+            "  <row> = index, run number, range, or all\n"
+            "  Examples: /move 1,3,5 porsil  |  /move 1-4 samples  |  /move all porsil",
         )
 
     row_spec = args[0]
@@ -59,7 +61,7 @@ async def handle_move(args: list[str], state: SessionState) -> CommandResult:
         state.tables[target_name] = WorkingTable(name=target_name, ipts=state.ipts)
     target = state.tables[target_name]
 
-    indices = _parse_indices(row_spec, source)
+    indices = parse_row_selection(row_spec, source)
     if not indices:
         return CommandResult(success=False, message=f"No valid rows for: {row_spec}")
 
@@ -162,20 +164,3 @@ def _table_rename(args: list[str], state: SessionState) -> CommandResult:
     return CommandResult(success=True, message=f"Renamed '{old_name}' → '{new_name}'.")
 
 
-def _parse_indices(spec: str, table: WorkingTable) -> list[int]:
-    valid = {r.index for r in table.rows}
-    indices = []
-    for part in spec.split(","):
-        part = part.strip()
-        if "-" in part:
-            try:
-                start, end = part.split("-", 1)
-                indices.extend(range(int(start), int(end) + 1))
-            except ValueError:
-                continue
-        else:
-            try:
-                indices.append(int(part))
-            except ValueError:
-                continue
-    return [i for i in indices if i in valid]

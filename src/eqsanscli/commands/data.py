@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
@@ -67,8 +68,11 @@ def _parse_plot_args(args: list[str], opts: PlotOptions | None = None) -> tuple[
             i += 1; opts.linewidth = float(args[i])
         elif al == "--offset" and i + 1 < len(args):
             i += 1; opts.offset_y = float(args[i])
-        elif al == "--save" and i + 1 < len(args):
-            i += 1; opts.save = args[i]
+        elif al == "--save":
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                i += 1; opts.save = args[i]
+            else:
+                opts.save = "__auto__"
         elif al == "--dpi" and i + 1 < len(args):
             i += 1; opts.dpi = int(args[i])
         elif al == "--figsize" and i + 2 < len(args):
@@ -142,6 +146,17 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
     if not files:
         return CommandResult(success=False, message="No files specified. Use /list iq to see available files.")
 
+    if opts.save == "__auto__":
+        if len(files) == 1:
+            stem = Path(files[0]).stem
+        else:
+            stem = "plot_" + Path(files[0]).stem
+        save_dir = state.output_directory if os.path.isdir(state.output_directory) else "."
+        opts.save = os.path.join(save_dir, f"{stem}.png")
+    elif opts.save and os.path.dirname(opts.save) == "":
+        save_dir = state.output_directory if os.path.isdir(state.output_directory) else "."
+        opts.save = os.path.join(save_dir, opts.save)
+
     try:
         is_2d = any("iqxqy" in os.path.basename(f).lower() for f in files)
         if is_2d:
@@ -154,7 +169,7 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(success=False, message=f"Plot error: {e}")
 
     if opts.save:
-        msg += f"\n  Saved: {result_path}"
+        msg += f"\n  Saved: [bold cyan]{os.path.abspath(result_path)}[/bold cyan]"
 
     return CommandResult(success=True, message=msg)
 

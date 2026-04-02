@@ -14,6 +14,7 @@ import re
 import textwrap
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -43,6 +44,85 @@ def _fmt(seconds: float) -> str:
         return f"{seconds:.0f}s"
     m, s = divmod(int(seconds), 60)
     return f"{m}m{s:02d}s"
+
+
+def _reduce_phase(
+    rows: list,
+    state: SessionState,
+    output_dir: str,
+    write: Callable,
+    cancel_event: threading.Event | None,
+    max_workers: int = 1,
+) -> tuple[int, int]:
+    """Run reduce_row for a list of rows, sequentially or in parallel.
+
+    Returns (n_success, n_fail). Stops early on cancellation.
+    """
+    from eqsanscli.services.reduction_service import reduce_row
+    from eqsanscli.commands.reduction import _summarize_error
+
+    total = len(rows)
+    n_ok = 0
+    n_fail = 0
+
+    if max_workers <= 1:
+        elapsed_times: list[float] = []
+        for i, row in enumerate(rows):
+            if cancel_event and cancel_event.is_set():
+                write(f"  [yellow]⊘ Cancelled — stopping[/yellow]")
+                return n_ok, n_fail
+            remaining = total - i
+            eta = f"  ETA ~{_fmt(sum(elapsed_times)/len(elapsed_times) * remaining)}" if elapsed_times else ""
+            write(f"  [{i+1}/{total}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration})  [dim]{remaining} left{eta}[/dim]")
+            result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event, drtsans_version=state.drtsans_version)
+            elapsed_times.append(result.elapsed_seconds)
+            if result.cancelled:
+                write(f"  [{i+1}/{total}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
+                return n_ok, n_fail
+            elif result.success:
+                n_ok += 1
+                state.reduced_files.append(result.output_file)
+                write(f"  [{i+1}/{total}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}")
+            else:
+                n_fail += 1
+                err = _summarize_error(result.log_file, result.err_file)
+                write(f"  [{i+1}/{total}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
+    else:
+        write(f"  [dim]Running {total} jobs on {max_workers} workers...[/dim]")
+        completed = 0
+        elapsed_times_p: list[float] = []
+
+        def _do_reduce(row):
+            return row, reduce_row(
+                row=row, ipts=state.ipts,
+                user_configs=state.configurations, output_dir=output_dir,
+                cancel_event=cancel_event,
+                drtsans_version=state.drtsans_version,
+            )
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_do_reduce, row): row for row in rows}
+            for future in as_completed(futures):
+                completed += 1
+                row, result = future.result()
+                elapsed_times_p.append(result.elapsed_seconds)
+                if result.cancelled:
+                    write(f"  [{completed}/{total}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
+                elif result.success:
+                    n_ok += 1
+                    state.reduced_files.append(result.output_file)
+                    remaining = total - completed
+                    eta = ""
+                    if elapsed_times_p:
+                        avg = sum(elapsed_times_p) / len(elapsed_times_p)
+                        eta = f"  ETA ~{_fmt(avg * remaining / max_workers)}"
+                    write(f"  [{completed}/{total}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}  [dim]{remaining} left{eta}[/dim]")
+                else:
+                    n_fail += 1
+                    err = _summarize_error(result.log_file, result.err_file)
+                    write(f"  [{completed}/{total}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
+
+    return n_ok, n_fail
 
 
 def _llm_explain_missing_empty(
@@ -234,13 +314,27 @@ def run_autopilot_sync(
     cancel_event: threading.Event | None = None,
     prompt_user: Callable | None = None,
     sample_filter: list[str] | None = None,
+    exclude_filter: list[str] | None = None,
+    thickness: float | None = None,
+    bkg_sample: str | None = None,
+    config_filter: str | None = None,
 ) -> None:
     """Runs entirely in a thread. dispatch_sync wraps async dispatch via loop.run_until_complete."""
 
     t0 = time.time()
+    label_parts = []
     if sample_filter:
-        filter_display = ", ".join(sample_filter)
-        write(f"[bold cyan]━━━ AUTOPILOT MODE (samples: {filter_display}) ━━━[/bold cyan]\n")
+        label_parts.append(f"samples: {', '.join(sample_filter)}")
+    if exclude_filter:
+        label_parts.append(f"exclude: {', '.join(exclude_filter)}")
+    if config_filter:
+        label_parts.append(f"config: {config_filter}")
+    if bkg_sample:
+        label_parts.append(f"bkg: {bkg_sample}")
+    if thickness is not None:
+        label_parts.append(f"thickness: {thickness} cm")
+    if label_parts:
+        write(f"[bold cyan]━━━ AUTOPILOT MODE ({'; '.join(label_parts)}) ━━━[/bold cyan]\n")
     else:
         write("[bold cyan]━━━ AUTOPILOT MODE ━━━[/bold cyan]\n")
 
@@ -284,7 +378,25 @@ def run_autopilot_sync(
         table = state.current_table
         write(f"  [green]✓[/green] {len(table.rows)} runs, {len(table.configurations)} configs: {', '.join(table.configurations)}\n")
 
-    # === Step 2b: Apply sample filter if specified ===
+    # === Step 2b: Apply customizations ===
+    # Order: thickness → bkg → samples → exclude → config
+    # Setup (thickness, bkg) runs first on the full table so all rows get
+    # correct values. Filters (samples, exclude, config) run after so they
+    # can remove rows that already have proper assignments.
+
+    if thickness is not None:
+        for row in table.rows:
+            row.thickness = thickness
+        write(f"[bold]  Thickness:[/bold] set {thickness} cm for all {len(table.rows)} rows\n")
+
+    if bkg_sample:
+        write(f"[bold]  Background:[/bold] assigning {bkg_sample} as background...")
+        r = dispatch_sync(f"/assign bkg {bkg_sample}")
+        if r.success:
+            write(f"  [green]✓[/green] {r.message}\n")
+        else:
+            write(f"  [yellow]⚠[/yellow] {r.message}\n")
+
     if sample_filter:
         filter_terms = [s.lower() for s in sample_filter]
 
@@ -306,6 +418,40 @@ def run_autopilot_sync(
         removed_count = rows_before - len(table.rows)
         write(f"[bold]  Sample filter:[/bold] keeping {', '.join(sample_filter)} (+ porsil if present)")
         write(f"  [green]✓[/green] Removed {removed_count} rows, {len(table.rows)} remaining: {', '.join(kept_samples)}\n")
+
+    if exclude_filter:
+        exclude_terms = [s.lower() for s in exclude_filter]
+
+        def _matches_exclude(sample_name: str) -> bool:
+            name_lower = sample_name.lower()
+            return any(term in name_lower for term in exclude_terms)
+
+        rows_before = len(table.rows)
+        indices_to_remove = [
+            row.index for row in table.rows
+            if _matches_exclude(row.sample_name)
+        ]
+        for idx in sorted(indices_to_remove, reverse=True):
+            table.remove_row(idx)
+
+        removed_count = rows_before - len(table.rows)
+        kept_samples = sorted(set(row.sample_name for row in table.rows))
+        write(f"[bold]  Exclude filter:[/bold] removed {', '.join(exclude_filter)}")
+        write(f"  [green]✓[/green] Removed {removed_count} rows, {len(table.rows)} remaining: {', '.join(kept_samples)}\n")
+
+    if config_filter:
+        from eqsanscli.models.config_id import normalize_config_id
+        norm_filter = normalize_config_id(config_filter)
+        rows_before = len(table.rows)
+        indices_to_remove = [
+            row.index for row in table.rows
+            if normalize_config_id(row.configuration) != norm_filter
+        ]
+        for idx in sorted(indices_to_remove, reverse=True):
+            table.remove_row(idx)
+        removed_count = rows_before - len(table.rows)
+        write(f"[bold]  Config filter:[/bold] keeping only {config_filter}")
+        write(f"  [green]✓[/green] Removed {removed_count} rows, {len(table.rows)} remaining\n")
 
     # === Step 3: Verify assignments — show the table ===
     write("[bold]Step 3/13:[/bold] Verifying assignments...")
@@ -411,9 +557,12 @@ def run_autopilot_sync(
 
     # === Step 5: Set output directory ===
     write("[bold]Step 5/13:[/bold] Setting output directory...")
-    output_dir = os.path.abspath("./output")
+    output_dir = os.path.abspath(state.output_directory)
     dispatch_sync(f"/set outputdir {output_dir}")
-    write(f"  [green]✓[/green] {output_dir}\n")
+    if state.output_directory != "./output/":
+        write(f"  [green]✓[/green] {output_dir} [dim](user-set)[/dim]\n")
+    else:
+        write(f"  [green]✓[/green] {output_dir}\n")
 
     # === Step 6: Reduce porsil (scale=1.0) ===
     from eqsanscli.services.reduction_service import reduce_row
@@ -423,6 +572,7 @@ def run_autopilot_sync(
 
     calibrated_configs: dict[str, float] = {}
     reference_config = None
+    max_workers = state.max_workers
 
     if has_porsil:
         porsil_todo = [row for row in porsil_rows if row.status != "done"]
@@ -432,33 +582,25 @@ def run_autopilot_sync(
             write(f"[bold]Step 6/13:[/bold] Reducing porsil... [dim]already done ({porsil_already_done} runs)[/dim]")
             write(f"  [green]✓[/green] All {porsil_already_done} porsil runs already reduced\n")
         else:
+            parallel_label = f" [{max_workers} parallel]" if max_workers > 1 else ""
             if porsil_already_done:
-                write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_todo)} remaining porsil runs (scale=1.0)... ({porsil_already_done} already done)")
+                write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_todo)} remaining porsil runs (scale=1.0)...{parallel_label} ({porsil_already_done} already done)")
             else:
-                write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_rows)} porsil runs (scale=1.0)...")
+                write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_rows)} porsil runs (scale=1.0)...{parallel_label}")
             for cfg in table.configurations:
                 dispatch_sync(f"/set config {cfg} standardabsolutescale 1.0")
 
-            elapsed_times: list[float] = []
-            total_p = len(porsil_todo)
-            for i, row in enumerate(porsil_todo):
-                if cancel_event and cancel_event.is_set():
-                    write(f"  [yellow]⊘ Cancelled — stopping autopilot[/yellow]")
-                    return
-                remaining = total_p - i
-                eta = f"  ETA ~{_fmt(sum(elapsed_times)/len(elapsed_times) * remaining)}" if elapsed_times else ""
-                write(f"  [{i+1}/{total_p}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration})  [dim]{remaining} left{eta}[/dim]")
-                result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event)
-                elapsed_times.append(result.elapsed_seconds)
-                if result.cancelled:
-                    write(f"  [{i+1}/{total_p}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
-                    return
-                elif result.success:
-                    write(f"  [{i+1}/{total_p}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}")
-                else:
-                    from eqsanscli.commands.reduction import _summarize_error
-                    err = _summarize_error(result.log_file, result.err_file)
-                    write(f"  [{i+1}/{total_p}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
+            _reduce_phase(
+                rows=porsil_todo,
+                state=state,
+                output_dir=output_dir,
+                write=write,
+                cancel_event=cancel_event,
+                max_workers=max_workers,
+            )
+
+            if cancel_event and cancel_event.is_set():
+                return
 
             done_porsil = sum(1 for row in porsil_rows if row.status == "done")
             write(f"  [green]✓[/green] {done_porsil}/{len(porsil_rows)} porsil completed\n")
@@ -510,31 +652,20 @@ def run_autopilot_sync(
     # === Step 9: Reduce all non-porsil ===
     non_porsil = [row for row in table.rows if row.sample_name.lower() != "porsil"]
     total_np = len(non_porsil)
-    write(f"[bold]Step 9/13:[/bold] Reducing {total_np} sample runs...")
+    parallel_label_s9 = f" [{max_workers} parallel]" if max_workers > 1 else ""
+    write(f"[bold]Step 9/13:[/bold] Reducing {total_np} sample runs...{parallel_label_s9}")
 
-    n_ok, n_fail = 0, 0
-    elapsed_times_np: list[float] = []
-    for i, row in enumerate(non_porsil):
-        if cancel_event and cancel_event.is_set():
-            write(f"  [yellow]⊘ Cancelled — stopping autopilot[/yellow]")
-            return
-        remaining = total_np - i
-        eta = f"  ETA ~{_fmt(sum(elapsed_times_np)/len(elapsed_times_np) * remaining)}" if elapsed_times_np else ""
-        write(f"  [{i+1}/{total_np}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration})  [dim]{remaining} left{eta}[/dim]")
-        result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event)
-        elapsed_times_np.append(result.elapsed_seconds)
-        if result.cancelled:
-            write(f"  [{i+1}/{total_np}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
-            return
-        elif result.success:
-            n_ok += 1
-            state.reduced_files.append(result.output_file)
-            write(f"  [{i+1}/{total_np}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}")
-        else:
-            n_fail += 1
-            from eqsanscli.commands.reduction import _summarize_error
-            err = _summarize_error(result.log_file, result.err_file)
-            write(f"  [{i+1}/{len(non_porsil)}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
+    n_ok, n_fail = _reduce_phase(
+        rows=non_porsil,
+        state=state,
+        output_dir=output_dir,
+        write=write,
+        cancel_event=cancel_event,
+        max_workers=max_workers,
+    )
+
+    if cancel_event and cancel_event.is_set():
+        return
 
     write(f"  [green]✓[/green] {n_ok} succeeded, [red]{n_fail} failed[/red]\n")
 
@@ -763,33 +894,6 @@ def run_autopilot_sync(
 
 
 def _find_closest_preset(config_id: str, preset_names: list[str]) -> tuple[str | None, str]:
-    """Returns (preset_name, match_type) where match_type is 'exact', 'partial', or 'distance'.
-
-    Priority:
-      1. Exact match (e.g., 4m10a == 4m10a)
-      2. Substring match (e.g., 4m10a in conf_4m_10a_60hz)
-      3. Same distance match (e.g., 4m2.5a → use 4m10a preset because both 4m)
-    """
-    import re
-    from eqsanscli.models.config_id import normalize_config_id
-
-    norm = normalize_config_id(config_id)
-
-    for name in preset_names:
-        if normalize_config_id(name) == norm:
-            return name, "exact"
-
-    for name in preset_names:
-        n = normalize_config_id(name)
-        if norm in n or n in norm:
-            return name, "partial"
-
-    dist_match = re.search(r"(\d+\.?\d*m)", norm)
-    if dist_match:
-        config_dist = dist_match.group(1)
-        for name in preset_names:
-            n = normalize_config_id(name)
-            if config_dist in n:
-                return name, "distance"
-
-    return None, ""
+    """Thin wrapper — delegates to preset_service.find_closest_preset."""
+    from eqsanscli.services.preset_service import find_closest_preset
+    return find_closest_preset(config_id, preset_names)

@@ -1,30 +1,30 @@
 {
-    "schemaStamp": "2026-03-30T19:59:30.872300",
+    "schemaStamp": "2026-03-30T20:08:08.761116",
     "instrumentName": "EQSANS",
     "iptsNumber": "36548",
     "sample": {
-        "runNumber": "176970",
+        "runNumber": "176959",
         "thickness": 0.1,
         "transmission": {
-            "runNumber": "176965",
+            "runNumber": "176954",
             "value": ""
         }
     },
     "background": {
-        "runNumber": "176968",
+        "runNumber": "176957",
         "transmission": {
-            "runNumber": "176963",
+            "runNumber": "176952",
             "value": ""
         }
     },
     "emptyTransmission": {
-        "runNumber": "176962",
+        "runNumber": "176951",
         "value": null
     },
     "beamCenter": {
-        "runNumber": "176962"
+        "runNumber": "176951"
     },
-    "outputFileName": "r0_20C_4m",
+    "outputFileName": "r0_20C_2o5m",
     "configuration": {
         "outputDir": "./output/",
         "instrumentConfigurationDir": "/SNS/EQSANS/shared/instrument_configuration",
@@ -53,7 +53,7 @@
         "normalization": "Total charge",
         "fluxMonitorRatioFile": null,
         "beamFluxFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/bl6_flux_2026a_mar_rebinned.txt",
-        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/Sensitivity_patched_thinPMMA_4m_176667.nxs",
+        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/Sensitivity_patched_thinPMMA_2o5m_176668.nxs",
         "useSolidAngleCorrection": true,
         "useThetaDepTransCorrection": true,
         "mmRadiusForTransmission": 25,
@@ -76,8 +76,8 @@
         "autoWedgeBackgroundWidth": null,
         "autoWedgeSignalToNoiseMin": null,
         "AnnularAngleBin": 5.0,
-        "Qmin": null,
-        "Qmax": null,
+        "Qmin": 0.02,
+        "Qmax": 0.5,
         "useErrorWeighting": true,
         "smearingPixelSizeX": null,
         "smearingPixelSizeY": null,
@@ -85,7 +85,7 @@
         "subpixelsX": null,
         "subpixelsY": null,
         "useSliceIDxAsSuffix": null,
-        "fitInelasticIncoh": false,
+        "fitInelasticIncoh": true,
         "selectMinIncoh": true,
         "incohfit_qmin": 0.2,
         "incohfit_qmax": 0.3,
