@@ -73,7 +73,8 @@ def _reduce_phase(
                 return n_ok, n_fail
             remaining = total - i
             eta = f"  ETA ~{_fmt(sum(elapsed_times)/len(elapsed_times) * remaining)}" if elapsed_times else ""
-            write(f"  [{i+1}/{total}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration})  [dim]{remaining} left{eta}[/dim]")
+            bkg_info = f"  bkg={row.background_scatt}" if row.background_scatt else "  [yellow]no bkg[/yellow]"
+            write(f"  [{i+1}/{total}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration}){bkg_info}  [dim]{remaining} left{eta}[/dim]")
             result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event, drtsans_version=state.drtsans_version)
             elapsed_times.append(result.elapsed_seconds)
             if result.cancelled:

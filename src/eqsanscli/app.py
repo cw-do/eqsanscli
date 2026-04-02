@@ -317,9 +317,10 @@ class EQSANSApp(App):
 
                 output_name = f"{row.sample_name}_{row.configuration}"
                 row.status = "reducing"
+                bkg_info = f"  bkg={row.background_scatt}" if row.background_scatt else "  [yellow]no bkg[/yellow]"
                 write(
                     f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
-                    f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
+                    f"[bold]{row.sample_name}[/bold] ({row.configuration}){bkg_info} "
                     f"→ {output_name}.json  "
                     f"[dim]{remaining} left{eta_str}[/dim]"
                 )
