@@ -76,9 +76,14 @@ Every response is a JSON object with these fields:
 When a user asks you to reduce an experiment, follow this workflow.
 Always verify each step before proceeding to the next.
 
-### Quick Path (one command)
+**IMPORTANT: Always prefer `/autopilot` over the manual path.** Autopilot handles
+loading, matching, preset application, reduction, calibration, stitching, and plotting
+automatically. Use the manual path ONLY when the user needs fine-grained control that
+autopilot flags cannot express (e.g., setting individual row parameters, custom config
+tweaks, or multi-step table editing).
 
-If the user just wants everything reduced with defaults:
+### Quick Path (one command) — USE THIS BY DEFAULT
+
 ```
 /autopilot <ipts>
 ```
@@ -101,9 +106,14 @@ Examples:
 /autopilot 35884 --bkg emptyticell --exclude Y5,Y6 --config 4m10a --thickness 0.15
 ```
 
-This handles everything automatically. Skip to "Sharing Results" below.
+This handles everything automatically — including preset application, calibration,
+stitching, and plotting. Skip to "Sharing Results" below.
 
-### Manual Path (full control)
+**"Reduce only porsil"** → `/autopilot 35884 --samples porsil`
+**"Reduce only 8m config"** → `/autopilot 35884 --config 8m12a`
+These are NOT reasons to use the manual path. Use autopilot with flags.
+
+### Manual Path (only when autopilot flags are insufficient)
 
 #### Step 1: Load Catalog
 
@@ -137,11 +147,15 @@ Empty beam matched: 45/50
 
 **To find the right run number:** Send `/show catalog` and search the data for runs matching the needed type (S- prefix = scattering, T- prefix = transmission) and same configuration.
 
-#### Step 3: Apply Presets
+#### Step 3: Apply Presets — MANDATORY, DO NOT SKIP
 
 ```
 /apply preset auto
 ```
+
+**This step is required.** Without presets, reduction parameters (qmin, qmax, numqbins,
+sensitivity files, dark current, flux files, etc.) are missing or wrong. Reduction will
+fail or produce garbage output.
 
 **Check:** message shows which presets matched each config.
 If any config shows "no matching preset found", tell the user — they may need to provide parameters.
