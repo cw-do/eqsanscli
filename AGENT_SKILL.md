@@ -323,12 +323,17 @@ transmission, or empty beam, the assigned run MUST be from the SAME config as th
 ### User: "Reduce IPTS 35884"
 
 ```
+Agent tells user: "Starting autopilot for IPTS-35884..."
 Agent sends: /autopilot 35884
-Agent reads: progress lines on stderr, then final JSON on stdout
-Agent reports: "Reduction complete. X samples reduced across Y configs. Z failures."
+Agent reads stderr progress, relays periodically:
+  → "Loaded 120 runs. Matched 50 across 2 configs."
+  → "Reducing... 10/50 done, ETA ~20min"
+  → "30/50 done, 1 failure so far"
+  → "Reduction complete: 48 succeeded, 2 failed."
+Agent tells user about failures: "Failed: S-broken (4m10a) — missing empty beam"
 Agent sends: /plot *_Iq.dat --save all_results.png
 Agent sends: /share *.png
-Agent reports: "Here are your results: <URL>"
+Agent tells user: "Here are your I(Q) plots: <URL>"
 ```
 
 ### User: "Reduce IPTS 36548 but skip the Y5 samples, thickness 0.15"
@@ -386,6 +391,67 @@ Agent summarizes: N rows, M configs, any missing fields
 
 ---
 
+## Relaying Output to the User
+
+**CRITICAL:** You must keep the user informed as you work. Do NOT silently run the
+entire pipeline and only report at the end. Reductions can take 30+ minutes — the
+user needs to see progress.
+
+### What to relay and when
+
+| Event | What to tell the user |
+|-------|----------------------|
+| After `/load ipts` | "Loaded N runs from IPTS-XXXXX" |
+| After `/matchruns` | "Matched N runs across M configs. X missing trans, Y missing bkg." |
+| After any `/set` or `/assign` | "Updated N rows" (brief confirmation) |
+| After `/apply preset auto` | "Applied presets: 4m10a ← conf_4m_10a_60hz, 2.5m2.5a ← ..." |
+| During `/reduce` or `/autopilot` | Relay progress from stderr: "[5/50] done S-myprotein (4m10a) 32s" |
+| After reduction completes | "Reduction complete: N succeeded, M failed out of T total" |
+| If any rows failed | List the failed samples and error messages |
+| After `/stitch run` | "Stitched N samples" |
+| After `/plot --save` | "Plot saved" |
+| After `/share` | **Always** send the URL to the user |
+
+### Progress during long-running commands
+
+`/reduce` and `/autopilot` stream progress to **stderr** with `progress:` prefix.
+Relay these to the user periodically — at minimum every 5 rows or every 2 minutes.
+You don't need to relay every single line, but the user should see:
+- That work is happening (not stalled)
+- Roughly how far along (e.g., "15/50 done, ~20 minutes remaining")
+- Any failures as they occur
+
+### Example: good relay behavior
+
+```
+User: "Reduce IPTS 35884"
+
+Agent: "Starting autopilot for IPTS-35884..."
+Agent sends: /autopilot 35884
+Agent reads stderr: progress lines
+Agent: "Loaded 120 runs. Matched 50 scattering runs across 2 configs (4m10a, 2.5m2.5a)."
+Agent: "Applied presets. Reducing 50 runs..."
+Agent: "Progress: 10/50 done, 2 failed so far. ETA ~15 minutes."
+Agent: "Progress: 30/50 done. ETA ~8 minutes."
+Agent: "Reduction complete: 47 succeeded, 3 failed."
+Agent: "Failed: S-broken (4m10a) — missing empty beam, S-bad (2.5m2.5a) — drtsans error"
+Agent sends: /plot *_Iq.dat --save results.png
+Agent sends: /share *.png
+Agent: "Here are your I(Q) plots: https://here.now/abc123"
+```
+
+### Example: bad relay behavior (DO NOT DO THIS)
+
+```
+User: "Reduce IPTS 35884"
+
+[30 minutes of silence]
+
+Agent: "Done. 47 out of 50 succeeded. Here are plots: <URL>"
+```
+
+---
+
 ## Important Notes
 
 - Always use `/commands` with the `/` prefix. Never send natural language — the headless
@@ -394,5 +460,5 @@ Agent summarizes: N rows, M configs, any missing fields
 - After modifying the table (`/set`, `/remove`, `/assign`), verify with `/show table`.
 - The `/share` command returns a URL — always pass this to the user.
 - Session auto-saves after every command. Use `/continue` on restart to resume.
-- Reduction can take minutes per row. Monitor stderr for progress.
+- Reduction can take minutes per row. Monitor stderr for progress and relay to user.
 - Default thickness is 0.1 cm. Only set `--thickness` if the user specifies differently.
