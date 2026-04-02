@@ -872,13 +872,17 @@ def run_autopilot_sync(
     merged = sorted(glob.glob(os.path.join(output_dir, "merged_*_Iq.txt")))
     merged += sorted(glob.glob(os.path.join(output_dir, "merged_*_Iq.dat")))
     if merged:
-        dispatch_sync(f"/plot {' '.join(merged)}")
+        r = dispatch_sync(f"/plot {' '.join(merged)}")
         write(f"  [green]✓[/green] Plotted {len(merged)} merged files")
+        if r.message:
+            write(f"  {r.message}")
     else:
         iq_files = sorted(glob.glob(os.path.join(output_dir, "*_Iq.dat")))
         if iq_files:
-            dispatch_sync(f"/plot {' '.join(iq_files[:20])}")
+            r = dispatch_sync(f"/plot {' '.join(iq_files[:20])}")
             write(f"  [green]✓[/green] Plotted {len(iq_files)} files")
+            if r.message:
+                write(f"  {r.message}")
         else:
             write("  [yellow]⚠[/yellow] No output files found to plot")
 
