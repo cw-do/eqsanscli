@@ -48,6 +48,18 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
     value = " ".join(args[2:])
 
     ok, message = set_config_param(config_id, param, value, state.configurations)
+
+    # Mark "done" rows as "modified" when their config parameters change
+    if ok:
+        table = state.current_table
+        n_reset = 0
+        for row in table.rows:
+            if row.status == "done" and normalize_config_id(row.configuration) == config_id:
+                row.status = "modified"
+                n_reset += 1
+        if n_reset:
+            message += f"\n  ⚠ {n_reset} row(s) marked as modified — will be re-reduced."
+
     return CommandResult(success=ok, message=message)
 
 

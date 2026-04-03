@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
+from eqsanscli.models.config_id import normalize_config_id
 from eqsanscli.services.config_manager import get_config, list_config_params
 from eqsanscli.services.preset_service import (
     compare_configs,
@@ -16,6 +17,17 @@ from eqsanscli.services.preset_service import (
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
+
+
+def _mark_config_rows_modified(state: SessionState, config_id: str) -> int:
+    """Mark 'done' rows as 'modified' when their config parameters change."""
+    norm = normalize_config_id(config_id)
+    n = 0
+    for row in state.current_table.rows:
+        if row.status == "done" and normalize_config_id(row.configuration) == norm:
+            row.status = "modified"
+            n += 1
+    return n
 
 
 async def handle_show_presets(args: list[str], state: SessionState) -> CommandResult:
@@ -122,12 +134,14 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
                         for key, value in params.items():
                             state.configurations[cfg][key] = value
                         applied += 1
+                        n_reset = _mark_config_rows_modified(state, cfg)
+                        reset_note = f" ({n_reset} rows modified)" if n_reset else ""
                         if match_type == "exact":
-                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved}")
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved}{reset_note}")
                         elif match_type == "partial":
-                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]")
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]{reset_note}")
                         elif match_type == "distance":
-                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]")
+                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]{reset_note}")
                         continue
             lines.append(f"  [yellow]⚠[/yellow] {cfg} — no matching preset found")
 
@@ -166,10 +180,12 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
         state.configurations[config_id][key] = value
         count += 1
 
-    return CommandResult(
-        success=True,
-        message=f"Applied preset '{resolved}' to config '{config_id}' ({count} parameters).",
-    )
+    n_reset = _mark_config_rows_modified(state, config_id)
+    msg = f"Applied preset '{resolved}' to config '{config_id}' ({count} parameters)."
+    if n_reset:
+        msg += f"\n  ⚠ {n_reset} row(s) marked as modified — will be re-reduced."
+
+    return CommandResult(success=True, message=msg)
 
 
 async def handle_compare(args: list[str], state: SessionState) -> CommandResult:

@@ -93,6 +93,7 @@ Options (all composable):
 - `--samples <a,b>` — keep only these samples (+ porsil)
 - `--exclude <a,b>` — remove these samples
 - `--config <id>` — reduce only this configuration (e.g., `8m12a`)
+- `--force` — re-reduce all rows, ignoring done/modified status
 
 **Execution order:** thickness → bkg → samples → exclude → config.
 Setup (thickness, bkg) applies to the full table first, so all rows get correct
@@ -303,12 +304,38 @@ Plot flags: `--save <path>`, `--loglog`, `--linlin`, `--kratky`, `--guinier`, `-
 
 ---
 
+## Re-reduction and Status Tracking
+
+Row status values: `ready` → `reducing` → `done` | `error` | `modified`
+
+**Auto-modified status:** When you change a reduction-relevant parameter on a "done"
+row, the status automatically resets to `modified`:
+- Row fields: `/set` or `/assign bkg` changes trans, bkg, bkgtrans, emp, thickness
+- Config parameters: `/set config` or `/apply preset` changes any config param
+
+Autopilot treats `modified` rows the same as `ready` — they will be re-reduced.
+Rows with status `done` are skipped (already reduced with current parameters).
+
+**If you need to force re-reduction** (e.g., drtsans was updated, or you want
+different output), use `--force`:
+```
+/autopilot 35884 --force
+```
+
+**You do NOT need `--force` when:**
+- You changed background with `/assign bkg` → rows auto-reset to `modified`
+- You changed a config param with `/set config` → rows auto-reset to `modified`
+- You applied a preset with `/apply preset` → rows auto-reset to `modified`
+
+---
+
 ## Error Recovery
 
 | Symptom | Diagnosis | Fix |
 |---------|-----------|-----|
 | `/matchruns` shows missing trans/bkg/emp | Catalog runs don't follow naming convention | Use `/show catalog`, find correct runs, use `/set` |
 | `/reduce` fails for some rows | Check `data.results` for `status: "error"` | Fix missing fields with `/set`, re-reduce failed rows |
+| Autopilot skips rows (status "done") | Parameters changed but status not reset | Should auto-reset; if not, use `--force` |
 | "No scattering runs found" | Empty catalog or wrong IPTS | Verify IPTS number, `/show catalog` |
 | Preset not found | No matching preset in preset_configs/ | `/show presets` to list available, apply manually |
 | Bad stitch overlap | Wrong target or overlap range | `/stitch set all target <lowest_q_config>`, `/stitch set all overlap auto` |

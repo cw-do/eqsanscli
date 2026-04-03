@@ -39,10 +39,18 @@ python -m eqsanscli
 | `/autopilot <ipts> --thickness <cm>` | Set sample thickness for all rows |
 | `/autopilot <ipts> --bkg <sample>` | Use named sample as background (config-aware) |
 | `/autopilot <ipts> --config <id>` | Reduce only the specified configuration |
+| `/autopilot <ipts> --force` | Re-reduce all rows (ignore done/modified status) |
 | `/autopilot <ipts> --exclude Y5 --bkg emptyticell --thickness 0.15` | Combined options |
 
 All flags are composable. Execution order: thickness → bkg → samples → exclude → config.
 Setup (thickness, bkg) applies to the full table first, then filters (samples, exclude, config) trim rows down.
+
+### Re-reduction Status
+
+When you change a row's parameters (`/set`, `/assign bkg`) or config parameters
+(`/set config`, `/apply preset`) after reduction, affected rows automatically change
+status from `done` to `modified`. Autopilot will re-reduce `modified` rows.
+Use `--force` to re-reduce all rows regardless of status.
 
 **Examples:**
 ```
