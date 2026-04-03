@@ -319,6 +319,7 @@ def run_autopilot_sync(
     thickness: float | None = None,
     bkg_sample: str | None = None,
     config_filter: str | None = None,
+    force: bool = False,
 ) -> None:
     """Runs entirely in a thread. dispatch_sync wraps async dispatch via loop.run_until_complete."""
 
@@ -334,6 +335,8 @@ def run_autopilot_sync(
         label_parts.append(f"bkg: {bkg_sample}")
     if thickness is not None:
         label_parts.append(f"thickness: {thickness} cm")
+    if force:
+        label_parts.append("force")
     if label_parts:
         write(f"[bold cyan]━━━ AUTOPILOT MODE ({'; '.join(label_parts)}) ━━━[/bold cyan]\n")
     else:
@@ -576,7 +579,10 @@ def run_autopilot_sync(
     max_workers = state.max_workers
 
     if has_porsil:
-        porsil_todo = [row for row in porsil_rows if row.status != "done"]
+        if force:
+            porsil_todo = porsil_rows
+        else:
+            porsil_todo = [row for row in porsil_rows if row.status != "done"]
         porsil_already_done = len(porsil_rows) - len(porsil_todo)
 
         if not porsil_todo:

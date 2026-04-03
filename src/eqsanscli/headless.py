@@ -218,6 +218,7 @@ def _run_autopilot_sync(
     thickness: float | None,
     bkg_sample: str | None,
     config_filter: str | None,
+    force: bool,
     loop: asyncio.AbstractEventLoop,
     router: CommandRouter,
 ) -> dict[str, Any]:
@@ -251,6 +252,7 @@ def _run_autopilot_sync(
         thickness=thickness,
         bkg_sample=bkg_sample,
         config_filter=config_filter,
+        force=force,
     )
 
     return {
@@ -322,6 +324,7 @@ def run_headless() -> None:
                         thickness=result.data.get("thickness"),
                         bkg_sample=result.data.get("bkg_sample"),
                         config_filter=result.data.get("config_filter"),
+                        force=result.data.get("force", False),
                         loop=loop,
                         router=router,
                     )

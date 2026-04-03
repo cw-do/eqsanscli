@@ -29,8 +29,23 @@ class WorkingTableRow:
     wavelength: float = 0.0  # Angstroms (from ONCat)
     frequency: int = 60  # Hz (chopper frequency from ONCat)
     thickness: float = 0.1  # cm
-    status: str = "ready"  # ready | reducing | done | error
+    status: str = "ready"  # ready | reducing | done | error | modified
     output_file: Optional[str] = None
+
+    # Fields that affect reduction output — changing any of these on a "done"
+    # row means the previous output is stale and needs re-reduction.
+    _REDUCTION_FIELDS = frozenset({
+        "transmission_run", "background_scatt", "background_trans",
+        "empty_beam", "thickness",
+    })
+
+    def set_field(self, attr_name: str, value) -> None:
+        """Set a field and auto-reset status to 'modified' if the row was 'done'
+        and the field affects reduction output."""
+        old_value = getattr(self, attr_name, None)
+        setattr(self, attr_name, value)
+        if attr_name in self._REDUCTION_FIELDS and self.status == "done" and old_value != value:
+            self.status = "modified"
 
     @property
     def configuration(self) -> str:

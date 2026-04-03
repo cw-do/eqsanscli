@@ -20,7 +20,8 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
             "  /autopilot 35884 --thickness 0.2              — Set thickness to 0.2 cm\n"
             "  /autopilot 35884 --bkg banjo                  — Use banjo as background\n"
             "  /autopilot 35884 --config 8m12a               — Reduce only 8m12a config\n"
-            "  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined",
+            "  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined\n"
+            "  /autopilot 35884 --force                        — Re-reduce all (ignore done status)",
         )
 
     ipts = None
@@ -29,6 +30,7 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
     thickness: float | None = None
     bkg_sample: str | None = None
     config_filter: str | None = None
+    force: bool = False
 
     i = 0
     while i < len(args):
@@ -58,6 +60,10 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
             config_filter = args[i + 1]
             i += 2
             continue
+        if a == "--force":
+            force = True
+            i += 1
+            continue
         if ipts is None:
             try:
                 ipts = int(a)
@@ -79,6 +85,8 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
         data["bkg_sample"] = bkg_sample
     if config_filter is not None:
         data["config_filter"] = config_filter
+    if force:
+        data["force"] = True
 
     return CommandResult(
         success=True,

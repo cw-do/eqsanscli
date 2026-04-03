@@ -221,7 +221,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             if attr_name == "thickness":
                 return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
             for row in matching_rows:
-                setattr(row, attr_name, "")
+                row.set_field(attr_name, "")
             return CommandResult(
                 success=True,
                 message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching '{args[1]}'.",
@@ -236,7 +236,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             parsed_value = value_str
 
         for row in matching_rows:
-            setattr(row, attr_name, parsed_value)
+            row.set_field(attr_name, parsed_value)
 
         sample_list = ", ".join(sorted(set(r.sample_name for r in matching_rows)))
         return CommandResult(
@@ -280,7 +280,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         if attr_name == "thickness":
             return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
         for r in target_rows:
-            setattr(r, attr_name, "")
+            r.set_field(attr_name, "")
         label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
         return CommandResult(success=True, message=f"Cleared {field_name} for {label}.")
 
@@ -293,7 +293,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         parsed_value = value_str
 
     for r in target_rows:
-        setattr(r, attr_name, parsed_value)
+        r.set_field(attr_name, parsed_value)
 
     label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
     return CommandResult(

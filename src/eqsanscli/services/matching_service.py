@@ -240,17 +240,17 @@ def assign_background(
     for trow in table.rows:
         cfg = trow.config_key
         if trow.sample_name.lower() == bkg_name_lower:
-            trow.background_scatt = empty_by_config.get(cfg, "")
-            trow.background_trans = empty_by_config.get(cfg, "")
+            trow.set_field("background_scatt", empty_by_config.get(cfg, ""))
+            trow.set_field("background_trans", empty_by_config.get(cfg, ""))
             count += 1
         else:
             new_bkg_scatt = bkg_scatt_by_config.get(cfg, "")
             new_bkg_trans = bkg_trans_by_config.get(cfg, "")
             if new_bkg_scatt:
-                trow.background_scatt = new_bkg_scatt
+                trow.set_field("background_scatt", new_bkg_scatt)
                 count += 1
             if new_bkg_trans:
-                trow.background_trans = new_bkg_trans
+                trow.set_field("background_trans", new_bkg_trans)
 
     from eqsanscli.models.config_id import make_config_id
     configs_found = sorted(make_config_id(k[0], k[1], k[2]) for k in bkg_scatt_by_config)

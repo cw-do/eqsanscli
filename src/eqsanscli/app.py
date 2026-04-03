@@ -485,13 +485,14 @@ class EQSANSApp(App):
             self.run_autopilot_worker(
                 data["ipts"], data.get("samples"), data.get("excludes"),
                 data.get("thickness"), data.get("bkg_sample"), data.get("config_filter"),
+                data.get("force", False),
             )
 
     def action_cancel_job(self) -> None:
         self.cancel_job()
 
     @work(thread=True)
-    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None) -> None:
+    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None, force: bool = False) -> None:
         import asyncio
         from eqsanscli.services.autopilot import run_autopilot_sync
 
@@ -530,6 +531,7 @@ class EQSANSApp(App):
                 thickness=thickness,
                 bkg_sample=bkg_sample,
                 config_filter=config_filter,
+                force=force,
             )
         finally:
             loop.close()
