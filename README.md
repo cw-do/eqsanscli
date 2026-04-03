@@ -112,9 +112,9 @@ Use `--force` to re-reduce all rows regardless of status.
 
 | Command | Description |
 |---------|-------------|
-| `/calibrate <porsil_file>` | Calculate absolute scale from porsil data |
+| `/calibrate <porsil_file>` | Calculate absolute scale from porsil data (default Q range: 0.01–0.03) |
 | `/calibrate <file> --ref NG3\|NG7` | Choose reference standard |
-| `/calibrate <file> --qmin 0.01 --qmax 0.1` | Set Q range |
+| `/calibrate <file> --qmin 0.01 --qmax 0.03` | Set Q range (defaults shown) |
 | `/calibrate --list-refs` | List available reference standards |
 
 ### Share
