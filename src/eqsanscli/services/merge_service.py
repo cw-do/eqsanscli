@@ -50,10 +50,21 @@ def _scaling_factor(
     start_q: float, end_q: float,
 ) -> float:
     """Find the scale factor to bring `other` profile to `target` in the overlap region."""
-    mask = (target_q > start_q) & (target_q < end_q) & np.isfinite(target_i)
+    mask = (target_q >= start_q) & (target_q <= end_q) & np.isfinite(target_i)
     q_overlap = target_q[mask]
     if len(q_overlap) < 2:
-        raise ValueError("Insufficient Q values in overlap region for interpolation.")
+        # Try widening by 20% on each side as fallback
+        margin = (end_q - start_q) * 0.5
+        wide_mask = (target_q >= start_q - margin) & (target_q <= end_q + margin) & np.isfinite(target_i)
+        q_overlap_wide = target_q[wide_mask]
+        if len(q_overlap_wide) >= 2:
+            mask = wide_mask
+            q_overlap = q_overlap_wide
+        else:
+            raise ValueError(
+                f"Insufficient Q values in overlap region [{start_q:.5f}, {end_q:.5f}] "
+                f"(found {len(q_overlap)}, need >=2). Try widening overlap or using more points."
+            )
 
     good = np.isfinite(other_i)
     other_interp = np.interp(q_overlap, other_q[good], other_i[good])

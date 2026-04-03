@@ -249,7 +249,7 @@ def _resolve_target_index(value: str, configs: list[str]) -> int | None:
     return None
 
 
-def _auto_overlap_centered(files: list[str], n_points: int = 4) -> tuple[list[float], str]:
+def _auto_overlap_centered(files: list[str], n_points: int = 6) -> tuple[list[float], str]:
     """For each adjacent pair in files compute a centered n-point overlap window."""
     import numpy as np
     from eqsanscli.services.plotting_service import load_iq_native
@@ -282,20 +282,32 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
     if len(args) < 3:
         return CommandResult(
             success=False,
-            message="Usage: /stitch set <sample|all> overlap <q1 q2 ...>\n"
-            "       /stitch set <sample|all> overlap auto [n=4]\n"
-            "       /stitch set <sample|all> target <index|config_id>",
+            message="Usage: /stitch set <idx|sample|all> overlap <q1 q2 ...>\n"
+            "       /stitch set <idx|sample|all> overlap auto [n=6]\n"
+            "       /stitch set <idx|sample|all> target <index|config_id>",
         )
 
-    sample = args[0]
+    selector = args[0]
     field = args[1].lower()
 
-    if sample.lower() == "all":
+    if selector.lower() == "all":
         target_groups = groups
     else:
-        target_groups = [g for g in groups if g.sample_name.lower() == sample.lower()]
+        # Try as index first, then as sample name
+        target_groups = []
+        try:
+            idx = int(selector)
+            if 0 <= idx < len(groups):
+                target_groups = [groups[idx]]
+        except ValueError:
+            pass
         if not target_groups:
-            return CommandResult(success=False, message=f"Sample not found in stitch table: {sample}")
+            target_groups = [g for g in groups if g.sample_name.lower() == selector.lower()]
+        if not target_groups:
+            return CommandResult(
+                success=False,
+                message=f"'{selector}' not found as index or sample name in stitch table.",
+            )
 
     if field == "overlap":
         if args[2].lower() == "auto":
@@ -321,9 +333,9 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             return CommandResult(success=False, message="Overlap values must be numbers.")
         for group in target_groups:
             group.overlaps = overlap_values
-        if sample.lower() == "all":
+        if selector.lower() == "all":
             return CommandResult(success=True, message=f"Set overlaps for all {len(target_groups)} samples: {overlap_values}")
-        return CommandResult(success=True, message=f"Set overlaps for {sample}: {overlap_values}")
+        return CommandResult(success=True, message=f"Set overlaps for {selector}: {overlap_values}")
 
     if field == "target":
         results = []
@@ -339,16 +351,16 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             config_name = group.configs[idx] if group.configs else str(idx)
             results.append(f"  [green]✓[/green] {group.sample_name}: target={idx} ({config_name})")
         
-        if sample.lower() == "all":
+        if selector.lower() == "all":
             return CommandResult(success=True, message=f"Set target for {len(target_groups)} samples:\n" + "\n".join(results))
         return CommandResult(success=True, message="\n".join(results))
 
     if field == "output":
         for group in target_groups:
             group.output_file = args[2]
-        if sample.lower() == "all":
+        if selector.lower() == "all":
             return CommandResult(success=True, message=f"Set output file for all {len(target_groups)} samples: {args[2]}")
-        return CommandResult(success=True, message=f"Set output file for {sample}: {args[2]}")
+        return CommandResult(success=True, message=f"Set output file for {selector}: {args[2]}")
 
     return CommandResult(success=False, message=f"Unknown stitch field: {field}. Use 'overlap', 'target', or 'output'.")
 
