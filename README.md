@@ -200,8 +200,8 @@ Plot flags:
 | `/stitch build` | Auto-build stitch table from reduced I(Q) files |
 | `/stitch smart [--llm]` | Smart stitch with overlap quality analysis |
 | `/stitch show` | Display stitch table |
-| `/stitch set <sample\|all> overlap <q1 q2 ...>` | Set overlap Q range (use `all` for all samples) |
-| `/stitch set <sample\|all> target <idx\|config_id>` | Set normalization target (index or config like `4m10a`) |
+| `/stitch set <idx\|sample\|all> overlap <q1 q2 ...>` | Set overlap Q range |
+| `/stitch set <idx\|sample\|all> target <idx\|config_id>` | Set normalization target (index or config like `4m10a`) |
 | `/stitch removerow <idx\|all\|--sample name>` | Remove stitch group by index, all, or sample name |
 | `/stitch removeconfig <idx\|all> <config_id>` | Remove a config from stitch group(s) |
 | `/stitch reorder <idx\|all> <c1,c2,...>` | Reorder configs in stitch group(s) |
@@ -211,11 +211,12 @@ Plot flags:
 | `/stitch load <name>` | Load stitch table |
 
 **Smart Stitching:** The `/stitch smart` command analyzes overlap quality between curves and automatically removes redundant configurations:
-- Requires 3-4 overlapping data points minimum
 - Prefers overlaps in the middle region (not at edges)
 - Detects when a middle config (mid-Q) adds no value
 - Optionally consults LLM for complex decisions (`--llm` flag)
 - Calculates quality scores (0-100) based on point count, error, and position
+
+**Auto-overlap algorithm:** `/stitch set all overlap auto` computes a centered overlap window for each adjacent pair. The window starts with 6 pooled Q values centered in the intersection, then widens symmetrically until both profiles have at least 2 data points inside. This ensures reliable scaling regardless of data sparsity or which config is used as the normalization target.
 
 ### Session
 

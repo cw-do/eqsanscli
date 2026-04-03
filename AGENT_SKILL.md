@@ -180,12 +180,16 @@ If any failed, report the error messages to the user.
 
 ```
 /stitch build
-/stitch set all target 4m10a
-/stitch set all overlap auto
+/stitch set all target 4m10a    # usually the lowest-Q config
+/stitch set all overlap auto    # auto-computes centered overlap, widens until >=2 pts per profile
 /stitch run
 ```
 
-Or use `/stitch smart` for automatic quality analysis.
+Or use `/stitch smart` for automatic quality analysis (recommended).
+
+**The target can be any config** — the auto-overlap algorithm ensures sufficient
+data points in the overlap window regardless of which config is the reference.
+`/stitch set` accepts index (`0`, `1`), sample name, or `all`.
 
 #### Step 7: Plot
 
@@ -277,10 +281,13 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 |---------|---------|
 | `/stitch build` | Build stitch table from reduced files |
 | `/stitch show` | Display stitch table |
-| `/stitch smart` | Auto-analyze and stitch |
-| `/stitch set <sample\|all> target <config_id>` | Set normalization target |
-| `/stitch set <sample\|all> overlap auto` | Auto-detect overlap Q ranges |
+| `/stitch smart` | Auto-analyze and stitch (recommended) |
+| `/stitch set <idx\|sample\|all> target <config_id>` | Set normalization target |
+| `/stitch set <idx\|sample\|all> overlap auto` | Auto-detect overlap Q ranges (widens until >=2 pts per profile) |
 | `/stitch run [sample]` | Execute stitching |
+| `/stitch removerow <idx\|all\|--sample name>` | Remove stitch group(s) |
+| `/stitch removeconfig <idx\|all> <config_id>` | Remove a config from group(s) |
+| `/stitch reorder <idx\|all> <c1,c2,...>` | Reorder configs in group(s) |
 
 ### Data & Plotting
 
@@ -338,7 +345,8 @@ different output), use `--force`:
 | Autopilot skips rows (status "done") | Parameters changed but status not reset | Should auto-reset; if not, use `--force` |
 | "No scattering runs found" | Empty catalog or wrong IPTS | Verify IPTS number, `/show catalog` |
 | Preset not found | No matching preset in preset_configs/ | `/show presets` to list available, apply manually |
-| Bad stitch overlap | Wrong target or overlap range | `/stitch set all target <lowest_q_config>`, `/stitch set all overlap auto` |
+| Bad stitch overlap | Wrong target or overlap range | `/stitch set all overlap auto` (auto-widens to ensure >=2 pts per profile) |
+| Stitch "insufficient Q values" | Overlap window too narrow for sparse data | Should not happen with auto-overlap; if manual, widen the Q range |
 | Wrong output directory | outputdir not propagated | `/set outputdir <path>` re-propagates to all configs |
 
 ---
