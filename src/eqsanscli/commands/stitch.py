@@ -284,14 +284,25 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Usage: /stitch set <idx|sample|all> overlap <q1 q2 ...>\n"
             "       /stitch set <idx|sample|all> overlap auto [n=6]\n"
-            "       /stitch set <idx|sample|all> target <index|config_id>",
+            "       /stitch set <idx|sample|all> target <index|config_id>\n"
+            "       /stitch set --sample <name> target <index|config_id>",
         )
+
+    # Support --sample flag to force sample-name matching
+    force_sample = False
+    if args[0] == "--sample":
+        force_sample = True
+        args = args[1:]
+        if len(args) < 3:
+            return CommandResult(success=False, message="Usage: /stitch set --sample <name> <field> <value>")
 
     selector = args[0]
     field = args[1].lower()
 
     if selector.lower() == "all":
         target_groups = groups
+    elif force_sample:
+        target_groups = [g for g in groups if g.sample_name.lower() == selector.lower()]
     else:
         # Try as index first, then as sample name
         target_groups = []
@@ -303,7 +314,7 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             pass
         if not target_groups:
             target_groups = [g for g in groups if g.sample_name.lower() == selector.lower()]
-        if not target_groups:
+    if not target_groups:
             return CommandResult(
                 success=False,
                 message=f"'{selector}' not found as index or sample name in stitch table.",
