@@ -23,13 +23,20 @@ if TYPE_CHECKING:
 from eqsanscli.services.plotting_service import load_iq_native
 
 
-def centered_overlap(q_a: np.ndarray, q_b: np.ndarray, n_points: int = 4) -> tuple[float, float]:
-    """Return (start_q, end_q) of a centered n-point overlap window between two Q arrays.
+def centered_overlap(
+    q_a: np.ndarray, q_b: np.ndarray, n_points: int = 6, min_per_profile: int = 2,
+) -> tuple[float, float]:
+    """Return (start_q, end_q) of a centered overlap window between two Q arrays.
 
-    Pools all Q values from both curves within their intersection, then picks
-    n_points symmetrically around the center of that pool. This avoids using
-    the full intersection (which is too wide) and produces a tight, stable
-    scaling region consistent with /stitch set overlap auto.
+    Starts with n_points centered in the overlap, then widens symmetrically
+    until both profiles have at least min_per_profile data points inside the
+    window (or the full intersection is reached).
+
+    Parameters
+    ----------
+    q_a, q_b : Q arrays from adjacent profiles (sorted, finite values only)
+    n_points : initial window size (number of pooled Q values to select)
+    min_per_profile : minimum data points required from EACH profile in the window
     """
     intersect_start = max(float(q_a[0]), float(q_b[0]))
     intersect_end   = min(float(q_a[-1]), float(q_b[-1]))
@@ -47,6 +54,7 @@ def centered_overlap(q_a: np.ndarray, q_b: np.ndarray, n_points: int = 4) -> tup
     if n_avail <= n_points:
         return float(q_pool[0]), float(q_pool[-1])
 
+    # Start with n_points centered, then widen until both profiles have enough points
     center_idx = n_avail // 2
     half = n_points // 2
     lo = max(0, center_idx - half)
@@ -54,6 +62,19 @@ def centered_overlap(q_a: np.ndarray, q_b: np.ndarray, n_points: int = 4) -> tup
     if hi > n_avail:
         hi = n_avail
         lo = hi - n_points
+
+    while lo > 0 or hi < n_avail:
+        start_q, end_q = float(q_pool[lo]), float(q_pool[hi - 1])
+        n_a = int(np.sum((q_a >= start_q) & (q_a <= end_q)))
+        n_b = int(np.sum((q_b >= start_q) & (q_b <= end_q)))
+        if n_a >= min_per_profile and n_b >= min_per_profile:
+            return start_q, end_q
+        # Widen by 1 point on each side
+        if lo > 0:
+            lo -= 1
+        if hi < n_avail:
+            hi += 1
+
     return float(q_pool[lo]), float(q_pool[hi - 1])
 
 
