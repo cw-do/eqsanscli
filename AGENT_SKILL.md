@@ -213,13 +213,18 @@ so they can view the results.
 
 ## Command Reference
 
-### Row Selection
+### Row / Selector Resolution
 
-Many commands accept a `<row>` argument. It can be:
-- Row index: `3`
-- Run number: `172815`
-- Range: `1-5` or `1,3,5`
-- All rows: `all`
+Many commands accept a `<row>` or `<idx|sample|all>` argument. Resolution order:
+1. `all` keyword → all rows/groups
+2. Try as **integer index** first (row index or stitch group index)
+3. Fall back to **run number** or **sample name** match
+
+If a sample name is a bare integer (e.g., `"3"`), it will be interpreted as an index.
+Use `--sample 3` to force sample-name matching where available (`/set --sample`,
+`/remove --sample`, `/stitch removerow --sample`).
+
+Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, `1,3,5`), or `all`.
 
 ### Sample Name Matching
 

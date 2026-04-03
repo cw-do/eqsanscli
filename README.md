@@ -283,6 +283,13 @@ Format examples: `4m10a`, `4m2.5a`, `2.5m2.5a`, `8m12a30hz`
 
 The same ID is used for table display, commands, and output filenames (e.g., `porsil_4m10a_Iq.dat`).
 
+### Index vs Name Resolution
+
+Commands that accept `<row>` or `<idx|sample|all>` (e.g., `/set`, `/reduce`, `/stitch set`)
+try **index first**, then fall back to sample/run name. If a sample name happens to be a
+bare integer (e.g., `"3"`), it will be interpreted as an index. Use `--sample 3` to force
+sample-name matching where available (`/set --sample`, `/remove --sample`).
+
 ### Run Matching
 
 `/matchruns` groups runs by configuration, then matches by sample name:
