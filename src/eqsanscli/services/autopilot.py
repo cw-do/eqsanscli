@@ -651,10 +651,14 @@ def run_autopilot_sync(
         write("[bold]Step 6/13:[/bold] Reduce porsil standard — [dim]Skipped[/dim]")
         write("    No porsil (porasil) standard runs found in this IPTS.")
         write("    Porsil is used as an absolute intensity calibration standard.")
-        write("    Without it, absolute scale factors cannot be determined from this data.")
         write("[bold]Step 7/13:[/bold] Calibrate absolute scale — [dim]Skipped (no porsil)[/dim]")
         write("[bold]Step 8/13:[/bold] Apply scale factors — [dim]Skipped (no porsil)[/dim]")
-        write("    Reduction will proceed with standardAbsoluteScale = 1.0 (uncalibrated).\n")
+        # Report the standardabsolutescale that will actually be used (from preset)
+        write("    Reduction will use standardAbsoluteScale from applied preset(s):")
+        for cfg in table.configurations:
+            scale = state.configurations.get(cfg, {}).get("standardabsolutescale", "not set")
+            write(f"      {cfg}: standardabsolutescale = {scale}")
+        write("    [dim]To calibrate, add a porsil sample and re-run autopilot, or use /calibrate manually.[/dim]\n")
 
     # === Step 9: Reduce all non-porsil ===
     non_porsil = [row for row in table.rows if row.sample_name.lower() != "porsil"]
