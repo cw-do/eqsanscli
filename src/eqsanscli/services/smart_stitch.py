@@ -327,14 +327,14 @@ class ConfigurationSelector:
         Returns:
             (selected_configs, quality_metrics, removed_configs_with_reasons)
         """
-        if len(configs) <= 2:
-            # Need at least 3 configs to detect redundancy
-            return configs, [], []
-
         # Sort by Q range (lowest Q first)
         sorted_order = sorted(range(len(configs)), key=lambda i: configs[i].q_range[0])
         sorted_configs = [configs[i] for i in sorted_order]
         sorted_profiles = [profiles[i] for i in sorted_order]
+
+        if len(sorted_configs) <= 2:
+            # Need at least 3 configs to detect redundancy, but still return sorted
+            return sorted_configs, [], []
 
         selected = []
         removed = []
