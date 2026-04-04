@@ -41,11 +41,9 @@ python -m eqsanscli
 /set config 2.5m2.5a standardabsolutescale 1.0
 /reduce --sample porsil                  # Reduce only porsil rows
 
-# Calibrate each config against the reduced porsil
-/calibrate porsil_4m10a_Iq.dat           # Prints scale factor + ready-to-use /set command
-/set config 4m10a standardabsolutescale 0.227588
-/calibrate porsil_2.5m2.5a_Iq.dat
-/set config 2.5m2.5a standardabsolutescale 0.191234
+# Calibrate each config and auto-apply the scale factor
+/calibrate porsil_4m10a_Iq.dat --applynow
+/calibrate porsil_2.5m2.5a_Iq.dat --applynow
 
 # Now reduce the actual samples with calibrated scales
 /reduce all                              # Re-reduces everything (porsil "modified" auto-resets)
@@ -152,6 +150,7 @@ Use `--force` to re-reduce all rows regardless of status.
 | Command | Description |
 |---------|-------------|
 | `/calibrate <porsil_file>` | Calculate absolute scale from porsil data (default Q range: 0.01–0.03) |
+| `/calibrate <file> --applynow` | Calculate AND auto-apply scale to matching config in working table |
 | `/calibrate <file> --ref NG3\|NG7` | Choose reference standard |
 | `/calibrate <file> --qmin 0.01 --qmax 0.03` | Set Q range (defaults shown) |
 | `/calibrate --list-refs` | List available reference standards |

@@ -178,12 +178,14 @@ before reducing the real samples:
 /set config 2.5m2.5a standardabsolutescale 1.0
 /reduce --sample porsil
 
-# Calibrate each config
-/calibrate porsil_4m10a_Iq.dat          # Prints scale factor + /set command
-/set config 4m10a standardabsolutescale <value from output>
-/calibrate porsil_2.5m2.5a_Iq.dat
-/set config 2.5m2.5a standardabsolutescale <value from output>
+# Calibrate AND auto-apply scale factors in one step
+/calibrate porsil_4m10a_Iq.dat --applynow
+/calibrate porsil_2.5m2.5a_Iq.dat --applynow
 ```
+
+`--applynow` parses the config ID from the filename (e.g., `porsil_4m10a_Iq.dat` → `4m10a`),
+applies the scale factor to that config, and marks affected rows as "modified" so they'll
+be re-reduced.
 
 If NO porsil is in the working table, skip this step — the preset's
 `standardabsolutescale` will be used as the fallback.
