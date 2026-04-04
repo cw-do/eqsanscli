@@ -13,20 +13,59 @@ python -m eqsanscli
 
 ## Typical Workflow
 
+### Minimal (using auto-match)
+
 ```
 /load ipts 35884                         # Fetch catalog from ONCat
-/show catalog                            # View loaded catalog
 /matchruns                               # Auto-match trans/bkg/empty runs
 /show table                              # Review matched runs
+/apply preset auto                       # Auto-match closest preset to each config
 /set outputdir /SNS/EQSANS/IPTS-35884/shared/output/
-/apply preset conf_4m_10a_60hz 4m10a     # Apply preset to config
-/set config 4m10a standardabsolutescale 0.14
 /reduce all                              # Run reduction
-/export script reduce_35884.py           # Or export as standalone script
 /list iq                                 # List reduced files
-/plot *_4m10a_Iq.dat --save plot.png     # Plot results
+/plot *_Iq.dat --save plot.png           # Plot results
 /share *.png                             # Share via here.now (24h link)
 /save session myexperiment               # Save for later
+```
+
+### With porsil calibration (manual, like autopilot)
+
+```
+/load ipts 35884
+/matchruns
+/apply preset auto
+/set outputdir /SNS/EQSANS/IPTS-35884/shared/output/
+
+# Reduce porsil first with scale=1.0
+/set config 4m10a standardabsolutescale 1.0
+/set config 2.5m2.5a standardabsolutescale 1.0
+/reduce --sample porsil                  # Reduce only porsil rows
+
+# Calibrate each config against the reduced porsil
+/calibrate porsil_4m10a_Iq.dat           # Prints scale factor + ready-to-use /set command
+/set config 4m10a standardabsolutescale 0.227588
+/calibrate porsil_2.5m2.5a_Iq.dat
+/set config 2.5m2.5a standardabsolutescale 0.191234
+
+# Now reduce the actual samples with calibrated scales
+/reduce all                              # Re-reduces everything (porsil "modified" auto-resets)
+
+# Stitch and plot
+/stitch smart
+/stitch run
+/plot merged_*.txt --save stitched.png
+/share stitched.png
+```
+
+### Manual override (specific preset, custom scale)
+
+```
+/load ipts 35884
+/matchruns
+/apply preset conf_4m_10a_60hz 4m10a     # Apply specific preset
+/set config 4m10a standardabsolutescale 0.14
+/set outputdir /SNS/EQSANS/IPTS-35884/shared/output/
+/reduce all
 ```
 
 ## Autopilot (Full Pipeline)
@@ -165,6 +204,7 @@ Place JSON files in the `preset_configs/` folder. These are full `eqsans_reducti
 | Command | Description |
 |---------|-------------|
 | `/reduce <row>` | Run data reduction. `<row>` = index, run number, range, or `all` |
+| `/reduce --sample <name>` | Reduce only rows matching sample name (exact; `*` for wildcard) |
 | `/export script [filename]` | Generate standalone .py reduction script |
 
 ### Data & Plotting

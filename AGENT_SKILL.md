@@ -167,11 +167,36 @@ If any config shows "no matching preset found", tell the user — they may need 
 /set outputdir /SNS/EQSANS/IPTS-<number>/shared/output/
 ```
 
+#### Step 4b: Calibrate with Porsil (if porsil is available)
+
+If the working table contains porsil samples, calibrate absolute scale
+before reducing the real samples:
+
+```
+# Reduce porsil with scale=1.0 first
+/set config 4m10a standardabsolutescale 1.0
+/set config 2.5m2.5a standardabsolutescale 1.0
+/reduce --sample porsil
+
+# Calibrate each config
+/calibrate porsil_4m10a_Iq.dat          # Prints scale factor + /set command
+/set config 4m10a standardabsolutescale <value from output>
+/calibrate porsil_2.5m2.5a_Iq.dat
+/set config 2.5m2.5a standardabsolutescale <value from output>
+```
+
+If NO porsil is in the working table, skip this step — the preset's
+`standardabsolutescale` will be used as the fallback.
+
 #### Step 5: Reduce
 
 ```
 /reduce all
 ```
+
+This re-reduces porsil too (status auto-reset to "modified" after scale changes).
+If you want to skip already-reduced porsil, use `/reduce --sample <name>` for specific
+non-porsil samples, or just accept the small overhead.
 
 **Check `data.results`** — each entry has `status: "done"` or `status: "error"`.
 If any failed, report the error messages to the user.
@@ -277,6 +302,7 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 | Command | Purpose |
 |---------|---------|
 | `/reduce <row>` | Reduce selected rows |
+| `/reduce --sample <name>` | Reduce only rows matching sample name (use `*` for wildcard) |
 | `/autopilot <ipts> [options]` | Full automated pipeline (see Quick Path above for all options) |
 | `/export script [file]` | Export standalone Python script |
 

@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
+from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.reduction_service import parse_row_selection, reduce_row
 
 if TYPE_CHECKING:
@@ -38,18 +39,28 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(
             success=False,
             message="Usage: /reduce <row>\n"
+            "       /reduce --sample <name>\n"
             "  <row> = index, run number, range, or all\n"
-            "  Examples: /reduce 1  |  /reduce 172815  |  /reduce 1-4  |  /reduce 1,3,5  |  /reduce all",
+            "  Examples: /reduce 1  |  /reduce 172815  |  /reduce 1-4  |  /reduce all\n"
+            "            /reduce --sample porsil  |  /reduce --sample *3b*",
         )
 
     table = state.current_table
     if not table.rows:
         return CommandResult(success=False, message="Working table is empty. Use /matchruns first.")
 
-    selection = args[0]
-    indices = parse_row_selection(selection, table)
-    if not indices:
-        return CommandResult(success=False, message=f"No valid rows for selection: {selection}")
+    if args[0] == "--sample":
+        if len(args) < 2:
+            return CommandResult(success=False, message="Usage: /reduce --sample <name>")
+        pattern = args[1]
+        indices = [r.index for r in table.rows if sample_matches(pattern, r.sample_name)]
+        if not indices:
+            return CommandResult(success=False, message=f"No rows with sample name matching: {pattern}")
+    else:
+        selection = args[0]
+        indices = parse_row_selection(selection, table)
+        if not indices:
+            return CommandResult(success=False, message=f"No valid rows for selection: {selection}")
 
     return CommandResult(
         success=True,
