@@ -168,12 +168,13 @@ async def _handle_smart(args: list[str], state: SessionState) -> CommandResult:
             output_file = os.path.join(output_dir, f"merged_{sg['sample_name']}_{configs_str}_Iq.txt")
 
         # Create StitchGroup with selected configs
+        from eqsanscli.services.merge_service import _default_target_index
         group = StitchGroup(
             sample_name=sg["sample_name"],
             files=sg["files"],
             configs=sg["configs"],
             overlaps=[round(v, 6) for pair in sg["overlaps"] for v in pair],
-            target_profile_index=0,
+            target_profile_index=_default_target_index(sg["configs"]),
             output_file=output_file,
             status="ready",
         )

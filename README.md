@@ -257,6 +257,24 @@ Plot flags:
 
 **Auto-overlap algorithm:** `/stitch set all overlap auto` computes a centered overlap window for each adjacent pair. The window starts with 6 pooled Q values centered in the intersection, then widens symmetrically until both profiles have at least 2 data points inside. This ensures reliable scaling regardless of data sparsity or which config is used as the normalization target.
 
+**Config ordering (low-Q → high-Q):** Stitch groups automatically sort configs from lowest-Q to highest-Q:
+- Larger detector distance first (8m → 4m → 2.5m → 1.3m)
+- For same distance, longer wavelength first (4m10a → 4m2.5a)
+
+The stitch algorithm assumes this ordering. If you manually reorder with `/stitch reorder`, you must preserve low-Q → high-Q.
+
+**Default stitch target (reference config):** `/stitch build` and `/stitch smart` choose the target in this priority order:
+1. `4m10a` (if present)
+2. Any `8m*` config
+3. `4m2.5a`
+4. `2.5m2.5a`
+5. First config in the group (lowest-Q)
+
+Override with `/stitch set <idx|sample|all> target <config_id>`.
+
+**Merged output filename:** `merged_{sample}_{lowq_config}_..._{highq_config}_Iq.txt`
+The config names appear in the filename in low-Q → high-Q order (e.g., `merged_porsil_8m12a_4m10a_2.5m2.5a_Iq.txt`).
+
 ### Session
 
 | Command | Description |

@@ -317,6 +317,35 @@ def _scan_output_dir(output_dir: str) -> dict[str, list[tuple[str, str, float, f
     return sample_files
 
 
+def _default_target_index(configs: list[str]) -> int:
+    """Pick the default stitch target index from a list of configs (low-Q first order).
+
+    Priority:
+      1. 4m10a (standard low-Q reference)
+      2. any 8m config (next-longest distance)
+      3. 4m2.5a
+      4. 2.5m2.5a
+      5. 0 (first config — which is already the lowest-Q by sort order)
+    """
+    from eqsanscli.models.config_id import normalize_config_id
+
+    priorities = ["4m10a", "8m12a", "4m2.5a", "2.5m2.5a"]
+    norm_configs = [normalize_config_id(c) for c in configs]
+
+    # Exact priority match first
+    for pref in priorities:
+        norm_pref = normalize_config_id(pref)
+        if norm_pref in norm_configs:
+            return norm_configs.index(norm_pref)
+
+    # Special case: any 8m config (8m12a, 8m6a, etc.)
+    for i, nc in enumerate(norm_configs):
+        if nc.startswith("8m"):
+            return i
+
+    return 0
+
+
 def _config_sort_key(entry: tuple[str, str, float, float]) -> tuple[float, float, float]:
     """Return a sort key for ordering configs from lower-Q to higher-Q.
 
@@ -395,13 +424,14 @@ def _build_groups(
         configs = [c for _, c, _, _ in entries]
         overlaps = _auto_suggest_overlaps(files)
 
+        configs_str = "_".join(configs)
         groups.append(StitchGroup(
             sample_name=sample_name,
             files=files,
             configs=configs,
             overlaps=overlaps,
-            target_profile_index=0,
-            output_file=os.path.join(output_dir, f"merged_{sample_name}_Iq.txt"),
+            target_profile_index=_default_target_index(configs),
+            output_file=os.path.join(output_dir, f"merged_{sample_name}_{configs_str}_Iq.txt"),
         ))
 
     return groups

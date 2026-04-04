@@ -756,8 +756,9 @@ def run_autopilot_sync(
                 if reference_config and reference_config in group.configs:
                     group.target_profile_index = group.configs.index(reference_config)
                 else:
-                    # Use first config as target
-                    group.target_profile_index = 0
+                    # Default priority: 4m10a > 8m* > 4m2.5a > 2.5m2.5a > first
+                    from eqsanscli.services.merge_service import _default_target_index
+                    group.target_profile_index = _default_target_index(group.configs)
 
                 state.stitch_groups.append(group)
 

@@ -214,9 +214,22 @@ If any failed, report the error messages to the user.
 
 Or use `/stitch smart` for automatic quality analysis (recommended).
 
+**Config ordering:** Stitch groups are auto-sorted low-Q → high-Q (larger distance first,
+longer wavelength first within same distance). Example order: `8m12a → 4m10a → 2.5m2.5a`.
+The stitch algorithm requires this ordering.
+
+**Default target priority** (when group is built):
+1. `4m10a` if present (standard low-Q reference)
+2. Any `8m*` config
+3. `4m2.5a`
+4. `2.5m2.5a`
+5. First config (lowest-Q)
+
 **The target can be any config** — the auto-overlap algorithm ensures sufficient
-data points in the overlap window regardless of which config is the reference.
-`/stitch set` accepts index (`0`, `1`), sample name, or `all`.
+data points regardless. Override with `/stitch set <idx|sample|all> target <config_id>`.
+
+**Merged filename:** `merged_{sample}_{config1}_..._{configN}_Iq.txt` with configs
+in low-Q → high-Q order (e.g., `merged_porsil_8m12a_4m10a_2.5m2.5a_Iq.txt`).
 
 #### Step 7: Plot
 
