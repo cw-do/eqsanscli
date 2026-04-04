@@ -170,7 +170,11 @@ def _run_reduction_sync(
             avg = sum(elapsed_times) / len(elapsed_times)
             eta_str = f" ETA ~{_format_time(avg * remaining)}"
 
-        bkg_info = f" bkg={row.background_scatt}" if row.background_scatt else " no_bkg"
+        if row.background_scatt:
+            bkg_title = state.run_title(row.background_scatt)
+            bkg_info = f" bkg={row.background_scatt}" + (f" ({bkg_title})" if bkg_title else "")
+        else:
+            bkg_info = " no_bkg"
         _progress(f"[{i+1}/{total}] reducing {row.sample_name} ({row.configuration}){bkg_info} {remaining} left{eta_str}")
 
         row.status = "reducing"

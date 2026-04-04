@@ -317,7 +317,11 @@ class EQSANSApp(App):
 
                 output_name = f"{row.sample_name}_{row.configuration}"
                 row.status = "reducing"
-                bkg_info = f"  bkg={row.background_scatt}" if row.background_scatt else "  [yellow]no bkg[/yellow]"
+                if row.background_scatt:
+                    bkg_title = state.run_title(row.background_scatt)
+                    bkg_info = f"  bkg={row.background_scatt}" + (f" [dim]({bkg_title})[/dim]" if bkg_title else "")
+                else:
+                    bkg_info = "  [yellow]no bkg[/yellow]"
                 write(
                     f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
                     f"[bold]{row.sample_name}[/bold] ({row.configuration}){bkg_info} "

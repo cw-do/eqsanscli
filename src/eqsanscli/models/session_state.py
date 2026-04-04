@@ -87,6 +87,28 @@ class SessionState:
         else:
             self.catalog_data = df.to_dict("records")
 
+    def run_title(self, run_number: str) -> str:
+        """Look up the title for a run number from the catalog.
+
+        Accepts comma-separated run numbers (e.g. "172804, 172805") — uses the first.
+        Returns empty string if not found.
+        """
+        if not run_number or self.catalog_data is None:
+            return ""
+        # Handle comma-separated multi-run
+        first = run_number.split(",")[0].strip()
+        try:
+            first_int = int(first)
+        except ValueError:
+            return ""
+        for record in self.catalog_data:
+            try:
+                if int(record.get("run_number", 0)) == first_int:
+                    return str(record.get("title", ""))
+            except (ValueError, TypeError):
+                continue
+        return ""
+
     @property
     def current_table(self) -> WorkingTable:
         """Get the currently active working table."""
