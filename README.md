@@ -257,6 +257,14 @@ Plot flags:
 
 **Auto-overlap algorithm:** `/stitch set all overlap auto` computes a centered overlap window for each adjacent pair. The window starts with 6 pooled Q values centered in the intersection, then widens symmetrically until both profiles have at least 2 data points inside. This ensures reliable scaling regardless of data sparsity or which config is used as the normalization target.
 
+**Preset overlaps:** `/stitch smart` looks up predefined overlap Q ranges for known config pairs in `preset_configs/stitch_overlaps.json` BEFORE falling back to the auto-overlap algorithm. Add your own entries there for configs you use regularly. Current presets include:
+- `4m10a` ↔ `2.5m2.5a`: `[0.05, 0.06]`
+- `4m10a` ↔ `4m2.5a`: `[0.04, 0.045]`
+- `8m12a` ↔ `4m10a`: `[0.025, 0.028]`
+- `8m12a` ↔ `2.5m2.5a`: `[0.04, 0.05]`
+
+When displayed in `/stitch smart` output, pairs using preset overlaps are marked `(preset)`, others `(auto)`.
+
 **Config ordering (low-Q → high-Q):** Stitch groups automatically sort configs from lowest-Q to highest-Q:
 - Larger detector distance first (8m → 4m → 2.5m → 1.3m)
 - For same distance, longer wavelength first (4m10a → 4m2.5a)

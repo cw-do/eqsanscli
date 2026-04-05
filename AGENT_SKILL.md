@@ -214,6 +214,11 @@ If any failed, report the error messages to the user.
 
 Or use `/stitch smart` for automatic quality analysis (recommended).
 
+**Preset overlaps:** `/stitch smart` uses predefined overlap ranges for known config
+pairs (e.g., `4m10a↔2.5m2.5a` → `[0.05, 0.06]`) from `preset_configs/stitch_overlaps.json`,
+falling back to the auto-overlap algorithm for unknown pairs. The smart output shows
+`(preset)` or `(auto)` next to each overlap pair.
+
 **Config ordering:** Stitch groups are auto-sorted low-Q → high-Q (larger distance first,
 longer wavelength first within same distance). Example order: `8m12a → 4m10a → 2.5m2.5a`.
 The stitch algorithm requires this ordering.

@@ -199,13 +199,22 @@ async def _handle_smart(args: list[str], state: SessionState) -> CommandResult:
                 f" [dim](all {len(sg['configs'])} configs kept)[/dim]"
             )
 
-        # Show quality metrics
+        # Show quality metrics and actual overlap used
         quality = sg.get("quality_metrics", [])
-        for q in quality:
+        overlap_sources = sg.get("overlap_sources", [])
+        overlaps_used = sg.get("overlaps", [])
+        for i, q in enumerate(quality):
             icon = "[green]✓[/green]" if q.get("is_good") else "[yellow]~[/yellow]"
+            src = overlap_sources[i] if i < len(overlap_sources) else ""
+            src_tag = " [cyan](preset)[/cyan]" if src == "preset" else " [dim](auto)[/dim]"
+            if i < len(overlaps_used):
+                used_start, used_end = overlaps_used[i]
+                overlap_str = f"Q=[{used_start:.4f}, {used_end:.4f}]"
+            else:
+                overlap_str = f"Q=[{q['start_q']:.4f}, {q['end_q']:.4f}]"
             messages.append(
-                f"      {icon} Q=[{q['start_q']:.4f}, {q['end_q']:.4f}]: "
-                f"{q['n_points']} pts, score={q['score']:.1f}"
+                f"      {icon} {overlap_str}{src_tag}  "
+                f"[dim](intersection: {q['n_points']} pts, score={q['score']:.1f})[/dim]"
             )
 
     msg = (

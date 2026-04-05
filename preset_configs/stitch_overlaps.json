@@ -1,0 +1,9 @@
+{
+  "description": "Predefined overlap Q ranges for known EQSANS configuration pairs. Used by /stitch smart. Configs listed in low-Q -> high-Q order.",
+  "overlaps": [
+    {"configs": ["4m10a", "2.5m2.5a"], "overlap": [0.05, 0.06], "note": "standard 4m10a + 2.5m2.5a pair"},
+    {"configs": ["4m10a", "4m2.5a"], "overlap": [0.04, 0.045], "note": "same detector distance, wavelength change"},
+    {"configs": ["8m12a", "4m10a"], "overlap": [0.025, 0.028], "note": "8m + 4m low-Q pair"},
+    {"configs": ["8m12a", "2.5m2.5a"], "overlap": [0.04, 0.05], "note": "8m12a direct to 2.5m2.5a"}
+  ]
+}

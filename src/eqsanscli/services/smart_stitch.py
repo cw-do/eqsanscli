@@ -23,6 +23,55 @@ if TYPE_CHECKING:
 from eqsanscli.services.plotting_service import load_iq_native
 
 
+_PRESET_OVERLAP_DIRS = [
+    Path(__file__).resolve().parent.parent.parent.parent / "preset_configs",
+    Path.cwd() / "preset_configs",
+]
+
+
+def _load_preset_overlaps() -> dict[tuple[str, str], tuple[float, float]]:
+    """Load predefined overlap ranges for known config pairs.
+
+    Returns a dict keyed by (normalized_config_low, normalized_config_high) tuple.
+    Returns empty dict if the file is not found or malformed.
+    """
+    from eqsanscli.models.config_id import normalize_config_id
+
+    for d in _PRESET_OVERLAP_DIRS:
+        path = d / "stitch_overlaps.json"
+        if not path.is_file():
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            result: dict[tuple[str, str], tuple[float, float]] = {}
+            for entry in data.get("overlaps", []):
+                configs = entry.get("configs", [])
+                overlap = entry.get("overlap", [])
+                if len(configs) == 2 and len(overlap) == 2:
+                    key = (normalize_config_id(configs[0]), normalize_config_id(configs[1]))
+                    result[key] = (float(overlap[0]), float(overlap[1]))
+            return result
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+    return {}
+
+
+def _lookup_preset_overlap(
+    config_a: str, config_b: str,
+    preset_overlaps: dict[tuple[str, str], tuple[float, float]],
+) -> tuple[float, float] | None:
+    """Look up predefined overlap for a pair of configs. Tries both orders."""
+    from eqsanscli.models.config_id import normalize_config_id
+    norm_a = normalize_config_id(config_a)
+    norm_b = normalize_config_id(config_b)
+    if (norm_a, norm_b) in preset_overlaps:
+        return preset_overlaps[(norm_a, norm_b)]
+    if (norm_b, norm_a) in preset_overlaps:
+        return preset_overlaps[(norm_b, norm_a)]
+    return None
+
+
 def centered_overlap(
     q_a: np.ndarray, q_b: np.ndarray, n_points: int = 6, min_per_profile: int = 2,
 ) -> tuple[float, float]:
@@ -125,6 +174,7 @@ class StitchPlan:
     removed_configs: list[tuple[StitchConfig, str]]  # (config, reason)
     llm_analysis: str = ""  # LLM's reasoning
     confidence: float = 0.0  # 0-1 confidence in the plan
+    overlap_sources: list[str] = field(default_factory=list)  # "preset" or "auto" per pair
 
 
 class OverlapAnalyzer:
@@ -632,18 +682,30 @@ class SmartStitchService:
             configs, profiles
         )
 
-        # Build overlaps for selected configs using centered n-point windows
+        # Build overlaps for selected configs
+        # Priority: 1) predefined preset overlap for known config pair
+        #           2) centered n-point auto-overlap algorithm
         n_overlap_points = 6
+        preset_overlaps = _load_preset_overlaps()
         overlaps = []
+        overlap_sources: list[str] = []  # "preset" or "auto" for each pair
         selected_profiles = []
         for cfg in selected:
             idx = next(j for j, c in enumerate(configs) if c.config_id == cfg.config_id)
             selected_profiles.append(profiles[idx])
 
         for i in range(len(selected) - 1):
-            q_a = selected_profiles[i].mod_q[np.isfinite(selected_profiles[i].intensity)]
-            q_b = selected_profiles[i + 1].mod_q[np.isfinite(selected_profiles[i + 1].intensity)]
-            start_q, end_q = centered_overlap(q_a, q_b, n_overlap_points)
+            cfg_a = selected[i].config_id
+            cfg_b = selected[i + 1].config_id
+            preset = _lookup_preset_overlap(cfg_a, cfg_b, preset_overlaps)
+            if preset is not None:
+                start_q, end_q = preset
+                overlap_sources.append("preset")
+            else:
+                q_a = selected_profiles[i].mod_q[np.isfinite(selected_profiles[i].intensity)]
+                q_b = selected_profiles[i + 1].mod_q[np.isfinite(selected_profiles[i + 1].intensity)]
+                start_q, end_q = centered_overlap(q_a, q_b, n_overlap_points)
+                overlap_sources.append("auto")
             overlaps.append((round(start_q, 6), round(end_q, 6)))
 
         # Determine target (use first selected as default)
@@ -657,6 +719,7 @@ class SmartStitchService:
             target_config=target,
             quality_metrics=qualities,
             removed_configs=removed,
+            overlap_sources=overlap_sources,
         )
 
         # Consult LLM if requested
@@ -773,6 +836,7 @@ def build_smart_stitch_table(
                 for cfg, reason in plan.removed_configs
             ],
             "overlaps": plan.overlaps,
+            "overlap_sources": plan.overlap_sources,
             "target_config": plan.target_config.config_id,
             "status": "ready",
             "quality_metrics": [
