@@ -61,7 +61,12 @@ def _lookup_preset_overlap(
     config_a: str, config_b: str,
     preset_overlaps: dict[tuple[str, str], tuple[float, float]],
 ) -> tuple[float, float] | None:
-    """Look up predefined overlap for a pair of configs. Tries both orders."""
+    """Look up predefined overlap for a pair of configs. Tries both orders.
+
+    Also matches frame-skipping pairs by substring: if config_a contains
+    'frame0' and config_b contains 'frame1' (or any frame_skipping variant),
+    looks up a ('frame0', 'frame1') preset entry.
+    """
     from eqsanscli.models.config_id import normalize_config_id
     norm_a = normalize_config_id(config_a)
     norm_b = normalize_config_id(config_b)
@@ -69,6 +74,18 @@ def _lookup_preset_overlap(
         return preset_overlaps[(norm_a, norm_b)]
     if (norm_b, norm_a) in preset_overlaps:
         return preset_overlaps[(norm_b, norm_a)]
+
+    # Frame-skipping: match by substring in config IDs
+    def _has_frame(s: str, frame_num: str) -> bool:
+        return f"frame{frame_num}" in s or f"frame_{frame_num}" in s
+
+    for (key_a, key_b), overlap in preset_overlaps.items():
+        # key_a/key_b might be e.g. 'frame0'/'frame1' (generic frame preset)
+        if _has_frame(key_a, "0") and _has_frame(key_b, "1"):
+            if _has_frame(norm_a, "0") and _has_frame(norm_b, "1"):
+                return overlap
+            if _has_frame(norm_b, "0") and _has_frame(norm_a, "1"):
+                return overlap
     return None
 
 
@@ -780,7 +797,10 @@ def build_smart_stitch_table(
     service = SmartStitchService(llm_handler)
     groups = []
 
-    for sample_name, entries in sorted(sample_files.items()):
+    for group_key, entries in sorted(sample_files.items()):
+        # Unwrap composite key for 30Hz frame-skipping groups
+        # ("mysample__30hz__4m10a30hz" → "mysample")
+        sample_name = group_key.split("__30hz__")[0] if "__30hz__" in group_key else group_key
         if len(entries) < 2:
             groups.append({
                 "sample_name": sample_name,

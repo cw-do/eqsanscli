@@ -262,8 +262,11 @@ Plot flags:
 - `4m10a` ↔ `4m2.5a`: `[0.04, 0.045]`
 - `8m12a` ↔ `4m10a`: `[0.025, 0.028]`
 - `8m12a` ↔ `2.5m2.5a`: `[0.04, 0.05]`
+- `frame0` ↔ `frame1` (30Hz frame-skipping): `[0.05, 0.06]`
 
 When displayed in `/stitch smart` output, pairs using preset overlaps are marked `(preset)`, others `(auto)`.
+
+**30Hz frame-skipping support:** Both `/stitch build` and `/stitch smart` detect rows where `frequency=30` and split them into `frame_0` (low-Q, ~4m 9.5Å) and `frame_1` (high-Q, ~4m 2.5Å) entries. The frame files are expected to be named `{sample}_{config}_frame_0_Iq.dat` and `{sample}_{config}_frame_1_Iq.dat`. 30Hz groups are kept separate from 60Hz configs for the same sample.
 
 **Config ordering (low-Q → high-Q):** Stitch groups automatically sort configs from lowest-Q to highest-Q:
 - Larger detector distance first (8m → 4m → 2.5m → 1.3m)

@@ -219,6 +219,12 @@ pairs (e.g., `4m10a↔2.5m2.5a` → `[0.05, 0.06]`) from `preset_configs/stitch_
 falling back to the auto-overlap algorithm for unknown pairs. The smart output shows
 `(preset)` or `(auto)` next to each overlap pair.
 
+**30Hz frame-skipping:** Rows with `frequency=30` produce two output files per run:
+`{sample}_{config}_frame_0_Iq.dat` (low-Q) and `{sample}_{config}_frame_1_Iq.dat`
+(high-Q). Both `/stitch build` and `/stitch smart` auto-detect these and treat them
+as separate stitch entries. The `frame0↔frame1` preset overlap (`[0.05, 0.06]`) is
+auto-applied.
+
 **Config ordering:** Stitch groups are auto-sorted low-Q → high-Q (larger distance first,
 longer wavelength first within same distance). Example order: `8m12a → 4m10a → 2.5m2.5a`.
 The stitch algorithm requires this ordering.

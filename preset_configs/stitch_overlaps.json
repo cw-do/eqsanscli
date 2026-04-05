@@ -4,6 +4,7 @@
     {"configs": ["4m10a", "2.5m2.5a"], "overlap": [0.05, 0.06], "note": "standard 4m10a + 2.5m2.5a pair"},
     {"configs": ["4m10a", "4m2.5a"], "overlap": [0.04, 0.045], "note": "same detector distance, wavelength change"},
     {"configs": ["8m12a", "4m10a"], "overlap": [0.025, 0.028], "note": "8m + 4m low-Q pair"},
-    {"configs": ["8m12a", "2.5m2.5a"], "overlap": [0.04, 0.05], "note": "8m12a direct to 2.5m2.5a"}
+    {"configs": ["8m12a", "2.5m2.5a"], "overlap": [0.04, 0.05], "note": "8m12a direct to 2.5m2.5a"},
+    {"configs": ["frame0", "frame1"], "overlap": [0.05, 0.06], "note": "30Hz frame-skipping: frame_0 (low-Q, ~4m 9.5A) and frame_1 (high-Q, ~4m 2.5A). Matches any config containing 'frame0'/'frame1' or 'frame_0'/'frame_1'."}
   ]
 }
