@@ -27,7 +27,7 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             message="No catalog loaded. Use /show <ipts> first.",
         )
 
-    table = match_runs(catalog, ipts=state.ipts)
+    table, match_warnings = match_runs(catalog, ipts=state.ipts)
 
     if not table.rows:
         return CommandResult(
@@ -103,6 +103,9 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
 
         summary += "\n" + "\n".join(lines)
         summary += "\n\nTip: Use /set --sample <name> <field> <value> to fix unmatched rows in bulk."
+
+    if match_warnings:
+        summary += "\n\n" + "\n".join(f"⚠ {w}" for w in match_warnings)
 
     rows = build_working_table_display(state)
 

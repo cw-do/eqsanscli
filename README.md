@@ -16,8 +16,10 @@ python -m eqsanscli
 ### Minimal (using auto-match)
 
 ```
-/load ipts 35884                         # Fetch catalog from ONCat
-/matchruns                               # Auto-match trans/bkg/empty runs
+/load ipts 35884                         # Fetch catalog from ONCat (adds run_class)
+/show catalog                            # Review catalog with Class column
+/reclass 172804-172810 scatt             # Fix any misclassified runs (optional)
+/matchruns                               # Auto-match trans/bkg/empty using run_class
 /show table                              # Review matched runs
 /apply preset auto                       # Auto-match closest preset to each config
 /set outputdir /SNS/EQSANS/IPTS-35884/shared/output/
@@ -71,6 +73,7 @@ python -m eqsanscli
 | Command | Description |
 |---------|-------------|
 | `/autopilot <ipts>` | Full automated reduction pipeline |
+| `/autopilot current` | Use current IPTS/catalog from session (preserves `/reclass` overrides) |
 | `/autopilot <ipts> --samples <name1,name2>` | Only reduce specific samples |
 | `/autopilot <ipts> --exclude <name1,name2>` | Reduce all except named samples |
 | `/autopilot <ipts> --thickness <cm>` | Set sample thickness for all rows |
@@ -92,6 +95,8 @@ Use `--force` to re-reduce all rows regardless of status.
 **Examples:**
 ```
 /autopilot 35884                                         # Reduce everything
+/autopilot current                                       # Use current session (after /reclass etc.)
+/autopilot current --bkg emptyticell --exclude Y5        # Current session + options
 /autopilot 35884 --samples Bi1,Bi2                       # Only Bi1 and Bi2 (+ porsil)
 /autopilot 35884 --exclude Y5,Y6                         # Everything except Y5 and Y6
 /autopilot 35884 --bkg emptyticell                       # Use emptyticell as background
@@ -109,7 +114,7 @@ Use `--force` to re-reduce all rows regardless of status.
 | Command | Description |
 |---------|-------------|
 | `/load ipts <number>` | Fetch catalog from ONCat |
-| `/show catalog` | Display loaded catalog |
+| `/show catalog` | Display loaded catalog (with Class column: S, T, BkgS, BkgT, EmpT) |
 | `/show ipts` | Show current IPTS number |
 | `/save catalog <file>` | Export catalog to CSV |
 | `/load catalog <file>` | Load catalog from CSV |
@@ -123,7 +128,9 @@ Use `--force` to re-reduce all rows regardless of status.
 |---------|-------------|
 | `/show table` | Show current working table |
 | `/show table --sample <name>` | Show only rows matching sample name (read-only filter) |
-| `/matchruns` | Auto-match transmission/background/empty runs |
+| `/reclass <runs> <class>` | Override run classification (scatt/trans/bkg/bkgtrans/empty/sample) |
+| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`) |
+| `/matchruns` | Auto-match transmission/background/empty runs using `run_class` |
 | `/assign bkg <sample>` | Reassign background sample for all rows (config-aware, sets bkg+bkgtrans) |
 | `/set <row> <field> <value>` | Set row field. `<row>` = index, run number, range (`1-5`, `1,3,5`), or `all` |
 | `/set <row> <field> none` | Clear a field |
@@ -155,15 +162,27 @@ Use `--force` to re-reduce all rows regardless of status.
 | `/calibrate <file> --qmin 0.01 --qmax 0.03` | Set Q range (defaults shown) |
 | `/calibrate --list-refs` | List available reference standards |
 
-### Share
+### Share & Email
 
 | Command | Description |
 |---------|-------------|
 | `/share <file\|pattern>` | Share files via here.now (anonymous, 24h link) |
 | `/share *.png` | Share all PNG files |
 | `/share *_4m10a_Iq.dat` | Share matching I(Q) files |
+| `/zipnsend <email>` | Zip `merged*.txt` from outputdir and email |
+| `/zipnsend <email> --pattern <glob>` | Zip custom file pattern and email |
+| `/zipnsend <email> --dir <path>` | Zip from specific directory |
+| `/zipnsend <email> --subject <text>` | Custom email subject |
 
-Files are uploaded to [here.now](https://here.now) using only Python stdlib (no external packages). Anonymous uploads expire in 24 hours. Max 50 MB total. Searches output directory first, then current directory.
+**Share:** Files are uploaded to [here.now](https://here.now) using only Python stdlib (no external packages). Anonymous uploads expire in 24 hours. Max 50 MB total. Searches output directory first, then current directory.
+
+**Zipnsend:** Zips matching files and emails using `mailx`/`mail`. Max 25 MB (suggests `/share` if larger). Default pattern is `merged*.txt` from the output directory.
+
+```
+/zipnsend ccd@ornl.gov                                  # merged files
+/zipnsend ccd@ornl.gov --pattern "*_Iq.dat"             # all Iq files
+/zipnsend ccd@ornl.gov --pattern "*.png" --subject "IPTS-38397 plots"
+```
 
 ### LLM
 
@@ -297,7 +316,7 @@ The config names appear in the filename in low-Q → high-Q order (e.g., `merged
 | `/help` | Show command reference |
 | `/quit` | Exit (auto-saves session) |
 
-**Auto-save:** Session is saved automatically after every command and on exit. On startup, if a previous session exists, you'll see a hint to type `/continue` to resume.
+**Auto-save:** Session is saved automatically after every command, after background jobs complete (`/reduce`, `/autopilot`), and on exit. On startup, if a previous session exists, you'll see a hint to type `/continue` to resume.
 
 ### Settings
 
@@ -338,6 +357,10 @@ The config names appear in the filename in low-Q → high-Q order (e.g., `merged
 | `Ctrl+L` | Clear output log |
 | `Escape` | Focus command input |
 
+**Status bars:**
+- **Header:** session name, IPTS, active table, row count, output directory, LLM token usage
+- **Footer:** LLM model, drtsans version (`drtsans`, `drtsans --dev`, `drtsans --qa`), keyboard shortcuts
+
 ## Key Concepts
 
 ### Configuration = (distance, wavelength, frequency)
@@ -360,11 +383,47 @@ sample-name matching where available (`/set --sample`, `/remove --sample`).
 
 ### Run Matching
 
-`/matchruns` groups runs by configuration, then matches by sample name:
-- **All** scattering runs appear in the table (including background and empty beam)
+**Run Classification (`run_class`):** When a catalog is loaded (`/load ipts`), each run is
+automatically classified based on its title prefix (S-, T-) and keywords (banjo, empty, etc.).
+The classification is stored as a `run_class` column in the catalog:
+
+| Class | Label | Description |
+|-------|-------|-------------|
+| `scattering` | S | Sample scattering |
+| `transmission` | T | Sample transmission |
+| `bkg_scatt` | BkgS | Background scattering (banjo, emptyticell, emptycell, ti-cell, bkg, etc.) |
+| `bkg_trans` | BkgT | Background transmission |
+| `empty_trans` | EmpT | Empty beam transmission (required for reduction) |
+| `empty_scatt` | EmpS | Empty beam scattering (rare) |
+
+**Classification keywords:**
+- **Empty beam:** standalone `empty`, `emp`, `emt`, or followed by `beam` (word boundary — won't match `emptyticell`)
+- **Background:** `bkg`, `banjo`, `background`, `emptycell`, `emptyticell`, `ti-cell`, `ticell`
+- Background keywords are checked **before** empty beam, so `emptyticell` → background, not empty beam
+
+If a run is mislabeled (e.g. title says `T-` but it's actually scattering), use `/reclass`:
+```
+/reclass 172804 scatt               # Fix single run
+/reclass 172804-172810 scatt        # Fix a range
+/reclass 172804,172806 trans        # Fix specific runs
+/reclass 172804-172810 sample       # Treat as normal sample (S-→scatt, T-→trans)
+/reclass --sample BkgG sample       # All BkgG runs: S-BkgG→scatt, T-BkgG→trans
+/reclass --sample Bkg* sample       # Wildcard matching
+/reclass --sample emptyticell bkg   # Force all emptyticell runs to background
+```
+
+The `sample` target is useful when a sample name contains a background keyword (e.g. `S-BkgG`).
+Instead of forcing all runs to scattering, it respects the S-/T- prefix in each title.
+
+The `run_class` persists across session save/load. After reclassing, run `/matchruns` to
+rebuild the working table.
+
+`/matchruns` reads `run_class` from the catalog, groups runs by configuration, then matches by sample name:
+- **All** scattering-type runs appear in the table (including bkg/empty scattering)
 - Background runs (banjo) get empty beam as their own background
-- Transmission matched for every scattering run by sample name
+- Transmission matched for every scattering run by sample name within the same config
 - Use `/assign bkg <sample>` to change which sample is used as background
+- **Warnings** are shown if multiple empty beams or multiple backgrounds are found in the same configuration — user should decide which to use
 
 **Transmission matching with temperature:** When run titles include temperature
 (e.g., "r1 4m 10A 110C" → sample name `r1_110C`), matching works in two tiers:

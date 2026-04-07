@@ -9,20 +9,23 @@ if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
 
 
+_USAGE = (
+    "Usage: /autopilot <ipts_number> [options]\n"
+    "  /autopilot 35884                              — Full automated reduction\n"
+    "  /autopilot current                            — Use current IPTS/catalog from session\n"
+    "  /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples\n"
+    "  /autopilot 35884 --exclude Y5                 — Reduce all except Y5\n"
+    "  /autopilot 35884 --thickness 0.2              — Set thickness to 0.2 cm\n"
+    "  /autopilot 35884 --bkg banjo                  — Use banjo as background\n"
+    "  /autopilot 35884 --config 8m12a               — Reduce only 8m12a config\n"
+    "  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined\n"
+    "  /autopilot 35884 --force                      — Re-reduce all (ignore done status)"
+)
+
+
 async def handle_autopilot(args: list[str], state: SessionState) -> CommandResult:
     if not args:
-        return CommandResult(
-            success=False,
-            message="Usage: /autopilot <ipts_number> [options]\n"
-            "  /autopilot 35884                              — Full automated reduction\n"
-            "  /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples\n"
-            "  /autopilot 35884 --exclude Y5                 — Reduce all except Y5\n"
-            "  /autopilot 35884 --thickness 0.2              — Set thickness to 0.2 cm\n"
-            "  /autopilot 35884 --bkg banjo                  — Use banjo as background\n"
-            "  /autopilot 35884 --config 8m12a               — Reduce only 8m12a config\n"
-            "  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined\n"
-            "  /autopilot 35884 --force                        — Re-reduce all (ignore done status)",
-        )
+        return CommandResult(success=False, message=_USAGE)
 
     ipts = None
     samples: list[str] = []
@@ -31,10 +34,17 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
     bkg_sample: str | None = None
     config_filter: str | None = None
     force: bool = False
+    use_current = False
 
     i = 0
     while i < len(args):
         a = args[i]
+        if a.lower() == "current":
+            use_current = True
+            i += 1
+            continue
+        if a in ("--help", "-h", "help"):
+            return CommandResult(success=False, message=_USAGE)
         if a == "--samples" and i + 1 < len(args):
             raw = args[i + 1]
             samples = [s.strip() for s in raw.split(",") if s.strip()]
@@ -71,8 +81,20 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
                 pass
         i += 1
 
+    if use_current and not ipts:
+        if state.ipts:
+            ipts = state.ipts
+        else:
+            return CommandResult(
+                success=False,
+                message="No IPTS in current session. Use /load ipts <number> first.",
+            )
+
     if not ipts:
-        return CommandResult(success=False, message="Please provide an IPTS number: /autopilot <number>")
+        return CommandResult(
+            success=False,
+            message=f"Please provide an IPTS number or use 'current'.\n\n{_USAGE}",
+        )
 
     data: dict = {"type": "start_autopilot", "ipts": ipts}
     if samples:

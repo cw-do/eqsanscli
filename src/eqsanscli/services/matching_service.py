@@ -3,6 +3,10 @@
 Configuration = (detector_distance, wavelength, chopper_frequency).
 All scattering runs (including bkg/empty) appear in the working table.
 Transmission is matched for ALL scattering runs by sample name.
+
+Run classification is stored in the catalog's ``run_class`` column (added at
+catalog-load time) so that users can override it with ``/reclass`` before
+running ``/matchruns``.
 """
 
 from __future__ import annotations
@@ -17,8 +21,50 @@ from eqsanscli.models.working_table import WorkingTable, WorkingTableRow
 
 logger = logging.getLogger(__name__)
 
-BKG_KEYWORDS = ["bkg", "banjo", "background"]
-EMPTY_KEYWORDS = ["empty", "emptybeam", "empty beam"]
+BKG_KEYWORDS = ["bkg", "banjo", "background", "emptycell", "emptyticell", "empty ticell",
+                "empty ti-cell", "ti-cell", "ticell"]
+# Empty beam patterns: "empty", "emp", "emt" as standalone words, or followed by "beam"
+# Must NOT match "emptycell", "emptyticell", etc. (those are background)
+_EMPTY_BEAM_RE = re.compile(
+    r"\b(?:empty\s+beam|emp\s+beam|emt\s+beam|empty|emp|emt)\b", re.IGNORECASE
+)
+
+# Valid run_class values (canonical names used internally)
+VALID_RUN_CLASSES = {
+    "scattering", "transmission",
+    "bkg_scatt", "bkg_trans",
+    "empty_trans", "empty_scatt",
+}
+
+# User-friendly short names → canonical
+RUN_CLASS_ALIASES: dict[str, str] = {
+    "scatt": "scattering",
+    "s": "scattering",
+    "trans": "transmission",
+    "t": "transmission",
+    "bkg": "bkg_scatt",
+    "bkgscatt": "bkg_scatt",
+    "bkg_scatt": "bkg_scatt",
+    "bkgtrans": "bkg_trans",
+    "bkg_trans": "bkg_trans",
+    "empty": "empty_trans",
+    "emptytrans": "empty_trans",
+    "empty_trans": "empty_trans",
+    "emptyscatt": "empty_scatt",
+    "empty_scatt": "empty_scatt",
+    "scattering": "scattering",
+    "transmission": "transmission",
+}
+
+# Short display labels for /show catalog
+RUN_CLASS_SHORT: dict[str, str] = {
+    "scattering": "S",
+    "transmission": "T",
+    "bkg_scatt": "BkgS",
+    "bkg_trans": "BkgT",
+    "empty_trans": "EmpT",
+    "empty_scatt": "EmpS",
+}
 
 ConfigKey = tuple[float, float, int]
 
@@ -41,42 +87,91 @@ def _round_config(distance: float, wavelength: float, frequency: int) -> ConfigK
     return (round(distance, 1), round(wavelength, 1), frequency)
 
 
-def _classify_run(
-    run_number: int, title: str, distance: float, wavelength: float, frequency: int = 60,
-) -> ClassifiedRun:
+def classify_title(title: str) -> str:
+    """Classify a run based on its title string.
+
+    Returns one of the canonical run_class values:
+        scattering, transmission, bkg_scatt, bkg_trans, empty_trans, empty_scatt
+
+    Classification priority:
+        1. Background keywords checked FIRST (emptycell/emptyticell/ti-cell/banjo/bkg)
+        2. Empty beam (standalone "empty"/"emp"/"emt" or "* beam")
+        3. S-/T- prefix for scattering/transmission
+        4. Default: scattering
+    """
     title_lower = title.strip().lower()
     is_scattering = title_lower.startswith("s-") or title_lower.startswith("s ")
     is_transmission = title_lower.startswith("t-") or title_lower.startswith("t ")
-    is_empty = any(kw in title_lower for kw in EMPTY_KEYWORDS)
+
+    # Check background BEFORE empty beam — "emptyticell" must be bkg, not empty
     is_background = any(kw in title_lower for kw in BKG_KEYWORDS)
 
+    # Empty beam: standalone "empty"/"emp"/"emt" or "* beam" (word boundary prevents
+    # matching "emptycell", "emptyticell" etc.)
+    is_empty = bool(_EMPTY_BEAM_RE.search(title_lower)) and not is_background
+
     if is_empty and is_transmission:
-        run_type = "empty_trans"
-    elif is_empty and is_scattering:
-        run_type = "empty_scatt"
-    elif is_empty:
-        run_type = "empty_trans"
-    elif is_background and is_scattering:
-        run_type = "bkg_scatt"
-    elif is_background and is_transmission:
-        run_type = "bkg_trans"
-    elif is_background:
-        run_type = "bkg_scatt"
-    elif is_scattering:
-        run_type = "scattering"
-    elif is_transmission:
-        run_type = "transmission"
+        return "empty_trans"
+    if is_empty and is_scattering:
+        return "empty_scatt"
+    if is_empty:
+        return "empty_trans"
+    if is_background and is_scattering:
+        return "bkg_scatt"
+    if is_background and is_transmission:
+        return "bkg_trans"
+    if is_background:
+        return "bkg_scatt"
+    if is_scattering:
+        return "scattering"
+    if is_transmission:
+        return "transmission"
+    return "scattering"
+
+
+def add_run_class_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``run_class`` column to a catalog DataFrame based on titles.
+
+    If the column already exists (e.g. loaded from a saved session), existing
+    values are preserved — only missing/empty entries are filled in.
+    """
+    if "run_class" not in df.columns:
+        df["run_class"] = df["title"].apply(lambda t: classify_title(str(t)))
     else:
-        run_type = "scattering"
+        mask = df["run_class"].isna() | (df["run_class"] == "")
+        df.loc[mask, "run_class"] = df.loc[mask, "title"].apply(
+            lambda t: classify_title(str(t))
+        )
+    return df
+
+
+def resolve_run_class(name: str) -> str | None:
+    """Resolve a user-provided class name to a canonical run_class value.
+
+    Returns None if the name is not recognized.
+    """
+    return RUN_CLASS_ALIASES.get(name.lower().strip())
+
+
+def _classify_run_from_row(row) -> ClassifiedRun:
+    """Build a ClassifiedRun from a catalog row that already has run_class."""
+    run_type = str(row.get("run_class", "scattering"))
+    if run_type not in VALID_RUN_CLASSES:
+        run_type = classify_title(str(row.get("title", "")))
+    is_background = run_type in ("bkg_scatt", "bkg_trans")
+    is_empty = run_type in ("empty_trans", "empty_scatt")
+    distance = float(row.get("detector_distance") or 0)
+    wavelength = float(row.get("wavelength") or 0)
+    frequency = int(row.get("frequency") or 60)
 
     return ClassifiedRun(
-        run_number=run_number,
-        title=title,
+        run_number=int(row["run_number"]),
+        title=str(row.get("title", "")),
         detector_distance=distance,
         wavelength=wavelength,
         frequency=frequency,
         run_type=run_type,
-        sample_name=_extract_sample_name(title),
+        sample_name=_extract_sample_name(str(row.get("title", ""))),
         config_key=_round_config(distance, wavelength, frequency),
         is_background=is_background,
         is_empty=is_empty,
@@ -123,22 +218,25 @@ def _extract_sample_name(title: str) -> str:
 
 
 def _classify_catalog(catalog: pd.DataFrame) -> list[ClassifiedRun]:
-    """Classify all runs in a catalog."""
+    """Classify all runs in a catalog using the run_class column.
+
+    If run_class is missing, falls back to title-based classification.
+    """
+    if "run_class" not in catalog.columns:
+        catalog = add_run_class_column(catalog)
+
     classified: list[ClassifiedRun] = []
     for _, row in catalog.iterrows():
-        cr = _classify_run(
-            run_number=int(row["run_number"]),
-            title=str(row.get("title", "")),
-            distance=float(row.get("detector_distance") or 0),
-            wavelength=float(row.get("wavelength") or 0),
-            frequency=int(row.get("frequency") or 60),
-        )
+        cr = _classify_run_from_row(row)
         classified.append(cr)
     return classified
 
 
-def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
+def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list[str]]:
     """Auto-match runs from a catalog into a working table.
+
+    Returns (table, warnings) where warnings is a list of human-readable
+    warning strings (e.g. multiple empty beams per config).
 
     - ALL scattering runs in the table (including bkg/empty).
     - Transmission matched for EVERY scattering run by sample name.
@@ -146,7 +244,7 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
     - Config = (distance, wavelength, frequency).
     """
     if catalog.empty:
-        return WorkingTable(name="default", ipts=ipts)
+        return WorkingTable(name="default", ipts=ipts), []
 
     classified = _classify_catalog(catalog)
 
@@ -155,8 +253,12 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
         config_groups.setdefault(cr.config_key, []).append(cr)
 
     table = WorkingTable(name="default", ipts=ipts)
+    warnings: list[str] = []
 
     for config_key, runs in sorted(config_groups.items()):
+        from eqsanscli.models.config_id import make_config_id
+        cfg_label = make_config_id(config_key[0], config_key[1], config_key[2])
+
         all_scattering = [
             r for r in runs if r.run_type in ("scattering", "bkg_scatt", "empty_scatt")
         ]
@@ -166,6 +268,24 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
 
         if not all_scattering:
             continue
+
+        # Warn if multiple empty beams in this config
+        if len(empty_trans_runs) > 1:
+            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in empty_trans_runs)
+            warnings.append(
+                f"[{cfg_label}] {len(empty_trans_runs)} empty beam runs found: {run_list}\n"
+                f"  Using {empty_trans_runs[0].run_number} as default. "
+                f"Use /set <row> emp <run> to override."
+            )
+
+        # Warn if multiple background scattering runs in this config
+        if len(bkg_scatt_runs) > 1:
+            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in bkg_scatt_runs)
+            warnings.append(
+                f"[{cfg_label}] {len(bkg_scatt_runs)} background scatt runs found: {run_list}\n"
+                f"  Using {bkg_scatt_runs[0].run_number} as default. "
+                f"Use /assign bkg <sample> to override."
+            )
 
         default_empty = str(empty_trans_runs[0].run_number) if empty_trans_runs else ""
         default_bkg_scatt = str(bkg_scatt_runs[0].run_number) if bkg_scatt_runs else ""
@@ -209,7 +329,7 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> WorkingTable:
             )
             table.add_row(row)
 
-    return table
+    return table, warnings
 
 
 def assign_background(

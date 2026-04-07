@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.catalog_service import CatalogService
+from eqsanscli.services.matching_service import (
+    RUN_CLASS_SHORT,
+    add_run_class_column,
+    resolve_run_class,
+)
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -24,9 +30,12 @@ def _format_counts(n: int) -> str:
 def _build_catalog_rows(df) -> list[dict]:
     rows = []
     for _, row in df.iterrows():
+        run_class = str(row.get("run_class", ""))
+        class_label = RUN_CLASS_SHORT.get(run_class, run_class[:6])
         rows.append({
             "Run #": str(int(row["run_number"])),
             "Title": str(row["title"])[:40],
+            "Class": class_label,
             "Dist (m)": f"{row['detector_distance']:.1f}",
             "λ (Å)": f"{row['wavelength']:.1f}",
             "Count": _format_counts(int(row["total_counts"])),
@@ -86,6 +95,7 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
     if df.empty:
         return CommandResult(success=True, message=f"No runs found for IPTS-{ipts}.")
 
+    add_run_class_column(df)
     state.ipts = ipts
     state.catalog = df
 
@@ -233,6 +243,160 @@ async def handle_list_ipts(args: list[str], state: SessionState) -> CommandResul
             lines.append(f"    [dim]{' · '.join(detail_parts)}[/dim]")
 
     return CommandResult(success=True, message="\n".join(lines))
+
+
+def _parse_run_numbers(spec: str) -> list[int]:
+    """Parse run number spec: '12345', '12345-12350', '12345,12346,12350'."""
+    runs: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            start_s, end_s = part.split("-", 1)
+            try:
+                runs.extend(range(int(start_s), int(end_s) + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                runs.append(int(part))
+            except ValueError:
+                pass
+    return runs
+
+
+def _title_prefix_class(title: str) -> str:
+    """Determine scattering or transmission from S-/T- title prefix."""
+    t = title.strip().lower()
+    if t.startswith("t-") or t.startswith("t "):
+        return "transmission"
+    return "scattering"
+
+
+def _match_catalog_title(pattern: str, title: str) -> bool:
+    """Match a pattern against a catalog title (case-insensitive).
+
+    Strips the S-/T- prefix from the title before matching.
+    Supports * wildcard (glob-style) or exact match.
+    """
+    import fnmatch
+    p = pattern.lower().strip()
+    # Strip S-/T- prefix from title for matching
+    t = re.sub(r"^[sStT][-\s]+", "", title).strip().lower()
+    if "*" in p or "?" in p:
+        return fnmatch.fnmatch(t, p)
+    return p in t
+
+
+async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
+    """/reclass <runs> <class> — override run classification in the catalog.
+
+    Examples:
+        /reclass 172804 scatt              — single run → scattering
+        /reclass 172804-172810 scatt       — range → scattering
+        /reclass 172804,172806 trans       — specific runs → transmission
+        /reclass 172804-172810 sample      — treat as normal sample (S-→scatt, T-→trans)
+        /reclass --sample BkgG sample      — all BkgG runs: S-BkgG→scatt, T-BkgG→trans
+        /reclass --sample emptyticell bkg  — all emptyticell runs → background
+
+    Valid classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample
+    "sample" respects S-/T- prefix: S-BkgG → scattering, T-BkgG → transmission.
+    """
+    if len(args) < 2:
+        return CommandResult(
+            success=False,
+            message="Usage: /reclass <runs> <class>  |  /reclass --sample <name> <class>\n"
+            "  <runs>   = run number, range (12345-12350), or comma-separated\n"
+            "  <name>   = sample name (case-insensitive, matches title after S-/T- prefix)\n"
+            "  <class>  = scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample\n\n"
+            "  'sample' respects S-/T- prefix (S-BkgG → scatt, T-BkgG → trans)\n\n"
+            "Examples:\n"
+            "  /reclass 172804 scatt\n"
+            "  /reclass 172804-172810 sample\n"
+            "  /reclass --sample BkgG sample\n"
+            "  /reclass --sample emptyticell bkg",
+        )
+
+    if state.catalog_data is None:
+        return CommandResult(
+            success=False,
+            message="No catalog loaded. Use /load ipts <number> first.",
+        )
+
+    # Parse --sample mode vs run-number mode
+    if args[0].lower() == "--sample":
+        if len(args) < 3:
+            return CommandResult(
+                success=False,
+                message="Usage: /reclass --sample <name> <class>",
+            )
+        sample_pattern = args[1]
+        class_name = args[2]
+        use_sample_filter = True
+    else:
+        sample_pattern = None
+        run_spec = args[0]
+        class_name = args[1]
+        use_sample_filter = False
+
+    is_sample_mode = class_name.lower().strip() == "sample"
+
+    if not is_sample_mode:
+        new_class = resolve_run_class(class_name)
+        if new_class is None:
+            valid = "scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample"
+            return CommandResult(
+                success=False,
+                message=f"Unknown class: '{class_name}'. Valid classes: {valid}",
+            )
+    else:
+        new_class = None  # determined per-run from title prefix
+
+    if not use_sample_filter:
+        requested_runs = set(_parse_run_numbers(run_spec))
+        if not requested_runs:
+            return CommandResult(success=False, message=f"Could not parse run numbers: {run_spec}")
+
+    updated = 0
+    changed_runs: list[str] = []
+    for record in state.catalog_data:
+        try:
+            rn = int(record.get("run_number", 0))
+        except (ValueError, TypeError):
+            continue
+
+        title = str(record.get("title", ""))
+
+        if use_sample_filter:
+            if not _match_catalog_title(sample_pattern, title):
+                continue
+        else:
+            if rn not in requested_runs:
+                continue
+
+        old_class = record.get("run_class", "")
+        if is_sample_mode:
+            resolved = _title_prefix_class(title)
+        else:
+            resolved = new_class
+        record["run_class"] = resolved
+        old_short = RUN_CLASS_SHORT.get(old_class, old_class)
+        new_short = RUN_CLASS_SHORT.get(resolved, resolved)
+        changed_runs.append(f"  {rn}  {title[:30]}  {old_short} → {new_short}")
+        updated += 1
+
+    if updated == 0:
+        target = f"sample '{sample_pattern}'" if use_sample_filter else run_spec
+        return CommandResult(
+            success=False,
+            message=f"No runs in catalog matching: {target}",
+        )
+
+    detail = "\n".join(changed_runs)
+    return CommandResult(
+        success=True,
+        message=f"Reclassified {updated} run(s):\n{detail}\n\n"
+        "Run /matchruns to rebuild the working table with updated classes.",
+    )
 
 
 async def handle_show_table(args: list[str], state: SessionState) -> CommandResult:

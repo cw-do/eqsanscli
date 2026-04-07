@@ -15,12 +15,12 @@ from eqsanscli.tui.widgets.completable_input import CommandSubmitted, Completabl
 from eqsanscli.tui.widgets.status_bar import FooterBar, HeaderBar
 
 from eqsanscli import __version__
-from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts
+from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass
 from eqsanscli.commands.autopilot import handle_autopilot
 from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
 from eqsanscli.commands.calibrate import handle_calibrate
 from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
-from eqsanscli.commands.export import handle_export_script
+from eqsanscli.commands.export import handle_export_script, handle_zipnsend
 from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
 from eqsanscli.commands.models import handle_models
 from eqsanscli.commands.preset import handle_apply_preset, handle_compare, handle_show_preset, handle_show_presets
@@ -107,6 +107,7 @@ class EQSANSApp(App):
         self.router.register("show", handle_show)
         self.router.register("show table", handle_show_table)
         self.router.register("matchruns", handle_matchruns)
+        self.router.register("reclass", handle_reclass)
         self.router.register("set", handle_set)
         self.router.register("set config", handle_set_config)
         self.router.register("show config", handle_show_config)
@@ -119,6 +120,7 @@ class EQSANSApp(App):
         self.router.register("reduce", handle_reduce)
         self.router.register("remove", handle_remove)
         self.router.register("export script", handle_export_script)
+        self.router.register("zipnsend", handle_zipnsend)
         self.router.register("plot", handle_plot)
         self.router.register("list iq", handle_list_iq)
         self.router.register("list iqxqy", handle_list_iqxqy)
@@ -181,11 +183,13 @@ class EQSANSApp(App):
             "\n"
             "  [bold]Getting Started:[/bold]\n"
             "    1. [cyan]/load ipts <number>[/cyan]     Load experiment catalog from ONCat\n"
-            "    2. [cyan]/matchruns[/cyan]              Auto-match trans/bkg/empty runs\n"
-            "    3. [cyan]/show table[/cyan]             Review matched runs\n"
-            "    4. [cyan]/show presets[/cyan]           Browse preset configurations\n"
-            "    5. [cyan]/apply preset <name> <config>[/cyan]  Apply parameters\n"
-            "    6. [cyan]/reduce all[/cyan]             Run data reduction\n"
+            "    2. [cyan]/show catalog[/cyan]            Review catalog & run classes\n"
+            "    3. [cyan]/reclass <runs> <class>[/cyan]  Fix misclassified runs (scatt/trans/bkg/empty)\n"
+            "    4. [cyan]/matchruns[/cyan]              Auto-match trans/bkg/empty runs\n"
+            "    5. [cyan]/show table[/cyan]             Review matched runs\n"
+            "    6. [cyan]/show presets[/cyan]           Browse preset configurations\n"
+            "    7. [cyan]/apply preset <name> <config>[/cyan]  Apply parameters\n"
+            "    8. [cyan]/reduce all[/cyan]             Run data reduction\n"
             "\n"
             "  [dim]Type [bold]/help[/bold] for all commands, or just ask in natural language.[/dim]\n"
         )
@@ -216,6 +220,12 @@ class EQSANSApp(App):
 
     def _update_status_bars(self) -> None:
         self.query_one("#header-bar", HeaderBar).update_from_state(self.state)
+        version = self.state.drtsans_version
+        if version == "default":
+            label = "drtsans"
+        else:
+            label = f"drtsans --{version}"
+        self.query_one("#footer-bar", FooterBar).drtsans_label = label
 
     async def on_command_submitted(self, event: CommandSubmitted) -> None:
         value = event.value.strip()
@@ -439,6 +449,10 @@ class EQSANSApp(App):
             f"{cancelled_str}total {_format_time(total_elapsed)}\n"
             f"  Output: {output_dir}"
         )
+        try:
+            self.state.save(SessionState.auto_save_path())
+        except Exception:
+            pass
         self.call_from_thread(self._set_job_running, False)
         self.call_from_thread(self._update_status_bars)
 
@@ -449,7 +463,7 @@ class EQSANSApp(App):
         if data_type == "catalog":
             self._render_table(
                 log,
-                columns=["Run #", "Title", "Dist (m)", "λ (Å)", "Count", "Time(s)"],
+                columns=["Run #", "Title", "Class", "Dist (m)", "λ (Å)", "Count", "Time(s)"],
                 rows=data["rows"],
                 title=f"IPTS-{data.get('ipts', '?')} Catalog",
             )
@@ -539,6 +553,10 @@ class EQSANSApp(App):
             )
         finally:
             loop.close()
+            try:
+                self.state.save(SessionState.auto_save_path())
+            except Exception:
+                pass
         self.call_from_thread(self._set_job_running, False)
         self.call_from_thread(self._update_status_bars)
 
@@ -701,6 +719,7 @@ class EQSANSApp(App):
             "[bold cyan]Working Table:[/]\n"
             "  /show table                   — Show current working table\n"
             "  /show table --sample <name>   — Filter by sample name (read-only)\n"
+            "  /reclass <runs> <class>       — Override run classification (scatt/trans/bkg/empty)\n"
             "  /matchruns                    — Auto-match trans/bkg/empty runs\n"
             "  /assign bkg <sample>          — Reassign background for all rows (config-aware)\n"
             "  /set <row> <field> <value>    — Set field (row = index, run#, range, or all)\n"
@@ -767,6 +786,7 @@ class EQSANSApp(App):
             "\n"
             "[bold cyan]Autopilot:[/]\n"
             "  /autopilot <ipts>             — Full automated reduction pipeline\n"
+            "  /autopilot current            — Use current session IPTS/catalog\n"
             "  Options: --samples <a,b>      — Only reduce specific samples\n"
             "           --exclude <a,b>      — Reduce all except named samples\n"
             "           --bkg <sample>       — Use sample as background (config-aware)\n"
@@ -775,6 +795,7 @@ class EQSANSApp(App):
             "\n"
             "[bold cyan]Share:[/]\n"
             "  /share <file|pattern>         — Share files via here.now (24h link)\n"
+            "  /zipnsend <email> [options]   — Zip files and email (--pattern, --dir, --subject)\n"
             "\n"
             "[bold cyan]LLM:[/]\n"
             "  /models                       — List available LLM models\n"

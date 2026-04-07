@@ -86,8 +86,9 @@ tweaks, or multi-step table editing).
 
 ```
 /autopilot <ipts>
+/autopilot current              # use current session IPTS/catalog (preserves /reclass overrides)
 ```
-Options (all composable):
+Options (all composable, work with both `<ipts>` and `current`):
 - `--thickness <cm>` — set thickness for all rows (default 0.1)
 - `--bkg <sample>` — use named sample as background (config-aware)
 - `--samples <a,b>` — keep only these samples (+ porsil)
@@ -260,6 +261,19 @@ To share plots or data files with the user:
 This returns a here.now URL (anonymous, expires in 24h). Send this URL to the user
 so they can view the results.
 
+### Emailing Results
+
+To zip and email data files directly:
+```
+/zipnsend user@ornl.gov                           # merged*.txt from outputdir
+/zipnsend user@ornl.gov --pattern "*_Iq.dat"      # all Iq files
+/zipnsend user@ornl.gov --pattern "*.png"          # plot images
+/zipnsend user@ornl.gov --subject "IPTS-38397"     # custom subject
+```
+
+Uses `mailx`/`mail` on the server. Max 25 MB (suggests `/share` if larger).
+When the user asks to "send", "mail", or "email" data to someone, use `/zipnsend`.
+
 ---
 
 ## Command Reference
@@ -298,7 +312,9 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 | Command | Purpose |
 |---------|---------|
-| `/matchruns` | Auto-match trans/bkg/empty runs from catalog |
+| `/reclass <runs> <class>` | Override run classification (scatt/trans/bkg/bkgtrans/empty/sample) |
+| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`) |
+| `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog |
 | `/show table` | Display full working table |
 | `/show table --sample <name>` | Filter view by sample name |
 | `/assign bkg <sample>` | Set background for ALL rows (config-aware, sets bkg+bkgtrans) |
@@ -330,6 +346,7 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 | `/reduce <row>` | Reduce selected rows |
 | `/reduce --sample <name>` | Reduce only rows matching sample name (use `*` for wildcard) |
 | `/autopilot <ipts> [options]` | Full automated pipeline (see Quick Path above for all options) |
+| `/autopilot current [options]` | Use current IPTS/catalog from session (preserves `/reclass`) |
 | `/export script [file]` | Export standalone Python script |
 
 ### Stitching
@@ -353,6 +370,7 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 | `/list iq` | List reduced I(Q) files |
 | `/plot <pattern> [flags]` | Plot data |
 | `/share <pattern>` | Upload files, get 24h URL |
+| `/zipnsend <email> [options]` | Zip files and email (--pattern, --dir, --subject) |
 
 Plot flags: `--save <path>`, `--loglog`, `--linlin`, `--kratky`, `--guinier`, `--porod`, `--noerror`, `--title <text>`
 
@@ -397,7 +415,8 @@ different output), use `--force`:
 
 | Symptom | Diagnosis | Fix |
 |---------|-----------|-----|
-| `/matchruns` shows missing trans/bkg/emp | Catalog runs don't follow naming convention | Use `/show catalog`, find correct runs, use `/set` |
+| `/matchruns` shows missing trans/bkg/emp | Runs misclassified or don't follow naming convention | `/show catalog` to check Class column; `/reclass <runs> scatt` or `/reclass <runs> sample` to fix, then `/matchruns` |
+| `/matchruns` warns multiple empty beams or bkg per config | Multiple runs classified as same role | User should pick one; use `/set <row> emp <run>` or `/assign bkg <sample>` |
 | `/reduce` fails for some rows | Check `data.results` for `status: "error"` | Fix missing fields with `/set`, re-reduce failed rows |
 | Autopilot skips rows (status "done") | Parameters changed but status not reset | Should auto-reset; if not, use `--force` |
 | "No scattering runs found" | Empty catalog or wrong IPTS | Verify IPTS number, `/show catalog` |
@@ -565,6 +584,6 @@ Agent: "Done. 47 out of 50 succeeded. Here are plots: <URL>"
 - After `/reduce` or `/autopilot`, always check for failures in the response data.
 - After modifying the table (`/set`, `/remove`, `/assign`), verify with `/show table`.
 - The `/share` command returns a URL — always pass this to the user.
-- Session auto-saves after every command. Use `/continue` on restart to resume.
+- Session auto-saves after every command and after background jobs (`/reduce`, `/autopilot`). Use `/continue` on restart to resume.
 - Reduction can take minutes per row. Monitor stderr for progress and relay to user.
 - Default thickness is 0.1 cm. Only set `--thickness` if the user specifies differently.

@@ -24,10 +24,10 @@ from typing import Any
 
 from eqsanscli.commands.autopilot import handle_autopilot
 from eqsanscli.commands.calibrate import handle_calibrate
-from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts
+from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass
 from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
 from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
-from eqsanscli.commands.export import handle_export_script
+from eqsanscli.commands.export import handle_export_script, handle_zipnsend
 from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
 from eqsanscli.commands.models import handle_models
 from eqsanscli.commands.preset import (
@@ -73,6 +73,7 @@ def _register_commands(router: CommandRouter, state: SessionState) -> None:
     router.register("show", handle_show)
     router.register("show table", handle_show_table)
     router.register("matchruns", handle_matchruns)
+    router.register("reclass", handle_reclass)
     router.register("set", handle_set)
     router.register("set config", handle_set_config)
     router.register("show config", handle_show_config)
@@ -85,6 +86,7 @@ def _register_commands(router: CommandRouter, state: SessionState) -> None:
     router.register("reduce", handle_reduce)
     router.register("remove", handle_remove)
     router.register("export script", handle_export_script)
+    router.register("zipnsend", handle_zipnsend)
     router.register("plot", handle_plot)
     router.register("list iq", handle_list_iq)
     router.register("list iqxqy", handle_list_iqxqy)

@@ -33,9 +33,13 @@ python -m eqsanscli
 ## Workflow Overview
 
 ```
-/load ipts <N>        Load catalog from ONCat
+/load ipts <N>        Load catalog from ONCat (adds run_class column)
         |
-/matchruns            Auto-match trans/bkg/empty runs
+/show catalog         Review Class column (S/T/BkgS/BkgT/EmpT)
+        |
+[fix classes]         /reclass <runs> <class> (if titles are mislabeled)
+        |
+/matchruns            Auto-match trans/bkg/empty using run_class
         |
 /show table           Inspect — look for missing assignments
         |
@@ -54,6 +58,7 @@ python -m eqsanscli
 ```
 
 Or skip everything with: `/autopilot <ipts>` (runs full pipeline automatically).
+Use `/autopilot current` to run with the current session catalog (after `/reclass` etc.).
 
 ---
 
@@ -92,11 +97,14 @@ Matched 50 scattering runs across 2 configurations.
 | Missing transmission | `/set --sample <name> trans <run>` or `/set <row> trans <run>` |
 | Missing background | `/assign bkg <sample_name>` (preferred) or per-row `/set` |
 | Missing empty beam | `/set <row> emp <run>` — find empty beam run from `/show catalog` |
+| Mislabeled runs (title says T- but should be S-) | `/reclass <runs> scatt` then re-run `/matchruns` |
+| Sample name contains bkg keyword (e.g. BkgG) | `/reclass --sample BkgG sample` — respects S-/T- prefix |
+| Multiple empty beams or bkg per config | `/matchruns` will warn — use `/set <row> emp <run>` to pick one |
 | Unwanted rows (e.g., test runs) | `/remove --sample <name>` |
 
-**How to find the right run number:** Use `/show catalog` output. Match by:
-- Same configuration (4m10a bkg must come from 4m10a run)
-- Run title prefix: `S-` = scattering, `T-` = transmission, empty beam has no prefix or is labeled "empty"
+**How to find the right run number:** Use `/show catalog` output. The Class column shows each run's classification:
+- `S` = scattering, `T` = transmission, `BkgS`/`BkgT` = background, `EmpT` = empty beam
+- If a run is misclassified, use `/reclass <run> <class>` to fix it before `/matchruns`
 
 ### Step 3: Verify Table
 
@@ -255,6 +263,7 @@ Fields: `trans`, `bkg`, `bkgtrans`, `emp`, `thickness`
 |---------|---------|
 | `/reduce <row>` | Progress per row (✓/✗), output filenames |
 | `/autopilot <ipts> [options]` | Full pipeline with step-by-step progress |
+| `/autopilot current [options]` | Use current session IPTS/catalog (preserves `/reclass`) |
 | `/export script [file]` | Standalone .py script path |
 
 Autopilot options: `--samples <a,b>`, `--exclude <a,b>`, `--thickness <cm>`
@@ -276,6 +285,7 @@ Autopilot options: `--samples <a,b>`, `--exclude <a,b>`, `--thickness <cm>`
 | `/list iqxqy` | List of 2D I(Qx,Qy) .dat files |
 | `/plot <pattern> [flags]` | Plot displayed or saved to file |
 | `/share <pattern>` | Upload URL (24h anonymous link) |
+| `/zipnsend <email> [options]` | Zip files and email (--pattern, --dir, --subject) |
 
 Plot flags: `--logx`, `--logy`, `--linx`, `--liny`, `--loglog`, `--linlin`,
 `--kratky`, `--guinier`, `--porod`, `--save <path>`, `--title <text>`, `--noerror`
@@ -311,7 +321,7 @@ Plot flags: `--logx`, `--logy`, `--linx`, `--liny`, `--loglog`, `--linlin`,
 | Error | Diagnosis | Fix |
 |-------|-----------|-----|
 | Reduction ✗ for specific rows | `/show table --sample <name>` — check for missing fields | Fill missing trans/bkg/emp with `/set` |
-| "No scattering runs found" after `/matchruns` | Catalog may be empty or titles don't follow S-/T- convention | `/show catalog` to inspect run titles |
+| "No scattering runs found" after `/matchruns` | Catalog may be empty or runs misclassified | `/show catalog` to check Class column; `/reclass <runs> scatt` to fix, then re-run `/matchruns` |
 | Wrong absolute scale | Porsil calibration needed | `/calibrate <porsil_Iq.dat>` then `/set config <id> standardabsolutescale <value>` |
 | Stitched curves don't overlap well | Bad overlap range or wrong target | `/stitch set all overlap auto` or manually set `/stitch set <sample> overlap <q1> <q2>` |
 | "Preset not found" | Preset name doesn't match any file in `preset_configs/` | `/show presets` to list available presets |

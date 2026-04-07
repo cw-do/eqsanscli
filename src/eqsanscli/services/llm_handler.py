@@ -92,7 +92,8 @@ CATALOG:
 WORKING TABLE:
 /show table                     - Show working table
 /show table --sample <name>     - Show only rows matching sample name (read-only filter, no deletion)
-/matchruns                      - Auto-match trans/bkg/empty runs
+/reclass <runs> <class>         - Override run classification (scatt/trans/bkg/bkgtrans/empty/sample). "sample" respects S-/T- prefix
+/matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog)
 /assign bkg <sample>            - Reassign background for ALL rows (config-aware, sets both bkg+bkgtrans) — PREFER this over per-row /set for background
 /set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness). <row> = index, run number, range (1-5, 1,3,5), or all
 /set <row> <field> none         - Clear a field
@@ -146,8 +147,15 @@ STITCH:
 /stitch save <name>             - Save stitch table
 /stitch load <name>             - Load stitch table
 
-SHARE:
+SHARE & EMAIL:
 /share <file|pattern>           - Share files via here.now (anonymous, 24h expiry, returns URL)
+/zipnsend <email> [--pattern <glob>] [--dir <path>] [--subject <text>] - Zip files and email. Default pattern: merged*.txt from outputdir
+  When user asks to "send", "mail", "email" data/files to someone, use /zipnsend.
+  Examples of user intent → command:
+    "send merged data to ccd@ornl.gov" → /zipnsend ccd@ornl.gov
+    "email all Iq files to user@lab.gov" → /zipnsend user@lab.gov --pattern "*_Iq.dat"
+    "mail the plots to me at joe@ornl.gov" → /zipnsend joe@ornl.gov --pattern "*.png"
+    "send results to ccd@ornl.gov with subject IPTS-38397" → /zipnsend ccd@ornl.gov --subject "IPTS-38397"
 
 LLM:
 /models                         - List available LLM models
@@ -170,6 +178,7 @@ CALIBRATION:
 
 AUTOPILOT:
 /autopilot <ipts>               - Full automated reduction (load, match, configure, reduce, calibrate, stitch, plot)
+/autopilot current              - Use current IPTS/catalog from session (preserves /reclass overrides)
 /autopilot <ipts> --samples <name1,name2,...>  - Autopilot only for specific samples (case-insensitive, comma-separated)
 /autopilot <ipts> --exclude <name1,name2,...>  - Autopilot all samples except named ones
 /autopilot <ipts> --thickness <cm>  - Set sample thickness (default is 0.1 cm — only set if different)
