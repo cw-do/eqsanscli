@@ -40,9 +40,11 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Usage: /reduce <row>\n"
             "       /reduce --sample <name>\n"
+            "       /reduce --new\n"
             "  <row> = index, run number, range, or all\n"
+            "  --new = reduce only rows whose status is not 'done' (new/error/modified)\n"
             "  Examples: /reduce 1  |  /reduce 172815  |  /reduce 1-4  |  /reduce all\n"
-            "            /reduce --sample porsil  |  /reduce --sample *3b*",
+            "            /reduce --sample porsil  |  /reduce --sample *3b*  |  /reduce --new",
         )
 
     table = state.current_table
@@ -56,6 +58,13 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
         indices = [r.index for r in table.rows if sample_matches(pattern, r.sample_name)]
         if not indices:
             return CommandResult(success=False, message=f"No rows with sample name matching: {pattern}")
+    elif args[0] == "--new":
+        indices = [r.index for r in table.rows if r.status != "done"]
+        if not indices:
+            return CommandResult(
+                success=True,
+                message="No rows to reduce — all rows are already 'done'.",
+            )
     else:
         selection = args[0]
         indices = parse_row_selection(selection, table)

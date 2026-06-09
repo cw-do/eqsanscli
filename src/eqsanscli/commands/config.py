@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
@@ -8,6 +9,52 @@ from eqsanscli.services.config_manager import get_config, list_config_params, se
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
+
+
+# Params whose values are file paths — resolve bare filenames to absolute paths
+_FILE_PATH_PARAMS = {
+    "maskfilename",
+    "defaultmask",
+    "sensitivityfilename",
+    "darkfilename",
+    "fluxmonitorratiofile",
+    "beamfluxfilename",
+}
+
+
+def _resolve_file_path(value: str, ipts: int | str | None) -> tuple[str, str | None]:
+    """Resolve a bare filename to an absolute path by searching common locations.
+
+    Search order: cwd → /SNS/EQSANS/IPTS-{ipts}/shared/ → /SNS/EQSANS/shared/script/eqsanstools/
+
+    Returns (resolved_value, note). `note` is a human-readable message if a resolution
+    happened or failed; None otherwise. Sentinels ("none"/"null"/"") and already-absolute
+    paths pass through unchanged.
+    """
+    v = value.strip()
+    if not v or v.lower() in ("none", "null"):
+        return value, None
+    if os.path.isabs(v):
+        return v, None
+    # Treat any value containing a path separator as a user-supplied relative path
+    if os.sep in v or "/" in v:
+        abs_path = os.path.abspath(v)
+        return abs_path, f"Resolved to {abs_path}"
+
+    search_paths: list[str] = [os.path.abspath(v)]
+    if ipts:
+        search_paths.append(f"/SNS/EQSANS/IPTS-{ipts}/shared/{v}")
+    search_paths.append(f"/SNS/EQSANS/shared/script/eqsanstools/{v}")
+
+    for path in search_paths:
+        if os.path.exists(path):
+            return path, f"Resolved {v} → {path}"
+
+    return value, (
+        f"⚠ Could not locate '{v}' in cwd"
+        + (f", /SNS/EQSANS/IPTS-{ipts}/shared/" if ipts else "")
+        + ", or /SNS/EQSANS/shared/script/eqsanstools/. Stored as-is."
+    )
 
 
 async def handle_show_config(args: list[str], state: SessionState) -> CommandResult:
@@ -47,7 +94,13 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
     param = args[1]
     value = " ".join(args[2:])
 
+    resolve_note: str | None = None
+    if param.lower() in _FILE_PATH_PARAMS:
+        value, resolve_note = _resolve_file_path(value, state.ipts)
+
     ok, message = set_config_param(config_id, param, value, state.configurations)
+    if resolve_note:
+        message = f"{message}\n  {resolve_note}"
 
     # Mark "done" rows as "modified" when their config parameters change
     if ok:

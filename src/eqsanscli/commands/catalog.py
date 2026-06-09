@@ -107,6 +107,76 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
     )
 
 
+async def handle_refresh_catalog(args: list[str], state: SessionState) -> CommandResult:
+    """/refresh catalog — re-fetch catalog from ONCat, preserving any /reclass overrides.
+
+    Use this mid-experiment when new runs have been collected. Existing run_class
+    values (including manual overrides via /reclass) are preserved; only newly
+    discovered runs get fresh classification from their titles.
+
+    Follow with /matchruns --update to extend the working table without disrupting
+    already-reduced rows.
+    """
+    if not state.ipts:
+        return CommandResult(
+            success=False,
+            message="No IPTS loaded. Use /load ipts <number> first.",
+        )
+
+    try:
+        fresh_df = _catalog_service.fetch(state.ipts)
+    except ImportError as e:
+        return CommandResult(success=False, message=str(e))
+    except Exception as e:
+        return CommandResult(success=False, message=f"ONCat error: {e}")
+
+    if fresh_df.empty:
+        return CommandResult(success=True, message=f"No runs returned from ONCat for IPTS-{state.ipts}.")
+
+    # Build {run_number: run_class} from the existing catalog so manual /reclass overrides survive
+    old_class: dict[int, str] = {}
+    if state.catalog is not None and not state.catalog.empty and "run_class" in state.catalog.columns:
+        for _, row in state.catalog.iterrows():
+            try:
+                rn = int(row["run_number"])
+            except (ValueError, TypeError):
+                continue
+            cls = str(row.get("run_class", "") or "")
+            if cls:
+                old_class[rn] = cls
+
+    old_runs = set(old_class.keys())
+    new_runs = {int(r) for r in fresh_df["run_number"]} - old_runs
+
+    # Seed run_class column from the old catalog; add_run_class_column fills in only blanks
+    fresh_df["run_class"] = fresh_df["run_number"].map(lambda rn: old_class.get(int(rn), ""))
+    add_run_class_column(fresh_df)
+
+    state.catalog = fresh_df
+
+    rows = _build_catalog_rows(fresh_df)
+    summary = (
+        f"Refreshed IPTS-{state.ipts} catalog from ONCat.\n"
+        f"  Total runs: {len(fresh_df)}  (previously: {len(old_runs)})\n"
+        f"  New runs:   {len(new_runs)}\n"
+        f"  Preserved {len(old_runs)} existing run_class values"
+    )
+    if new_runs:
+        new_run_list = ", ".join(str(r) for r in sorted(new_runs)[:20])
+        if len(new_runs) > 20:
+            new_run_list += f", ... (+{len(new_runs) - 20} more)"
+        summary += f"\n  New run numbers: {new_run_list}"
+        summary += "\n\nNext: /matchruns --update to add new rows to the working table without disrupting reduced ones."
+    else:
+        summary += "\n\nNo new runs to add."
+
+    return CommandResult(
+        success=True,
+        message=summary,
+        data={"type": "catalog", "rows": rows, "ipts": state.ipts},
+    )
+
+
 async def handle_show_catalog(args: list[str], state: SessionState) -> CommandResult:
     catalog = state.catalog
     if catalog is None or catalog.empty:
@@ -295,11 +365,14 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
         /reclass 172804-172810 scatt       — range → scattering
         /reclass 172804,172806 trans       — specific runs → transmission
         /reclass 172804-172810 sample      — treat as normal sample (S-→scatt, T-→trans)
+        /reclass 172804 i                  — ignore this run (excluded from matching)
+        /reclass 172804 n                  — same: 'n' (not used) is an alias of 'i'
         /reclass --sample BkgG sample      — all BkgG runs: S-BkgG→scatt, T-BkgG→trans
         /reclass --sample emptyticell bkg  — all emptyticell runs → background
 
-    Valid classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample
+    Valid classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)
     "sample" respects S-/T- prefix: S-BkgG → scattering, T-BkgG → transmission.
+    "ignore" (aliases: i, n) excludes runs from /matchruns entirely (label: N).
     """
     if len(args) < 2:
         return CommandResult(
@@ -307,11 +380,13 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
             message="Usage: /reclass <runs> <class>  |  /reclass --sample <name> <class>\n"
             "  <runs>   = run number, range (12345-12350), or comma-separated\n"
             "  <name>   = sample name (case-insensitive, matches title after S-/T- prefix)\n"
-            "  <class>  = scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample\n\n"
-            "  'sample' respects S-/T- prefix (S-BkgG → scatt, T-BkgG → trans)\n\n"
+            "  <class>  = scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)\n\n"
+            "  'sample' respects S-/T- prefix (S-BkgG → scatt, T-BkgG → trans)\n"
+            "  'ignore' (aliases: i, n — 'not used') excludes runs from /matchruns entirely\n\n"
             "Examples:\n"
             "  /reclass 172804 scatt\n"
             "  /reclass 172804-172810 sample\n"
+            "  /reclass 172804 i        (or: /reclass 172804 n)\n"
             "  /reclass --sample BkgG sample\n"
             "  /reclass --sample emptyticell bkg",
         )
@@ -343,7 +418,7 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
     if not is_sample_mode:
         new_class = resolve_run_class(class_name)
         if new_class is None:
-            valid = "scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample"
+            valid = "scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)"
             return CommandResult(
                 success=False,
                 message=f"Unknown class: '{class_name}'. Valid classes: {valid}",

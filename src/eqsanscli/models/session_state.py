@@ -161,6 +161,17 @@ class SessionState:
         }
         with open(path, "w") as f:
             json.dump(data, f, indent=2, default=str)
+
+        # Update the global breadcrumb so /continue can find this autosave from
+        # any cwd — but only when the session has real content, so we don't
+        # clobber a good breadcrumb with an empty just-launched-elsewhere session.
+        has_content = (
+            self.ipts != 0
+            or any(t.rows for t in self.tables.values())
+        )
+        if has_content and os.path.basename(path) == "_autosave.json":
+            self.record_breadcrumb(path)
+
         return path
 
     @classmethod
@@ -205,3 +216,30 @@ class SessionState:
     @classmethod
     def auto_save_path(cls) -> str:
         return str(_sessions_dir() / "_autosave.json")
+
+    @classmethod
+    def _breadcrumb_path(cls) -> Path:
+        """Global pointer to the most recent autosave, regardless of cwd."""
+        d = Path.home() / ".eqsanscli"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "last_autosave"
+
+    @classmethod
+    def record_breadcrumb(cls, autosave_path: str) -> None:
+        """Write the latest autosave path to the global breadcrumb (best-effort)."""
+        try:
+            cls._breadcrumb_path().write_text(autosave_path)
+        except OSError:
+            pass
+
+    @classmethod
+    def read_breadcrumb(cls) -> str | None:
+        """Return the path from the breadcrumb if it exists and is non-empty."""
+        try:
+            p = cls._breadcrumb_path()
+            if p.exists():
+                text = p.read_text().strip()
+                return text or None
+        except OSError:
+            pass
+        return None

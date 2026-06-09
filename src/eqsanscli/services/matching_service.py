@@ -34,6 +34,7 @@ VALID_RUN_CLASSES = {
     "scattering", "transmission",
     "bkg_scatt", "bkg_trans",
     "empty_trans", "empty_scatt",
+    "ignore",
 }
 
 # User-friendly short names → canonical
@@ -54,6 +55,14 @@ RUN_CLASS_ALIASES: dict[str, str] = {
     "empty_scatt": "empty_scatt",
     "scattering": "scattering",
     "transmission": "transmission",
+    "i": "ignore",
+    "n": "ignore",
+    "ignore": "ignore",
+    "ignored": "ignore",
+    "notused": "ignore",
+    "not_used": "ignore",
+    "skip": "ignore",
+    "exclude": "ignore",
 }
 
 # Short display labels for /show catalog
@@ -64,6 +73,7 @@ RUN_CLASS_SHORT: dict[str, str] = {
     "bkg_trans": "BkgT",
     "empty_trans": "EmpT",
     "empty_scatt": "EmpS",
+    "ignore": "N",
 }
 
 ConfigKey = tuple[float, float, int]
@@ -227,6 +237,8 @@ def _classify_catalog(catalog: pd.DataFrame) -> list[ClassifiedRun]:
 
     classified: list[ClassifiedRun] = []
     for _, row in catalog.iterrows():
+        if str(row.get("run_class", "")) == "ignore":
+            continue
         cr = _classify_run_from_row(row)
         classified.append(cr)
     return classified
@@ -309,8 +321,12 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                 trans_run = trans_lookup_base.get(s_base, "")
 
             if s.is_background or s.is_empty:
-                row_bkg_scatt = default_empty
-                row_bkg_trans = default_empty
+                # Background-cell and empty-beam rows don't get an auto-assigned
+                # background — empty-beam is a calibration measurement, not a
+                # background reference. User can /set <row> bkg <run> manually
+                # if subtraction is desired for a specific bkg cell.
+                row_bkg_scatt = ""
+                row_bkg_trans = ""
             else:
                 row_bkg_scatt = default_bkg_scatt
                 row_bkg_trans = default_bkg_trans
@@ -332,6 +348,70 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
     return table, warnings
 
 
+def merge_new_runs(
+    existing_table: WorkingTable,
+    fresh_catalog: pd.DataFrame,
+    ipts: int = 0,
+) -> tuple[WorkingTable, list[str], int, list[str]]:
+    """Merge new catalog runs into an existing working table.
+
+    Preserves all existing rows (with their status, assignments, output_file).
+    Adds only new scattering runs from the fresh catalog. New runs in existing
+    configs inherit bkg/empty/bkgtrans from the existing table for that config.
+
+    Returns:
+        (merged_table, warnings, n_new_runs, new_config_ids)
+    """
+    from eqsanscli.models.config_id import make_config_id
+
+    # Existing scattering run numbers
+    existing_runs = {r.scattering_run for r in existing_table.rows}
+
+    # Build fresh table from refreshed catalog
+    fresh_table, fresh_warnings = match_runs(fresh_catalog, ipts=ipts)
+
+    # Collect bkg/empty/bkgtrans assignments from existing table per config
+    config_assignments: dict[str, dict[str, str]] = {}
+    for row in existing_table.rows:
+        cfg = row.configuration
+        if cfg not in config_assignments:
+            config_assignments[cfg] = {
+                "background_scatt": row.background_scatt,
+                "background_trans": row.background_trans,
+                "empty_beam": row.empty_beam,
+            }
+
+    # Find new rows
+    new_rows: list[WorkingTableRow] = []
+    new_config_ids: set[str] = set()
+    for row in fresh_table.rows:
+        if row.scattering_run not in existing_runs:
+            cfg = row.configuration
+            if cfg in config_assignments:
+                # Inherit assignments from existing table for this config
+                assignments = config_assignments[cfg]
+                row.background_scatt = assignments["background_scatt"]
+                row.background_trans = assignments["background_trans"]
+                row.empty_beam = assignments["empty_beam"]
+            else:
+                # New config not seen before
+                new_config_ids.add(cfg)
+            new_rows.append(row)
+
+    # Append new rows to existing table
+    warnings: list[str] = []
+    for row in new_rows:
+        existing_table.add_row(row)
+
+    if new_config_ids:
+        warnings.append(
+            f"New configuration(s) found: {', '.join(sorted(new_config_ids))}. "
+            f"Presets will be applied for these."
+        )
+
+    return existing_table, warnings, len(new_rows), sorted(new_config_ids)
+
+
 def assign_background(
     table: WorkingTable, catalog: pd.DataFrame, bkg_sample_name: str,
 ) -> tuple[int, str]:
@@ -351,17 +431,14 @@ def assign_background(
     if not bkg_scatt_by_config:
         return 0, f"No scattering runs found for sample '{bkg_sample_name}'."
 
-    empty_by_config: dict[ConfigKey, str] = {}
-    for trow in table.rows:
-        if trow.empty_beam:
-            empty_by_config[trow.config_key] = trow.empty_beam
-
     count = 0
     for trow in table.rows:
         cfg = trow.config_key
         if trow.sample_name.lower() == bkg_name_lower:
-            trow.set_field("background_scatt", empty_by_config.get(cfg, ""))
-            trow.set_field("background_trans", empty_by_config.get(cfg, ""))
+            # The bkg sample itself gets NO background — empty-beam is a
+            # calibration measurement, not a real background reference.
+            trow.set_field("background_scatt", "")
+            trow.set_field("background_trans", "")
             count += 1
         else:
             new_bkg_scatt = bkg_scatt_by_config.get(cfg, "")

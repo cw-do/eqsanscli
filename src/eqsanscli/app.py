@@ -7,20 +7,21 @@ from rich.table import Table
 from rich.text import Text
 
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
-from textual.widgets import RichLog
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import RichLog, Static
 from textual import work
 
 from eqsanscli.tui.widgets.completable_input import CommandSubmitted, CompletableInput, CompletionHint
 from eqsanscli.tui.widgets.status_bar import FooterBar, HeaderBar
 
 from eqsanscli import __version__
-from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass
+from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass, handle_refresh_catalog
 from eqsanscli.commands.autopilot import handle_autopilot
 from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
 from eqsanscli.commands.calibrate import handle_calibrate
 from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
-from eqsanscli.commands.export import handle_export_script, handle_zipnsend
+from eqsanscli.commands.export import handle_export_script, handle_zipnsend, handle_confirm
+from eqsanscli.commands.note import handle_note
 from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
 from eqsanscli.commands.models import handle_models
 from eqsanscli.commands.preset import handle_apply_preset, handle_compare, handle_show_preset, handle_show_presets
@@ -49,8 +50,13 @@ class EQSANSApp(App):
         layout: vertical;
         padding: 0 1;
     }
-    #output-scroll {
+    #main-area {
         height: 1fr;
+        width: 100%;
+    }
+    #output-scroll {
+        width: 1fr;
+        height: 100%;
         overflow-y: auto;
         overflow-x: auto;
         scrollbar-gutter: stable;
@@ -61,6 +67,23 @@ class EQSANSApp(App):
         border: none;
         overflow-x: auto;
         overflow-y: hidden;
+    }
+    #guide-pane {
+        width: 44;
+        height: 100%;
+        background: $surface;
+        border-left: solid $accent;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+        display: none;
+    }
+    #guide-pane.-visible {
+        display: block;
+    }
+    #guide-content {
+        height: auto;
+        color: $text;
+        padding: 1 2;
     }
     #cmd-input {
         dock: bottom;
@@ -108,6 +131,8 @@ class EQSANSApp(App):
         self.router.register("show table", handle_show_table)
         self.router.register("matchruns", handle_matchruns)
         self.router.register("reclass", handle_reclass)
+        self.router.register("refresh catalog", handle_refresh_catalog)
+        self.router.register("refresh", handle_refresh_catalog)  # bare /refresh = catalog
         self.router.register("set", handle_set)
         self.router.register("set config", handle_set_config)
         self.router.register("show config", handle_show_config)
@@ -121,6 +146,8 @@ class EQSANSApp(App):
         self.router.register("remove", handle_remove)
         self.router.register("export script", handle_export_script)
         self.router.register("zipnsend", handle_zipnsend)
+        self.router.register("confirm", handle_confirm)
+        self.router.register("note", handle_note)
         self.router.register("plot", handle_plot)
         self.router.register("list iq", handle_list_iq)
         self.router.register("list iqxqy", handle_list_iqxqy)
@@ -140,6 +167,7 @@ class EQSANSApp(App):
         self.router.register("settings", handle_settings)
         self.router.register("share", handle_share)
         self.router.register("help", self._handle_help)
+        self.router.register("guide", self._handle_guide)
         self.router.register("version", self._handle_version)
         self.router.alias("quit", "exit")
         self.router.alias("q", "exit")
@@ -161,8 +189,11 @@ class EQSANSApp(App):
 
     def compose(self) -> ComposeResult:
         yield HeaderBar(id="header-bar")
-        with VerticalScroll(id="output-scroll"):
-            yield RichLog(id="output", highlight=True, markup=True)
+        with Horizontal(id="main-area"):
+            with VerticalScroll(id="output-scroll"):
+                yield RichLog(id="output", highlight=True, markup=True)
+            with VerticalScroll(id="guide-pane"):
+                yield Static("", id="guide-content", markup=True)
         yield CompletableInput(placeholder="eqsans> Type a command or ask in natural language...", id="cmd-input")
         yield FooterBar(id="footer-bar")
 
@@ -192,6 +223,7 @@ class EQSANSApp(App):
             "    8. [cyan]/reduce all[/cyan]             Run data reduction\n"
             "\n"
             "  [dim]Type [bold]/help[/bold] for all commands, or just ask in natural language.[/dim]\n"
+            "  [dim]Type [bold]/guide[/bold] to dock a quickstart side pane, or [bold]/help --simple[/bold] for an inline quickstart.[/dim]\n"
         )
         log.write(Text.from_markup(logo))
 
@@ -225,7 +257,9 @@ class EQSANSApp(App):
             label = "drtsans"
         else:
             label = f"drtsans --{version}"
-        self.query_one("#footer-bar", FooterBar).drtsans_label = label
+        footer = self.query_one("#footer-bar", FooterBar)
+        footer.drtsans_label = label
+        footer.worker_count = self.state.max_workers
 
     async def on_command_submitted(self, event: CommandSubmitted) -> None:
         value = event.value.strip()
@@ -503,14 +537,16 @@ class EQSANSApp(App):
             self.run_autopilot_worker(
                 data["ipts"], data.get("samples"), data.get("excludes"),
                 data.get("thickness"), data.get("bkg_sample"), data.get("config_filter"),
-                data.get("force", False),
+                data.get("force", False), data.get("continue_mode", False),
+                data.get("standard_sample"), data.get("from_step", 1),
+                data.get("fresh", False),
             )
 
     def action_cancel_job(self) -> None:
         self.cancel_job()
 
     @work(thread=True)
-    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None, force: bool = False) -> None:
+    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None, force: bool = False, continue_mode: bool = False, standard_sample: str | None = None, from_step: int = 1, fresh: bool = False) -> None:
         import asyncio
         from eqsanscli.services.autopilot import run_autopilot_sync
 
@@ -550,6 +586,10 @@ class EQSANSApp(App):
                 bkg_sample=bkg_sample,
                 config_filter=config_filter,
                 force=force,
+                continue_mode=continue_mode,
+                standard_sample=standard_sample,
+                from_step=from_step,
+                fresh=fresh,
             )
         finally:
             loop.close()
@@ -703,12 +743,73 @@ class EQSANSApp(App):
         log.write(table, shrink=False)
 
     async def _handle_help(self, args: list[str], state: SessionState) -> CommandResult:
-        """Handle /help — show available commands."""
+        """Handle /help — show available commands.
+
+        /help            — full command reference (long)
+        /help --simple   — quickstart workflow with the 7 essential steps
+        """
+        if args and args[0].lower() in ("--simple", "-s", "simple", "quickstart"):
+            simple_text = (
+                "[bold]Quickstart — basic reduction workflow:[/]\n"
+                "\n"
+                "[bold cyan]1. Load the catalog[/]\n"
+                "   [yellow]/load ipts <number>[/]              e.g. /load ipts 35884\n"
+                "   Fetches all runs for that IPTS from ONCat.\n"
+                "\n"
+                "[bold cyan]2. Check run classes; reclass if needed[/]\n"
+                "   [yellow]/show catalog[/]                    Look at the 'Class' column\n"
+                "   [yellow]/reclass <runs> <class>[/]          e.g. /reclass 172804 scatt\n"
+                "   [yellow]/reclass --sample BkgG sample[/]    Reclass by sample name (S-/T-aware)\n"
+                "   [yellow]/reclass <runs> i[/]                'i' or 'n' → ignore (excluded from matching)\n"
+                "   Classes: scatt, trans, bkg, bkgtrans, empty, sample, ignore\n"
+                "\n"
+                "[bold cyan]3. Build the working table[/]\n"
+                "   [yellow]/matchruns[/]                       Auto-matches trans/bkg/empty per config\n"
+                "\n"
+                "[bold cyan]4. Inspect and edit the table[/]\n"
+                "   [yellow]/show table[/]                      Look it over\n"
+                "   [yellow]/set <row> <field> <value>[/]       e.g. /set 3 bkg 172810\n"
+                "   [yellow]/assign bkg <sample>[/]             Bulk reassign background per config\n"
+                "   [yellow]/apply preset auto[/]               Apply preset reduction params per config\n"
+                "\n"
+                "[bold cyan]5. Reduce[/]\n"
+                "   [yellow]/reduce all[/]                      Reduce every row\n"
+                "   [yellow]/reduce --new[/]                    Only rows whose status is not 'done'\n"
+                "   [yellow]/reduce <row>[/]                    Single row or range (e.g. /reduce 1-4)\n"
+                "\n"
+                "[bold cyan]6. Stitch profiles across configurations[/]\n"
+                "   [yellow]/stitch smart[/]                    Build stitch table + auto-detect overlap Q ranges\n"
+                "   [yellow]/stitch run[/]                      Execute the merge (produces merged_*_Iq.txt)\n"
+                "   [dim]/stitch smart prepares the table; /stitch run does the actual merging.\n"
+                "    /stitch build is the manual alternative — use only if you want to set overlap\n"
+                "    Q ranges by hand via /stitch set <sample> overlap <q1 q2 ...>.[/]\n"
+                "\n"
+                "[bold cyan]7. Save the session (optional but recommended)[/]\n"
+                "   [yellow]/session save <name>[/]             Named save\n"
+                "   [yellow]/session save[/]                    Save under the current session name\n"
+                "   [dim]Session also autosaves after every command — /continue picks up the last one.[/]\n"
+                "\n"
+                "[bold cyan]8. Zip and email the results[/]\n"
+                "   [yellow]/zipnsend <email>[/]               Default: merged*.txt from outputdir, capped at 25 MB\n"
+                "   [yellow]/zipnsend <email> --pattern \"*_Iq.dat\"[/]   Custom file pattern\n"
+                "   [yellow]/zipnsend <email> --subject \"IPTS-35884 results\"[/]   Custom subject\n"
+                "   [yellow]/share <file|pattern>[/]            Anonymous 24h URL via here.now (alternative)\n"
+                "\n"
+                "[bold]Shortcut — let autopilot do it all:[/]\n"
+                "   [yellow]/autopilot <ipts>[/]                Runs steps 1–6 (and calibration) automatically\n"
+                "   [yellow]/autopilot --continue[/]            Mid-experiment: reduce only newly collected runs\n"
+                "\n"
+                "[dim]Tip: [bold]/guide[/bold] opens a side pane with these steps so you can follow along.\n"
+                "Type /help for the full command reference.[/]"
+            )
+            return CommandResult(success=True, message=simple_text)
+
         help_text = (
-            "[bold]Available Commands:[/]\n"
+            "[bold]Available Commands:[/]  [dim](use [bold]/help --simple[/bold] for the quickstart workflow, or [bold]/guide[/bold] to dock it as a side pane)[/]\n"
             "\n"
             "[bold cyan]Catalog & Data Loading:[/]\n"
             "  /load ipts <number>           — Fetch catalog from ONCat\n"
+            "  /refresh catalog              — Re-fetch current IPTS catalog (preserves /reclass overrides; reports new runs)\n"
             "  /list ipts *                  — List all EQSANS experiments from ONCat\n"
             "  /list ipts <text>             — Search by title or team member name\n"
             "  /show catalog                 — Display loaded catalog\n"
@@ -719,8 +820,12 @@ class EQSANSApp(App):
             "[bold cyan]Working Table:[/]\n"
             "  /show table                   — Show current working table\n"
             "  /show table --sample <name>   — Filter by sample name (read-only)\n"
-            "  /reclass <runs> <class>       — Override run classification (scatt/trans/bkg/empty)\n"
-            "  /matchruns                    — Auto-match trans/bkg/empty runs\n"
+            "  /reclass <runs> <class>       — Override run class (scatt/trans/bkg/bkgtrans/empty/sample/ignore)\n"
+            "  /reclass --sample <name> <class> — Reclass all runs whose title contains <name>\n"
+            "                                  Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (alias: i, n)\n"
+            "                                  'sample' respects S-/T- prefix; 'ignore' excludes from /matchruns\n"
+            "  /matchruns                    — Auto-match trans/bkg/empty runs (REBUILDS table, resets row status)\n"
+            "  /matchruns --update           — Add new scattering runs only; preserves 'done' rows (use after /refresh catalog)\n"
             "  /assign bkg <sample>          — Reassign background for all rows (config-aware)\n"
             "  /set <row> <field> <value>    — Set field (row = index, run#, range, or all)\n"
             "  /set --sample <name> <field> <value> — Set field by sample name\n"
@@ -756,6 +861,8 @@ class EQSANSApp(App):
             "\n"
             "[bold cyan]Reduction:[/]\n"
             "  /reduce <row>                 — Run data reduction (index, run#, range, all)\n"
+            "  /reduce --new                 — Reduce only rows whose status is not 'done'\n"
+            "  /reduce --sample <name>       — Reduce rows matching sample name (substring/glob)\n"
             "  /export script [filename]     — Generate standalone .py script\n"
             "\n"
             "[bold cyan]Data & Plotting:[/]\n"
@@ -787,15 +894,27 @@ class EQSANSApp(App):
             "[bold cyan]Autopilot:[/]\n"
             "  /autopilot <ipts>             — Full automated reduction pipeline\n"
             "  /autopilot current            — Use current session IPTS/catalog\n"
-            "  Options: --samples <a,b>      — Only reduce specific samples\n"
+            "  /autopilot <ipts> --continue  — Reduce only NEW runs (reuse saved calibration)\n"
+            "  /autopilot current --from <N> — Skip steps 1..(N-1) and start at step N (see /autopilot for step list)\n"
+            "  Options: --standard <name>    — Custom calibration standard (default: porsil)\n"
+            "           --samples <a,b>      — Only reduce specific samples\n"
             "           --exclude <a,b>      — Reduce all except named samples\n"
             "           --bkg <sample>       — Use sample as background (config-aware)\n"
             "           --config <id>        — Reduce only this configuration\n"
             "           --thickness <cm>     — Set sample thickness (default 0.1)\n"
+            "           --force              — Re-reduce all (ignore 'done' status)\n"
+            "\n"
+            "[bold cyan]Note (per-outputdir log):[/]\n"
+            '  /note add "<text>"            — Add a manual timestamped note to {outputdir}/NOTE.md\n'
+            "  /note show [N]                — Show last N entries (default 30)\n"
+            "  /note path                    — Show NOTE.md file path\n"
+            "  /note clear --yes             — Delete NOTE.md\n"
+            "  [dim]All state-changing commands are auto-logged to NOTE.md for reproducibility[/dim]\n"
             "\n"
             "[bold cyan]Share:[/]\n"
             "  /share <file|pattern>         — Share files via here.now (24h link)\n"
             "  /zipnsend <email> [options]   — Zip files and email (--pattern, --dir, --subject)\n"
+            "  /confirm [ipts] [options]     — Update IPTS reduction status (--status, --comment)\n"
             "\n"
             "[bold cyan]LLM:[/]\n"
             "  /models                       — List available LLM models\n"
@@ -836,6 +955,95 @@ class EQSANSApp(App):
             "[dim]Use ↑/↓ arrows to navigate command history[/]"
         )
         return CommandResult(success=True, message=help_text)
+
+    _GUIDE_TEXT = (
+        "[bold underline]EQSANS CLI — Quickstart[/]\n"
+        "\n"
+        "[bold cyan]1. Load catalog[/]\n"
+        "   [yellow]/load ipts <N>[/]\n"
+        "\n"
+        "[bold cyan]2. Check / fix classes[/]\n"
+        "   [yellow]/show catalog[/]\n"
+        "   [yellow]/reclass <runs> <class>[/]\n"
+        "   [yellow]/reclass --sample <name> <class>[/]\n"
+        "   [dim]classes: scatt, trans, bkg,\n"
+        "   bkgtrans, empty, sample, i (ignore)[/]\n"
+        "\n"
+        "[bold cyan]3. Build working table[/]\n"
+        "   [yellow]/matchruns[/]\n"
+        "\n"
+        "[bold cyan]4. Inspect / edit[/]\n"
+        "   [yellow]/show table[/]\n"
+        "   [yellow]/set <row> <field> <val>[/]\n"
+        "   [yellow]/assign bkg <sample>[/]\n"
+        "   [yellow]/apply preset auto[/]\n"
+        "\n"
+        "[bold cyan]5. Reduce[/]\n"
+        "   [yellow]/reduce all[/]\n"
+        "   [yellow]/reduce --new[/]\n"
+        "\n"
+        "[bold cyan]6. Stitch configurations[/]\n"
+        "   [yellow]/stitch smart[/]\n"
+        "   [yellow]/stitch run[/]\n"
+        "\n"
+        "[bold cyan]7. Save session[/]\n"
+        "   [yellow]/session save \\[name][/]\n"
+        "\n"
+        "[bold cyan]8. Zip & email results[/]\n"
+        "   [yellow]/zipnsend <email>[/]\n"
+        "   [dim]Default: merged*.txt from\n"
+        "   outputdir, ≤25 MB[/]\n"
+        "   [yellow]/zipnsend you@ornl.gov --pattern \"*_Iq.dat\"[/]\n"
+        "   [yellow]/share <file>[/]   [dim](24h public link)[/]\n"
+        "\n"
+        "[bold]Shortcut[/]\n"
+        "   [yellow]/autopilot <ipts>[/]\n"
+        "   [yellow]/autopilot --continue[/]\n"
+        "\n"
+        "[bold]Mid-experiment update[/]\n"
+        "   [yellow]/refresh catalog[/]\n"
+        "   [yellow]/matchruns --update[/]\n"
+        "   [yellow]/reduce --new[/]\n"
+        "\n"
+        "[dim]/guide off  — close this pane\n"
+        "/help       — full reference[/]"
+    )
+
+    async def _handle_guide(self, args: list[str], state: SessionState) -> CommandResult:
+        """Show/hide the right-side quickstart guide pane.
+
+        /guide          — toggle pane
+        /guide off      — close pane
+        /guide on       — open pane
+        """
+        try:
+            pane = self.query_one("#guide-pane", VerticalScroll)
+            content = self.query_one("#guide-content", Static)
+        except Exception:
+            return CommandResult(
+                success=False,
+                message="Guide pane not available in this view.",
+            )
+
+        sub = args[0].lower() if args else ""
+        if sub in ("off", "hide", "close"):
+            pane.remove_class("-visible")
+            return CommandResult(success=True, message="Guide closed.")
+
+        if sub in ("on", "open", "show"):
+            content.update(Text.from_markup(self._GUIDE_TEXT))
+            pane.add_class("-visible")
+            pane.scroll_home(animate=False)
+            return CommandResult(success=True, message="Guide opened.")
+
+        # bare /guide → toggle
+        if pane.has_class("-visible"):
+            pane.remove_class("-visible")
+            return CommandResult(success=True, message="Guide closed.")
+        content.update(Text.from_markup(self._GUIDE_TEXT))
+        pane.add_class("-visible")
+        pane.scroll_home(animate=False)
+        return CommandResult(success=True, message="Guide opened. Type /guide off to close. Scroll with mouse wheel or arrow keys when focused.")
 
     async def _handle_version(self, args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(success=True, message=f"eqsanscli v{__version__}")

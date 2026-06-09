@@ -74,16 +74,31 @@ python -m eqsanscli
 |---------|-------------|
 | `/autopilot <ipts>` | Full automated reduction pipeline |
 | `/autopilot current` | Use current IPTS/catalog from session (preserves `/reclass` overrides) |
+| `/autopilot <ipts> --continue` | Reduce only NEW runs (reuse saved calibration/configs/bkg) |
+| `/autopilot --continue` | Continue from saved session in outputdir (infers IPTS) |
+| `/autopilot <ipts> --standard <name>` | Use named sample as calibration standard (default: auto-detect porsil) |
 | `/autopilot <ipts> --samples <name1,name2>` | Only reduce specific samples |
 | `/autopilot <ipts> --exclude <name1,name2>` | Reduce all except named samples |
 | `/autopilot <ipts> --thickness <cm>` | Set sample thickness for all rows |
 | `/autopilot <ipts> --bkg <sample>` | Use named sample as background (config-aware) |
 | `/autopilot <ipts> --config <id>` | Reduce only the specified configuration |
 | `/autopilot <ipts> --force` | Re-reduce all rows (ignore done/modified status) |
+| `/autopilot <ipts> --fresh` | Force a clean catalog reload + table re-match (ignore in-memory state). Does NOT clear `/set config` overrides |
+| `/autopilot current --from <N>` | Skip steps 1..(N-1) of autopilot. Requires catalog + working table already in session. See `/autopilot` for the 13-step list. Common: `--from 5` (skip catalog/match/presets) |
 | `/autopilot <ipts> --exclude Y5 --bkg emptyticell --thickness 0.15` | Combined options |
 
 All flags are composable. Execution order: thickness → bkg → samples → exclude → config.
 Setup (thickness, bkg) applies to the full table first, then filters (samples, exclude, config) trim rows down.
+
+### Incremental Reduction (`--continue`)
+
+After the initial autopilot run, if you collect more data on the same IPTS:
+```
+/autopilot 35884 --continue
+```
+This refreshes the catalog from ONCat, merges new runs into the saved table, and reduces only new data. Calibration scale factors, config parameters, and background/empty beam assignments are reused from the previous run. Stitching is re-run on all data (old + new).
+
+At the end of each autopilot, a full session is saved to `{outputdir}/autopilot_session.json`. This file is also loadable via `/session load {path}` for manual inspection and modification.
 
 ### Re-reduction Status
 
@@ -97,6 +112,10 @@ Use `--force` to re-reduce all rows regardless of status.
 /autopilot 35884                                         # Reduce everything
 /autopilot current                                       # Use current session (after /reclass etc.)
 /autopilot current --bkg emptyticell --exclude Y5        # Current session + options
+/autopilot 35884 --continue                              # Only new runs, reuse saved calibration
+/autopilot --continue --samples NewSample                # Continue + filter to new sample only
+/autopilot current --standard porsilb1                   # Use porsilb1 as calibration standard
+/autopilot 38397 --standard agb1 --bkg banjo             # Custom standard + custom bkg
 /autopilot 35884 --samples Bi1,Bi2                       # Only Bi1 and Bi2 (+ porsil)
 /autopilot 35884 --exclude Y5,Y6                         # Everything except Y5 and Y6
 /autopilot 35884 --bkg emptyticell                       # Use emptyticell as background
@@ -113,8 +132,9 @@ Use `--force` to re-reduce all rows regardless of status.
 
 | Command | Description |
 |---------|-------------|
-| `/load ipts <number>` | Fetch catalog from ONCat |
-| `/show catalog` | Display loaded catalog (with Class column: S, T, BkgS, BkgT, EmpT) |
+| `/load ipts <number>` | Fetch catalog from ONCat (REPLACES current catalog, wipes `/reclass` overrides) |
+| `/refresh catalog` | Re-fetch the current IPTS catalog while PRESERVING `/reclass` overrides; reports new runs since last fetch. Use mid-experiment. |
+| `/show catalog` | Display loaded catalog (with Class column: S, T, BkgS, BkgT, EmpT, N=ignored) |
 | `/show ipts` | Show current IPTS number |
 | `/save catalog <file>` | Export catalog to CSV |
 | `/load catalog <file>` | Load catalog from CSV |
@@ -128,9 +148,10 @@ Use `--force` to re-reduce all rows regardless of status.
 |---------|-------------|
 | `/show table` | Show current working table |
 | `/show table --sample <name>` | Show only rows matching sample name (read-only filter) |
-| `/reclass <runs> <class>` | Override run classification (scatt/trans/bkg/bkgtrans/empty/sample) |
-| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`) |
-| `/matchruns` | Auto-match transmission/background/empty runs using `run_class` |
+| `/reclass <runs> <class>` | Override run classification. Classes: `scatt`, `trans`, `bkg`, `bkgtrans`, `empty`, `emptyscatt`, `sample`, `ignore` (aliases `i`, `n`) |
+| `/reclass --sample <name> <class>` | Reclass all runs whose title contains `<name>` (e.g. `--sample BkgG sample`, `--sample banjo i`) |
+| `/matchruns` | Auto-match transmission/background/empty runs using `run_class`. REBUILDS the table (resets row status) |
+| `/matchruns --update` | Add only new scattering runs to the EXISTING table; preserves `done` rows and assignments. Use after `/refresh catalog` |
 | `/assign bkg <sample>` | Reassign background sample for all rows (config-aware, sets bkg+bkgtrans) |
 | `/set <row> <field> <value>` | Set row field. `<row>` = index, run number, range (`1-5`, `1,3,5`), or `all` |
 | `/set <row> <field> none` | Clear a field |
@@ -173,10 +194,14 @@ Use `--force` to re-reduce all rows regardless of status.
 | `/zipnsend <email> --pattern <glob>` | Zip custom file pattern and email |
 | `/zipnsend <email> --dir <path>` | Zip from specific directory |
 | `/zipnsend <email> --subject <text>` | Custom email subject |
+| `/confirm [ipts]` | Confirm IPTS data reduction is complete |
+| `/confirm --comment <text>` | Confirm with comment |
 
 **Share:** Files are uploaded to [here.now](https://here.now) using only Python stdlib (no external packages). Anonymous uploads expire in 24 hours. Max 50 MB total. Searches output directory first, then current directory.
 
 **Zipnsend:** Zips matching files and emails using `mailx`/`mail`. Max 25 MB (suggests `/share` if larger). Default pattern is `merged*.txt` from the output directory.
+
+**Confirm:** Calls `/SNS/software/nses/bin/confirm-data` to mark IPTS data reduction as complete in the SNS experiment tracking system. Autopilot calls this automatically at the end.
 
 ```
 /zipnsend ccd@ornl.gov                                  # merged files
@@ -223,6 +248,7 @@ Place JSON files in the `preset_configs/` folder. These are full `eqsans_reducti
 |---------|-------------|
 | `/reduce <row>` | Run data reduction. `<row>` = index, run number, range, or `all` |
 | `/reduce --sample <name>` | Reduce only rows matching sample name (exact; `*` for wildcard) |
+| `/reduce --new` | Reduce only rows whose status is not `done` (newly added, modified, or previously errored) |
 | `/export script [filename]` | Generate standalone .py reduction script |
 
 ### Data & Plotting
@@ -309,14 +335,27 @@ The config names appear in the filename in low-Q → high-Q order (e.g., `merged
 
 | Command | Description |
 |---------|-------------|
-| `/continue` | Resume most recent session (autosave or named) |
-| `/session list` | List saved sessions |
+| `/continue` | Resume most recent session (autosave or named). Cross-cwd via breadcrumb at `~/.eqsanscli/last_autosave` |
+| `/session list` | List saved sessions with save date/time (sorted newest-first) |
 | `/session save [name]` | Save current session |
-| `/session load <name>` | Load a saved session |
-| `/help` | Show command reference |
+| `/session load <name>` | Load a saved session (accepts an absolute path too) |
+| `/help` | Show full command reference (long) |
+| `/help --simple` | Show inline 7-step quickstart workflow |
+| `/guide` | Toggle a side pane with the quickstart steps (auto-scrolls when content exceeds height) |
 | `/quit` | Exit (auto-saves session) |
 
-**Auto-save:** Session is saved automatically after every command, after background jobs complete (`/reduce`, `/autopilot`), and on exit. On startup, if a previous session exists, you'll see a hint to type `/continue` to resume.
+**Auto-save:** Session is saved automatically after every command, after background jobs complete (`/reduce`, `/autopilot`), and on exit. The autosave file lives at `{cwd}/.eqsanscli/sessions/_autosave.json` — i.e. it follows the working folder. `/continue` also reads a global breadcrumb at `~/.eqsanscli/last_autosave` (written whenever a non-empty session autosaves) so it can find your most recent work even if you re-launched from a different directory. On startup, if a previous session exists, you'll see a hint to type `/continue` to resume.
+
+### Note (per-outputdir log)
+
+| Command | Description |
+|---------|-------------|
+| `/note add "<text>"` | Add a manual timestamped note to `{outputdir}/NOTE.md` |
+| `/note show [N]` | Show the last N entries (default 30) |
+| `/note path` | Print the NOTE.md path |
+| `/note clear --yes` | Delete NOTE.md |
+
+All state-changing commands are auto-logged to `NOTE.md` (read-only commands like `/show`, `/help`, `/note` are skipped). Format includes timestamp and IPTS tag. The intent is "replay the listed commands in order to reproduce this reduction".
 
 ### Settings
 

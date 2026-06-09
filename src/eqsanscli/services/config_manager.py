@@ -204,23 +204,27 @@ def set_config_param(
         k for k, v in _load_json_defaults().items()
         if isinstance(v, bool)
     }
-    try:
-        if isinstance(current, bool) or param_lower in bool_params:
-            parsed: object = value.lower() in ("true", "1", "yes")
-        elif isinstance(current, int) and not isinstance(current, bool):
-            parsed = int(value)
-        elif isinstance(current, float):
-            parsed = float(value)
-        elif current is None:
-            # Try float, then int, then string
-            try:
+    # Sentinel values that clear a param back to None (drtsans treats null as "not set")
+    if value.strip().lower() in ("none", "null"):
+        parsed: object = None
+    else:
+        try:
+            if isinstance(current, bool) or param_lower in bool_params:
+                parsed = value.lower() in ("true", "1", "yes")
+            elif isinstance(current, int) and not isinstance(current, bool):
+                parsed = int(value)
+            elif isinstance(current, float):
                 parsed = float(value)
-            except ValueError:
+            elif current is None:
+                # Try float, then int, then string
+                try:
+                    parsed = float(value)
+                except ValueError:
+                    parsed = value
+            else:
                 parsed = value
-        else:
-            parsed = value
-    except (ValueError, TypeError):
-        return False, f"Invalid value for {param}: {value}"
+        except (ValueError, TypeError):
+            return False, f"Invalid value for {param}: {value}"
 
     # Store override
     if config_id not in user_configs:

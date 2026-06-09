@@ -35,9 +35,10 @@ python -m eqsanscli
 ```
 /load ipts <N>        Load catalog from ONCat (adds run_class column)
         |
-/show catalog         Review Class column (S/T/BkgS/BkgT/EmpT)
+/show catalog         Review Class column (S/T/BkgS/BkgT/EmpT/N=ignored)
         |
 [fix classes]         /reclass <runs> <class> (if titles are mislabeled)
+                      Classes include 'ignore' (alias 'i' or 'n') — excluded from /matchruns
         |
 /matchruns            Auto-match trans/bkg/empty using run_class
         |
@@ -45,13 +46,13 @@ python -m eqsanscli
         |
 [fix problems]        /set, /assign bkg, /remove
         |
-/apply preset auto    Apply closest preset configs
+/apply preset auto    Apply closest preset configs (preserves user-set params)
         |
 /set outputdir <path> Set where output goes
         |
-/reduce all           Run reduction
+/reduce all           Run reduction (or /reduce --new for just new/errored rows)
         |
-/stitch build         Build stitch table
+/stitch smart         Build stitch table + auto-detect overlap Q ranges
 /stitch run           Execute stitching
         |
 /plot *.dat           Plot results
@@ -59,6 +60,20 @@ python -m eqsanscli
 
 Or skip everything with: `/autopilot <ipts>` (runs full pipeline automatically).
 Use `/autopilot current` to run with the current session catalog (after `/reclass` etc.).
+
+**Mid-experiment incremental flow** (when new runs are collected during the experiment):
+```
+/refresh catalog         Re-fetch from ONCat; PRESERVES /reclass overrides
+/matchruns --update      Append new rows; preserves status=done rows
+/reduce --new            Reduce only status != "done" rows
+/stitch smart            Re-stitch with the new data
+```
+
+Or as a one-liner: `/autopilot --continue` does steps 1–4 above automatically and re-stitches.
+
+**Quick reference panels:**
+- `/help --simple` — inline 7-step quickstart
+- `/guide` — dockable side pane with the quickstart (toggle with `/guide off`)
 
 ---
 
@@ -264,6 +279,7 @@ Fields: `trans`, `bkg`, `bkgtrans`, `emp`, `thickness`
 | `/reduce <row>` | Progress per row (✓/✗), output filenames |
 | `/autopilot <ipts> [options]` | Full pipeline with step-by-step progress |
 | `/autopilot current [options]` | Use current session IPTS/catalog (preserves `/reclass`) |
+| `/autopilot --continue` | Reduce only NEW runs, reuse saved calibration/configs/bkg |
 | `/export script [file]` | Standalone .py script path |
 
 Autopilot options: `--samples <a,b>`, `--exclude <a,b>`, `--thickness <cm>`
@@ -286,6 +302,7 @@ Autopilot options: `--samples <a,b>`, `--exclude <a,b>`, `--thickness <cm>`
 | `/plot <pattern> [flags]` | Plot displayed or saved to file |
 | `/share <pattern>` | Upload URL (24h anonymous link) |
 | `/zipnsend <email> [options]` | Zip files and email (--pattern, --dir, --subject) |
+| `/confirm [ipts]` | Update IPTS reduction status in SNS system |
 
 Plot flags: `--logx`, `--logy`, `--linx`, `--liny`, `--loglog`, `--linlin`,
 `--kratky`, `--guinier`, `--porod`, `--save <path>`, `--title <text>`, `--noerror`

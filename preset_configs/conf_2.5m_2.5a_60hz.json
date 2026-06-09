@@ -61,7 +61,7 @@
         "StandardAbsoluteScale": 0.1916573,
         "numQxQyBins": 80,
         "1DQbinType": "scalar",
-        "QbinType": "linear",
+        "QbinType": "log",
         "numQBins": 80,
         "LogQBinsPerDecade": null,
         "useLogQBinsDecadeCenter": false,

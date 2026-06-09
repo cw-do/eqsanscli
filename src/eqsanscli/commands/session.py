@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,14 @@ def _list_saved_files(directory: Path, ext: str = ".json") -> list[Path]:
     if not directory.exists():
         return []
     return sorted(directory.glob(f"*{ext}"))
+
+
+def _fmt_mtime(path: Path) -> str:
+    """Format file mtime as 'YYYY-MM-DD HH:MM' for display."""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        return "?"
 
 
 async def handle_save(args: list[str], state: SessionState) -> CommandResult:
@@ -148,16 +157,18 @@ async def handle_load_table(args: list[str], state: SessionState) -> CommandResu
 
 async def handle_list_tables(args: list[str], state: SessionState) -> CommandResult:
     saved = _list_saved_files(_tables_dir())
+    saved = sorted(saved, key=lambda p: p.stat().st_mtime, reverse=True)
 
     lines = [f"Saved tables in {_tables_dir()} ({len(saved)}):"]
     for p in saved:
+        saved_at = _fmt_mtime(p)
         try:
             with open(p) as f:
                 data = json.load(f)
             n_rows = len(data.get("rows", []))
-            lines.append(f"  {p.stem:<20} {n_rows} rows  ({p.name})")
+            lines.append(f"  {p.stem:<20} [dim]{saved_at}[/dim]  {n_rows} rows  ({p.name})")
         except Exception:
-            lines.append(f"  {p.stem:<20} (corrupt)")
+            lines.append(f"  [dim]{p.stem:<20} {saved_at}  (corrupt)[/dim]")
 
     lines.append(f"\nActive tables in session:")
     for name, tbl in state.tables.items():
@@ -177,20 +188,26 @@ async def handle_save_session(args: list[str], state: SessionState) -> CommandRe
 async def handle_load_session(args: list[str], state: SessionState) -> CommandResult:
     if not args:
         saved = _list_saved_files(_sessions_dir())
+        # Sort by mtime (most-recent first) so the freshest session is at the top
+        saved = sorted(saved, key=lambda p: p.stat().st_mtime, reverse=True)
         if not saved:
             return CommandResult(success=True, message=f"No saved sessions in {_sessions_dir()}")
         lines = [f"Saved sessions in {_sessions_dir()}:"]
         for p in saved:
             if p.stem.startswith("_"):
                 continue
+            saved_at = _fmt_mtime(p)
             try:
                 with open(p) as f:
                     data = json.load(f)
                 ipts = data.get("ipts", "?")
                 n_tables = len(data.get("tables", {}))
-                lines.append(f"  [cyan]{p.stem}[/cyan]  (IPTS-{ipts}, {n_tables} tables)")
+                lines.append(
+                    f"  [cyan]{p.stem:<20}[/cyan]  [dim]{saved_at}[/dim]  "
+                    f"(IPTS-{ipts}, {n_tables} tables)"
+                )
             except Exception:
-                lines.append(f"  [dim]{p.stem}[/dim]  (corrupt)")
+                lines.append(f"  [dim]{p.stem:<20}  {saved_at}  (corrupt)[/dim]")
         lines.append(f"\n[dim]Usage: /load session <name>[/dim]")
         return CommandResult(success=True, message="\n".join(lines))
 
@@ -210,19 +227,34 @@ async def handle_load_session(args: list[str], state: SessionState) -> CommandRe
 
 
 async def handle_continue(args: list[str], state: SessionState) -> CommandResult:
-    """Load the most recent session — autosave first, then newest named session."""
+    """Load the most recent session — autosave first, then newest named session.
+
+    The autosave file is cwd-relative (tied to the working folder), so launching
+    eqsanscli from a different directory than where the work was done would miss
+    it. To handle that, we also consult a global breadcrumb at
+    ~/.eqsanscli/last_autosave that points to the most recent autosave that
+    contained real work, regardless of cwd.
+    """
     from eqsanscli.models.session_state import SessionState as SS
 
-    autosave = Path(SS.auto_save_path())
-    candidates: list[tuple[float, Path]] = []
+    cwd_autosave = Path(SS.auto_save_path())
+    breadcrumb_path_str = SS.read_breadcrumb()
+    breadcrumb = Path(breadcrumb_path_str) if breadcrumb_path_str else None
 
-    if autosave.exists():
-        candidates.append((autosave.stat().st_mtime, autosave))
+    candidates: list[tuple[float, Path, str]] = []  # (mtime, path, source_label)
+
+    if cwd_autosave.exists():
+        candidates.append((cwd_autosave.stat().st_mtime, cwd_autosave, "autosave (cwd)"))
+
+    if breadcrumb is not None and breadcrumb.exists() and breadcrumb != cwd_autosave:
+        candidates.append(
+            (breadcrumb.stat().st_mtime, breadcrumb, f"autosave ({breadcrumb.parent.parent.parent})")
+        )
 
     for p in _list_saved_files(_sessions_dir()):
         if p.stem.startswith("_"):
             continue
-        candidates.append((p.stat().st_mtime, p))
+        candidates.append((p.stat().st_mtime, p, f"session '{p.stem}'"))
 
     if not candidates:
         return CommandResult(
@@ -231,7 +263,7 @@ async def handle_continue(args: list[str], state: SessionState) -> CommandResult
         )
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    _, best = candidates[0]
+    _, best, source = candidates[0]
 
     try:
         loaded = SS.load(str(best))
@@ -240,12 +272,12 @@ async def handle_continue(args: list[str], state: SessionState) -> CommandResult
 
     state.restore_from(loaded)
 
-    source = "autosave" if best.stem.startswith("_") else f"session '{loaded.name}'"
     return CommandResult(
         success=True,
         message=f"Continued from {source} (IPTS-{loaded.ipts}, "
         f"{len(loaded.tables)} tables, "
-        f"{sum(len(t.rows) for t in loaded.tables.values())} total rows).",
+        f"{sum(len(t.rows) for t in loaded.tables.values())} total rows).\n"
+        f"  [dim]Path: {best}[/dim]",
     )
 
 

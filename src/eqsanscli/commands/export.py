@@ -190,3 +190,85 @@ async def handle_zipnsend(args: list[str], state: SessionState) -> CommandResult
         return CommandResult(success=False, message="Mail command timed out (30s).")
     except Exception as e:
         return CommandResult(success=False, message=f"Error: {e}")
+
+
+CONFIRM_DATA_BIN = "/SNS/software/nses/bin/confirm-data"
+
+VALID_STATUSES = ["Unknown", "No", "Yes", "Partially", "None Expected"]
+VALID_TYPES = ["Auto", "CIS", "Scripts"]
+
+
+def run_confirm_data(
+    ipts: int,
+    submission: int = 1,
+    reduction_type: str = "Scripts",
+    status: str = "Yes",
+    comment: str = "",
+) -> tuple[bool, str]:
+    """Call confirm-data to update IPTS reduction status.
+
+    Returns (success, message).
+    """
+    if not os.path.exists(CONFIRM_DATA_BIN):
+        return False, f"confirm-data not found: {CONFIRM_DATA_BIN}"
+
+    cmd = [CONFIRM_DATA_BIN, "EQSANS", str(ipts), str(submission), reduction_type,
+           "-s", status]
+    if comment:
+        cmd.extend(["-c", comment])
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            err = proc.stderr.strip() or proc.stdout.strip() or "Unknown error"
+            return False, f"confirm-data failed: {err}"
+        return True, f"Data reduction status updated for IPTS-{ipts} (type={reduction_type}, status={status})"
+    except subprocess.TimeoutExpired:
+        return False, "confirm-data timed out (30s)"
+    except Exception as e:
+        return False, f"Error running confirm-data: {e}"
+
+
+async def handle_confirm(args: list[str], state: SessionState) -> CommandResult:
+    """/confirm [ipts] [--comment <text>] — confirm IPTS data reduction is complete.
+
+    Examples:
+        /confirm                                — Confirm current IPTS
+        /confirm 38397                          — Confirm specific IPTS
+        /confirm --comment "reduced with eqsanscli"
+    """
+    if args and args[0] in ("--help", "-h", "help"):
+        return CommandResult(
+            success=False,
+            message="Usage: /confirm [ipts] [--comment <text>]\n"
+            "  Confirms data reduction is complete (status=Yes, type=Scripts).\n\n"
+            "Examples:\n"
+            "  /confirm\n"
+            "  /confirm 38397\n"
+            '  /confirm --comment "reduced with eqsanscli"',
+        )
+
+    ipts = None
+    comment = ""
+
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--comment" and i + 1 < len(args):
+            comment = args[i + 1]
+            i += 2
+            continue
+        if ipts is None:
+            try:
+                ipts = int(a)
+            except ValueError:
+                pass
+        i += 1
+
+    if ipts is None:
+        ipts = state.ipts
+    if not ipts:
+        return CommandResult(success=False, message="No IPTS specified and none in session. Usage: /confirm [ipts]")
+
+    success, message = run_confirm_data(ipts, comment=comment)
+    return CommandResult(success=success, message=message)

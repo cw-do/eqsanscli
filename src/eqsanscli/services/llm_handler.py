@@ -81,6 +81,7 @@ Available commands:
 
 CATALOG:
 /load ipts <number>             - Fetch catalog from ONCat
+/refresh catalog                - Re-fetch the current IPTS catalog while preserving any /reclass overrides; reports number of new runs since last fetch
 /list ipts *                    - List all EQSANS experiments (cached after first fetch)
 /list ipts <text>               - Search experiments by title or team member name (searches cache)
 /list ipts refresh              - Re-fetch experiment list from ONCat (clears cache)
@@ -88,12 +89,30 @@ CATALOG:
 /show ipts                      - Show current IPTS number
 /save catalog <file>            - Save catalog CSV
 /load catalog <file>            - Load catalog CSV
+  IMPORTANT: When the user says "refresh catalog", "check for new runs", "pull latest from oncat", "new data has been collected", use /refresh catalog (NOT /load ipts again — that wipes /reclass overrides).
 
 WORKING TABLE:
 /show table                     - Show working table
 /show table --sample <name>     - Show only rows matching sample name (read-only filter, no deletion)
-/reclass <runs> <class>         - Override run classification (scatt/trans/bkg/bkgtrans/empty/sample). "sample" respects S-/T- prefix
-/matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog)
+/reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/ignore)
+/reclass --sample <name> <class> - Override run classification by sample name (matches title after S-/T- prefix)
+  IMPORTANT: If the user references a NAME (text), use --sample. If the user references a NUMBER (run number), don't use --sample:
+    "reclass BkgG as sample" → /reclass --sample BkgG sample       (BkgG is a name)
+    "treat emptyticell as background" → /reclass --sample emptyticell bkg  (emptyticell is a name)
+    "make BkgH a normal sample" → /reclass --sample BkgH sample    (BkgH is a name)
+    "change 11233 to be sample" → /reclass 11233 sample            (11233 is a run number)
+    "reclass 11233-11240 as scatt" → /reclass 11233-11240 scatt    (run number range)
+    "ignore run 11233" / "skip 11233" / "exclude 11240-11242" → /reclass 11233 i  /  /reclass 11240-11242 i
+    "ignore the BadRun sample" → /reclass --sample BadRun i        (name-based ignore)
+    "mark 11233 as not used" / "don't use 11233" → /reclass 11233 n   ('n' = 'not used', same as 'i')
+  The "sample" class respects S-/T- prefix: S-BkgG→scatt, T-BkgG→trans
+  The "ignore" class (aliases: i, n) excludes those runs from /matchruns entirely — they will NOT appear in the working table.
+/matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog) — REBUILDS table (resets row status)
+/matchruns --update             - Add new scattering runs to the EXISTING working table without disrupting reduced rows. Use after /refresh catalog.
+  IMPORTANT: Mid-experiment incremental flow when new runs arrive:
+    "new runs collected, update the table" → /refresh catalog then /matchruns --update
+    "reduce only the new ones" → /reduce --new   (skips rows already done)
+    OR replace /reduce --new + manual stitch with /autopilot --continue (preferred — auto-stitches/plots).
 /assign bkg <sample>            - Reassign background for ALL rows (config-aware, sets both bkg+bkgtrans) — PREFER this over per-row /set for background
 /set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness). <row> = index, run number, range (1-5, 1,3,5), or all
 /set <row> <field> none         - Clear a field
@@ -105,10 +124,28 @@ WORKING TABLE:
 /load table <name>              - Load table
 /list tables                    - List tables
 
+MULTI-TABLE (one session can hold multiple named working tables; switching tables changes /show table, /reduce, /matchruns, etc.):
+/table                          - Show active table info + multi-table help
+/table list                     - List all tables in the session
+/table new <name>               - Create a new empty table and switch to it
+/table <name>                   - Switch the active table to <name>
+/table clone <src> <dst>        - Copy table <src> to a new table <dst>
+/table rename <old> <new>       - Rename a table
+/table delete <name>            - Delete a table
+/move <row> <target_table>      - Move rows from active table to <target_table>. <row> = index, run#, range, or all
+  Use multi-table when the user wants to separate porsil/standard runs from samples, or split by config, or stage different reductions side-by-side.
+    "put porsil into its own table" → /table new porsil  then  /move --sample porsil porsil
+    "switch back to default" → /table default
+    "rename samples to main" → /table rename samples main
+
 CONFIGURATION:
 /list configs                   - List configurations
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a)
 /set config <id> <param> <val>  - Set config parameter
+  File-path params (maskfilename, sensitivityfilename, darkfilename, defaultmask, fluxmonitorratiofile, beamfluxfilename) auto-resolve bare filenames against cwd → /SNS/EQSANS/IPTS-{ipts}/shared/ → eqsanstools defaults.
+  Pass the bare filename — do NOT pre-construct the path yourself.
+    "use mask4m.nxs for 4m configuration"         → /set config 4m maskfilename mask4m.nxs
+    "set sensitivity file to Sens_4m.nxs for 2m"  → /set config 2m sensitivityfilename Sens_4m.nxs
 /show outputdir                 - Show output directory
 /set outputdir <path>            - Set output directory
 /set ipts <number>              - Set IPTS number
@@ -124,6 +161,8 @@ PRESETS:
 
 REDUCTION:
 /reduce <row>                   - Run reduction. <row> = index, run number, range (1-4, 1,3,5), or all
+/reduce --new                   - Reduce ONLY rows whose status is not 'done' (i.e. newly added, modified, or previously errored)
+/reduce --sample <name>         - Reduce rows matching sample name (substring/glob)
 /export script [filename]       - Export .py reduction script
 
 DATA & PLOTTING:
@@ -156,6 +195,15 @@ SHARE & EMAIL:
     "email all Iq files to user@lab.gov" → /zipnsend user@lab.gov --pattern "*_Iq.dat"
     "mail the plots to me at joe@ornl.gov" → /zipnsend joe@ornl.gov --pattern "*.png"
     "send results to ccd@ornl.gov with subject IPTS-38397" → /zipnsend ccd@ornl.gov --subject "IPTS-38397"
+/confirm [ipts] [--comment <text>] - Confirm IPTS data reduction is complete in SNS system. Autopilot calls this automatically.
+  "confirm reduction" → /confirm
+  "confirm reduction for 38397" → /confirm 38397
+/note add "<text>"               - Add a manual note to {outputdir}/NOTE.md (timestamped). Auto-logs all state-changing commands.
+/note show [N]                   - Show last N entries of NOTE.md (default 30)
+/note path                       - Show NOTE.md file path
+  "add a note that the porsil run was bad" → /note add "porsil run was bad"
+  "remember we used qmin=0.005 for low-Q" → /note add "used qmin=0.005 for low-Q"
+  "show the log" / "show notes" → /note show
 
 LLM:
 /models                         - List available LLM models
@@ -179,11 +227,25 @@ CALIBRATION:
 AUTOPILOT:
 /autopilot <ipts>               - Full automated reduction (load, match, configure, reduce, calibrate, stitch, plot)
 /autopilot current              - Use current IPTS/catalog from session (preserves /reclass overrides)
+/autopilot <ipts> --continue    - Reduce only NEW runs (reuse saved calibration, configs, bkg from previous run)
+/autopilot --continue           - Infer IPTS from saved session in outputdir
+/autopilot <ipts> --standard <name>  - Use named sample as calibration standard (default: auto-detect porsil/porasil)
 /autopilot <ipts> --samples <name1,name2,...>  - Autopilot only for specific samples (case-insensitive, comma-separated)
 /autopilot <ipts> --exclude <name1,name2,...>  - Autopilot all samples except named ones
 /autopilot <ipts> --thickness <cm>  - Set sample thickness (default is 0.1 cm — only set if different)
 /autopilot <ipts> --bkg <sample>    - Use named sample as background for all rows (config-aware)
 /autopilot <ipts> --config <id>     - Reduce only the specified configuration (e.g. 8m12a)
+/autopilot <ipts> --force           - Re-reduce all rows even if status is 'done' (use sparingly; user must explicitly ask "re-reduce", "force", "redo everything")
+/autopilot <ipts> --fresh           - Force a clean catalog reload + table re-match, ignoring in-memory state. Use when the user says "fresh", "from scratch", "clean run", "reload everything", "start over". Does NOT clear /set config overrides — those are still preserved.
+/autopilot current --from <N>       - Skip steps 1..(N-1) of autopilot. Steps: 1=load, 2=match, 3=verify, 4=presets, 5=outputdir, 6=reduce-standard, 7=calibrate, 8=apply-scale, 9=reduce-samples, 10-12=stitch, 13=plot
+  IMPORTANT: When user says "use X as standard sample" or "use X for calibration", use --standard <X>.
+    "run autopilot using porsilb1 as standard" → /autopilot current --standard porsilb1
+    "use existing table, calibrate with porsil b1" → /autopilot current --standard "porsil b1"
+    "autopilot 38397 with standard agb1" → /autopilot 38397 --standard agb1
+  IMPORTANT: When user has already matched and configured (e.g. "match table is ready, just calibrate and reduce"), use --from <step>.
+    "skip catalog/match/presets, run porsil and reduce rest" → /autopilot current --from 5
+    "match table and configs are done, run from output dir setup" → /autopilot current --from 5
+    "everything is set up, just calibrate and reduce" → /autopilot current --from 5
 
 SETTINGS:
 /settings                       - Show current settings

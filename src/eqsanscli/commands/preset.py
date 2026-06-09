@@ -88,16 +88,27 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
 
     Special case: /apply preset auto — auto-match presets to all configs in the table.
 
+    By default, preset values DO NOT overwrite parameters the user has already
+    set on the config (preset acts as a fill-in for defaults). Pass --force to
+    overwrite user-set values too.
+
     Examples:
         /apply preset conf_4m_10a_60hz 4m10a
         /apply preset 8m_12a_60hz_inc 8m12a
         /apply preset auto
+        /apply preset auto --force
     """
+    force = False
+    if "--force" in args:
+        force = True
+        args = [a for a in args if a != "--force"]
+
     if not args:
         return CommandResult(
             success=False,
-            message="Usage: /apply preset <preset_name> <config_id>\n"
-            "       /apply preset auto    — auto-match presets to all configs\n"
+            message="Usage: /apply preset <preset_name> <config_id> [--force]\n"
+            "       /apply preset auto [--force]    — auto-match presets to all configs\n"
+            "  --force overwrites parameters the user has already set\n"
             "  Example: /apply preset conf_4m_10a_60hz 4m10a",
         )
 
@@ -122,6 +133,7 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
         lines: list[str] = []
         applied = 0
 
+        total_preserved = 0
         for cfg in configs:
             best, match_type = find_closest_preset(cfg, preset_names)
             if best:
@@ -131,21 +143,35 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
                     if params:
                         if cfg not in state.configurations:
                             state.configurations[cfg] = {}
+                        existing = state.configurations[cfg]
+                        n_new = 0
+                        n_preserved = 0
                         for key, value in params.items():
-                            state.configurations[cfg][key] = value
+                            if not force and key in existing:
+                                n_preserved += 1
+                                continue
+                            existing[key] = value
+                            n_new += 1
+                        total_preserved += n_preserved
                         applied += 1
                         n_reset = _mark_config_rows_modified(state, cfg)
                         reset_note = f" ({n_reset} rows modified)" if n_reset else ""
+                        preserved_note = (
+                            f" [dim]({n_preserved} user-set params kept)[/dim]"
+                            if n_preserved else ""
+                        )
                         if match_type == "exact":
-                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved}{reset_note}")
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved}{preserved_note}{reset_note}")
                         elif match_type == "partial":
-                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]{reset_note}")
+                            lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]{preserved_note}{reset_note}")
                         elif match_type == "distance":
-                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]{reset_note}")
+                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]{preserved_note}{reset_note}")
                         continue
             lines.append(f"  [yellow]⚠[/yellow] {cfg} — no matching preset found")
 
         header = f"Auto-applied presets to {applied}/{len(configs)} config(s):"
+        if total_preserved and not force:
+            header += f"  [dim](kept {total_preserved} user-set param(s); use --force to overwrite)[/dim]"
         return CommandResult(
             success=True,
             message=header + "\n" + "\n".join(lines),
@@ -171,17 +197,26 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
     if params is None:
         return CommandResult(success=False, message=f"Failed to load preset: {resolved}")
 
-    # Apply all preset params as user overrides on the config
+    # Apply preset params, preserving user-set values unless --force was given
     if config_id not in state.configurations:
         state.configurations[config_id] = {}
+    existing = state.configurations[config_id]
 
     count = 0
+    preserved = 0
     for key, value in params.items():
-        state.configurations[config_id][key] = value
+        if not force and key in existing:
+            preserved += 1
+            continue
+        existing[key] = value
         count += 1
 
     n_reset = _mark_config_rows_modified(state, config_id)
     msg = f"Applied preset '{resolved}' to config '{config_id}' ({count} parameters)."
+    if preserved and not force:
+        msg += (
+            f"\n  Kept {preserved} user-set parameter(s) — pass --force to overwrite."
+        )
     if n_reset:
         msg += f"\n  ⚠ {n_reset} row(s) marked as modified — will be re-reduced."
 

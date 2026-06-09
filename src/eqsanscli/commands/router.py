@@ -99,20 +99,32 @@ class CommandRouter:
 
         # For compound commands like "show table", "set config", "export script"
         # try matching "cmd_name subcommand" first, then fall back to "cmd_name"
+        result: CommandResult | None = None
         if args:
             compound = f"{cmd_name} {args[0].lower()}"
             if compound in self._handlers:
                 handler = self._handlers[compound]
-                return await handler(args[1:], state)
+                result = await handler(args[1:], state)
 
-        if cmd_name in self._handlers:
-            handler = self._handlers[cmd_name]
-            return await handler(args, state)
+        if result is None:
+            if cmd_name in self._handlers:
+                handler = self._handlers[cmd_name]
+                result = await handler(args, state)
+            else:
+                return CommandResult(
+                    success=False,
+                    message=f"Unknown command: /{cmd_name}. Use /help to see available commands.",
+                )
 
-        return CommandResult(
-            success=False,
-            message=f"Unknown command: /{cmd_name}. Use /help to see available commands.",
-        )
+        # Auto-log successful commands to NOTE.md (best-effort, never break dispatch)
+        if result.success:
+            try:
+                from eqsanscli.services.note_service import maybe_log_command
+                maybe_log_command(state, cmd_name, f"/{text}")
+            except Exception:
+                pass
+
+        return result
 
     async def _dispatch_natural_language(self, text: str, state: SessionState) -> CommandResult:
         from eqsanscli.services.llm_handler import parse_natural_language

@@ -10,7 +10,7 @@ from eqsanscli.commands.catalog import build_working_table_display
 from eqsanscli.models.config_id import make_config_id
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.matching_service import (
-    assign_background, match_runs, _classify_catalog,
+    assign_background, match_runs, merge_new_runs, _classify_catalog,
 )
 from eqsanscli.services.reduction_service import parse_row_selection
 
@@ -19,7 +19,13 @@ if TYPE_CHECKING:
 
 
 async def handle_matchruns(args: list[str], state: SessionState) -> CommandResult:
-    """Handle /matchruns — auto-match trans/bkg/empty runs from catalog."""
+    """Handle /matchruns — auto-match trans/bkg/empty runs from catalog.
+
+    Flags:
+      --update  Add only new scattering runs to the existing table; preserve
+                already-reduced rows and their status. New rows inherit bkg/empty
+                from existing rows in the same config. Use after /refresh catalog.
+    """
     catalog = state.catalog
     if catalog is None or catalog.empty:
         return CommandResult(
@@ -27,7 +33,23 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             message="No catalog loaded. Use /show <ipts> first.",
         )
 
-    table, match_warnings = match_runs(catalog, ipts=state.ipts)
+    update_mode = any(a.lower() in ("--update", "-u") for a in args)
+
+    if update_mode:
+        existing = state.current_table
+        if not existing.rows:
+            return CommandResult(
+                success=False,
+                message="/matchruns --update needs an existing working table. "
+                        "Run /matchruns (without --update) first.",
+            )
+        table, match_warnings, n_new, new_config_ids = merge_new_runs(
+            existing, catalog, ipts=state.ipts
+        )
+    else:
+        table, match_warnings = match_runs(catalog, ipts=state.ipts)
+        n_new = None
+        new_config_ids = []
 
     if not table.rows:
         return CommandResult(
@@ -48,13 +70,30 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     matched_bkg = sum(1 for r in table.rows if r.background_scatt)
     matched_empty = sum(1 for r in table.rows if r.empty_beam)
 
-    summary = (
-        f"Matched {len(table.rows)} scattering runs across {len(configs)} configurations.\n"
-        f"  Configurations: {', '.join(configs)}\n"
-        f"  Transmission matched: {matched_trans}/{len(table.rows)}\n"
-        f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
-        f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
-    )
+    if update_mode:
+        done_count = sum(1 for r in table.rows if r.status == "done")
+        summary = (
+            f"Updated working table: +{n_new} new row(s), {done_count} preserved as 'done'.\n"
+            f"  Total: {len(table.rows)} rows across {len(configs)} configurations.\n"
+            f"  Configurations: {', '.join(configs)}"
+        )
+        if new_config_ids:
+            summary += f"\n  ⚠ New configuration(s): {', '.join(new_config_ids)} — run /apply preset auto to assign presets."
+        if n_new == 0:
+            summary += "\n  No new scattering runs found — table is unchanged."
+        summary += (
+            f"\n  Transmission matched: {matched_trans}/{len(table.rows)}\n"
+            f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
+            f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
+        )
+    else:
+        summary = (
+            f"Matched {len(table.rows)} scattering runs across {len(configs)} configurations.\n"
+            f"  Configurations: {', '.join(configs)}\n"
+            f"  Transmission matched: {matched_trans}/{len(table.rows)}\n"
+            f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
+            f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
+        )
 
     missing_trans = [r for r in table.rows if not r.transmission_run]
     missing_bkg = [r for r in table.rows if not r.background_scatt]

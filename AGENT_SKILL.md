@@ -87,14 +87,19 @@ tweaks, or multi-step table editing).
 ```
 /autopilot <ipts>
 /autopilot current              # use current session IPTS/catalog (preserves /reclass overrides)
+/autopilot 35884 --continue     # reduce only NEW runs, reuse saved calibration/configs
+/autopilot --continue           # infer IPTS from saved session in outputdir
 ```
-Options (all composable, work with both `<ipts>` and `current`):
+Options (all composable, work with `<ipts>`, `current`, and `--continue`):
 - `--thickness <cm>` — set thickness for all rows (default 0.1)
-- `--bkg <sample>` — use named sample as background (config-aware)
+- `--bkg <sample>` — use named sample as background (config-aware). The bkg sample itself gets NO background subtraction (e.g., banjo's bkg fields stay empty)
 - `--samples <a,b>` — keep only these samples (+ porsil)
 - `--exclude <a,b>` — remove these samples
 - `--config <id>` — reduce only this configuration (e.g., `8m12a`)
+- `--standard <name>` — use named sample as calibration standard (default: auto-detect porsil/porasil)
 - `--force` — re-reduce all rows, ignoring done/modified status
+- `--fresh` — force a clean catalog reload + table re-match (ignores in-memory state). Does NOT clear `/set config` overrides
+- `--from <N>` — skip steps 1..(N-1) of the 13-step pipeline (requires catalog + working table already in session)
 
 **Execution order:** thickness → bkg → samples → exclude → config.
 Setup (thickness, bkg) applies to the full table first, so all rows get correct
@@ -302,7 +307,8 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 | Command | Purpose |
 |---------|---------|
-| `/load ipts <N>` | Fetch experiment catalog from ONCat |
+| `/load ipts <N>` | Fetch experiment catalog from ONCat (REPLACES current catalog) |
+| `/refresh catalog` | Re-fetch current IPTS catalog while preserving `/reclass` overrides; reports new runs |
 | `/show catalog` | Display all runs with metadata |
 | `/show ipts` | Show current IPTS number |
 | `/list ipts *` | List all EQSANS experiments |
@@ -312,9 +318,10 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 | Command | Purpose |
 |---------|---------|
-| `/reclass <runs> <class>` | Override run classification (scatt/trans/bkg/bkgtrans/empty/sample) |
-| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`) |
-| `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog |
+| `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n) |
+| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`) |
+| `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog. REBUILDS table |
+| `/matchruns --update` | Append new scattering runs only; preserves status=done rows. Use after `/refresh catalog` |
 | `/show table` | Display full working table |
 | `/show table --sample <name>` | Filter view by sample name |
 | `/assign bkg <sample>` | Set background for ALL rows (config-aware, sets bkg+bkgtrans) |
@@ -345,8 +352,12 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 |---------|---------|
 | `/reduce <row>` | Reduce selected rows |
 | `/reduce --sample <name>` | Reduce only rows matching sample name (use `*` for wildcard) |
+| `/reduce --new` | Reduce only rows whose status is not `done` (newly added, modified, or errored) |
 | `/autopilot <ipts> [options]` | Full automated pipeline (see Quick Path above for all options) |
 | `/autopilot current [options]` | Use current IPTS/catalog from session (preserves `/reclass`) |
+| `/autopilot <ipts> --continue` | Reduce only NEW runs, reuse saved calibration/configs |
+| `/autopilot --continue` | Continue from saved session in outputdir |
+| `/autopilot <ipts> --standard <name>` | Use named sample as calibration standard (default: porsil) |
 | `/export script [file]` | Export standalone Python script |
 
 ### Stitching
@@ -371,6 +382,7 @@ Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + f
 | `/plot <pattern> [flags]` | Plot data |
 | `/share <pattern>` | Upload files, get 24h URL |
 | `/zipnsend <email> [options]` | Zip files and email (--pattern, --dir, --subject) |
+| `/confirm [ipts]` | Confirm IPTS data reduction complete (--comment) |
 
 Plot flags: `--save <path>`, `--loglog`, `--linlin`, `--kratky`, `--guinier`, `--porod`, `--noerror`, `--title <text>`
 

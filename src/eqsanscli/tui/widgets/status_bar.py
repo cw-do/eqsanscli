@@ -73,6 +73,7 @@ class FooterBar(Widget):
     llm_status: reactive[str] = reactive("")
     model_name: reactive[str] = reactive("")
     drtsans_label: reactive[str] = reactive("drtsans")
+    worker_count: reactive[int] = reactive(1)
     _thinking: bool = False
     _job_running: bool = False
     _frame: int = 0
@@ -98,6 +99,7 @@ class FooterBar(Widget):
         else:
             result.append(" LLM: not configured ")
         result.append(f" {self.drtsans_label} ", style="dim")
+        result.append(f" cpu:{self.worker_count}x ", style="dim")
 
         if self._job_running:
             cancel_label = " ✕ Cancel "
