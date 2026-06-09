@@ -14,6 +14,8 @@ import re
 import textwrap
 import threading
 import time
+
+from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -802,44 +804,147 @@ def run_autopilot_sync(
     # This guarantees that any /set config <id> <param> <val> the user typed
     # BEFORE invoking autopilot wins over preset values — even if config_id
     # normalization or preset-key collisions would otherwise drop them.
+    #
+    # Special handling: the "__all__" key holds params set via
+    # "/set config all <param> <val>" — those apply to EVERY real config.
     if from_step < 5:
-        canon_lookup: dict[str, str] = {
-            normalize_config_id(cfg): cfg for cfg in state.configurations.keys()
-        }
+        # Track all user-set params per real config so we can print an explicit
+        # summary at the end of Step 4b (so the user can verify their intent).
+        user_set_by_config: dict[str, dict] = {}
+
+        # Pull __all__ out of the snapshot so we can broadcast it
+        all_snapshot_params: dict = {}
+        for key in list(user_param_snapshot.keys()):
+            if key == ALL_CONFIGS_KEY or key == normalize_config_id(ALL_CONFIGS_KEY):
+                all_snapshot_params.update(user_param_snapshot.pop(key))
+
+        # "Real" configs are the ones actually being reduced — NOT orphaned
+        # entries in state.configurations from pre-autopilot /set config commands
+        # that targeted nonexistent config IDs (e.g. LLM guessed wrong).
+        real_configs: list[str] = list(table.configurations)
+        real_by_norm: dict[str, str] = {normalize_config_id(c): c for c in real_configs}
+
+        def _resolve_snapshot_target(snap_norm: str) -> tuple[list[str], str]:
+            """Map a snapshot config_id (normalized) to one or more real configs.
+            Returns (list_of_real_configs, match_kind):
+                match_kind = "exact" | "substring" | "ambiguous" | "miss"
+            """
+            if snap_norm in real_by_norm:
+                return [real_by_norm[snap_norm]], "exact"
+            # Substring match in either direction (so '4m10a' matches '4m10a60hz'
+            # and '4m10a60hz' matches '4m10a' — symmetric)
+            subs = [
+                real for real_norm, real in real_by_norm.items()
+                if snap_norm in real_norm or real_norm in snap_norm
+            ]
+            if len(subs) == 1:
+                return subs, "substring"
+            if len(subs) > 1:
+                return subs, "ambiguous"
+            return [], "miss"
+
         restored_total = 0
         per_config: list[str] = []
-        for snap_cfg_norm, params in user_param_snapshot.items():
-            target_key = canon_lookup.get(snap_cfg_norm, snap_cfg_norm)
-            if target_key not in state.configurations:
-                state.configurations[target_key] = {}
-            target = state.configurations[target_key]
-            restored_here: list[str] = []
-            for key, val in params.items():
-                if key == "outputdir":
-                    continue
-                if target.get(key) != val:
-                    target[key] = val
-                    restored_here.append(f"{key}={val}")
-            if restored_here:
-                restored_total += len(restored_here)
-                per_config.append(f"  [green]✓[/green] {target_key}: {', '.join(restored_here)}")
+        warnings: list[str] = []
 
-        if restored_total:
+        # 1) Per-config snapshot entries — apply to MATCHING REAL configs, not orphans
+        for snap_cfg_norm, params in user_param_snapshot.items():
+            targets, kind = _resolve_snapshot_target(snap_cfg_norm)
+
+            if kind == "miss":
+                warnings.append(
+                    f"  [yellow]⚠[/yellow] '/set config {snap_cfg_norm}' didn't match any real "
+                    f"config in the table — your override was DROPPED. Real configs: {', '.join(real_configs)}"
+                )
+                continue
+            if kind == "ambiguous":
+                warnings.append(
+                    f"  [yellow]⚠[/yellow] '/set config {snap_cfg_norm}' is ambiguous — "
+                    f"applying to all matches: {', '.join(targets)}"
+                )
+
+            for target_key in targets:
+                target = state.configurations.setdefault(target_key, {})
+                restored_here: list[str] = []
+                for key, val in params.items():
+                    if key == "outputdir":
+                        continue
+                    # Record this as user-set on the real config
+                    user_set_by_config.setdefault(target_key, {})[key] = val
+                    if target.get(key) != val:
+                        target[key] = val
+                        restored_here.append(f"{key}={val}")
+                if restored_here:
+                    restored_total += len(restored_here)
+                    note = ""
+                    if kind == "substring" and snap_cfg_norm != normalize_config_id(target_key):
+                        note = f" [dim](fuzzy match: '{snap_cfg_norm}' → '{target_key}')[/dim]"
+                    elif kind == "ambiguous":
+                        note = f" [dim](one of {len(targets)} matches for '{snap_cfg_norm}')[/dim]"
+                    per_config.append(f"  [green]✓[/green] {target_key}: {', '.join(restored_here)}{note}")
+
+        # 2) "/set config all" defaults — broadcast to every real config
+        if all_snapshot_params:
+            for cfg in real_configs:
+                target = state.configurations.setdefault(cfg, {})
+                restored_here = []
+                for key, val in all_snapshot_params.items():
+                    if key == "outputdir":
+                        continue
+                    # Mark as user-set (per-config takes precedence if both apply)
+                    user_set_by_config.setdefault(cfg, {}).setdefault(key, val)
+                    if target.get(key) != val:
+                        target[key] = val
+                        restored_here.append(f"{key}={val}")
+                if restored_here:
+                    restored_total += len(restored_here)
+                    per_config.append(
+                        f"  [green]✓[/green] {cfg} [dim](from 'all')[/dim]: {', '.join(restored_here)}"
+                    )
+
+        # Clean up orphan entries in state.configurations that match neither a
+        # real config nor __all__. They came from /set config commands that hit
+        # nonexistent config IDs — leaving them around is just noise.
+        for orphan in [
+            k for k in list(state.configurations.keys())
+            if k != ALL_CONFIGS_KEY and k not in real_configs
+        ]:
+            del state.configurations[orphan]
+
+        if restored_total or warnings:
             write(f"[bold]Step 4b/13:[/bold] Re-applying user-set params (your settings win over presets)...")
             for line in per_config:
                 write(line)
+            for w in warnings:
+                write(w)
         else:
             write(f"[bold]Step 4b/13:[/bold] Re-apply user-set params — [dim]nothing to restore[/dim]")
 
-        # Effective-config summary so user can SEE what each config will reduce with
+        # Explicit summary of ALL user-set parameters per config — so the user
+        # can verify their intent landed correctly. This was requested because
+        # the previous "key files only" summary hid non-file params (numqbins,
+        # qmin, etc.) that the user might have set.
+        if user_set_by_config:
+            write("  [bold]User-set parameters per config:[/bold]")
+            for cfg in sorted(user_set_by_config.keys()):
+                params = user_set_by_config[cfg]
+                lines = [f"{k} = {v}" for k, v in sorted(params.items())]
+                write(f"    [bold cyan]{cfg}:[/bold cyan]")
+                for ln in lines:
+                    write(f"      {ln}")
+        else:
+            write("  [dim]No user-set params for any config (presets applied as-is).[/dim]")
+
+        # Compact effective-config (key files) summary — keeps the file-path
+        # audit at-a-glance even when files came from presets, not user.
         _KEY_FILE_PARAMS = [
             ("maskfilename",        "mask"),
             ("sensitivityfilename", "sens"),
             ("darkfilename",        "dark"),
             ("defaultmask",         "defmask"),
         ]
-        write("  [dim]Effective configuration (key files):[/dim]")
-        for cfg in sorted(state.configurations.keys()):
+        write("  [dim]Effective configuration (key files, basename only):[/dim]")
+        for cfg in sorted(c for c in state.configurations.keys() if c != ALL_CONFIGS_KEY):
             params = state.configurations[cfg]
             parts: list[str] = []
             for key, label in _KEY_FILE_PARAMS:
@@ -882,7 +987,7 @@ def run_autopilot_sync(
         write("[bold]Step 7/13:[/bold] Calibrate — [dim]Skipped[/dim]")
         write("[bold]Step 8/13:[/bold] Apply scale factors — [dim]Skipped[/dim]")
         write("  Saved scale factors:")
-        for cfg in sorted(state.configurations.keys()):
+        for cfg in sorted(c for c in state.configurations.keys() if c != ALL_CONFIGS_KEY):
             scale = state.configurations[cfg].get("standardabsolutescale", "?")
             write(f"    {cfg}: standardabsolutescale = {scale}")
             if reference_config is None and scale not in ("?", "1.0", 1.0):

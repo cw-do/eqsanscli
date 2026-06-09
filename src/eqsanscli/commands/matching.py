@@ -60,10 +60,15 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     state.tables[state.active_table] = table
     table.name = state.active_table
 
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+    all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
     for cfg in table.configurations:
         if cfg not in state.configurations:
             state.configurations[cfg] = {}
         state.configurations[cfg].setdefault("outputdir", os.path.abspath(state.output_directory))
+        # Propagate any "/set config all <param> <val>" defaults onto this config
+        for k, v in all_defaults.items():
+            state.configurations[cfg].setdefault(k, v)
 
     configs = table.configurations
     matched_trans = sum(1 for r in table.rows if r.transmission_run)

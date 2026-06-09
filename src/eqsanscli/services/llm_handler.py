@@ -141,10 +141,16 @@ MULTI-TABLE (one session can hold multiple named working tables; switching table
 CONFIGURATION:
 /list configs                   - List configurations
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a)
-/set config <id> <param> <val>  - Set config parameter
+/set config <id> <param> <val>  - Set config parameter for a SPECIFIC config (id like 4m10a, 2.5m2.5a). REQUIRES knowing which configs exist.
+/set config all <param> <val>   - Set parameter on EVERY config in the current table, AND save as a sticky default for any future configs.
+  CRITICAL: Use `all` when the user says "for all configs", "for every configuration", "all configurations". Use `all` whenever you don't actually KNOW which config IDs exist — e.g. before /load ipts or /matchruns has run. DO NOT guess config IDs like "4m10a", "2.5m2.5a" from context — they may not match the user's actual catalog.
+    "use numqbins 33 for all configs" → /set config all numqbins 33
+    "qmin should be 0.005 for all configurations" → /set config all qmin 0.005
+    "before running autopilot, set numqbins=33 for every config" → /set config all numqbins 33 then /autopilot ...
   File-path params (maskfilename, sensitivityfilename, darkfilename, defaultmask, fluxmonitorratiofile, beamfluxfilename) auto-resolve bare filenames against cwd → /SNS/EQSANS/IPTS-{ipts}/shared/ → eqsanstools defaults.
-  Pass the bare filename — do NOT pre-construct the path yourself.
-    "use mask4m.nxs for 4m configuration"         → /set config 4m maskfilename mask4m.nxs
+  Pass the bare filename — do NOT pre-construct the path yourself. Use `all` for "all configs":
+    "use mask4m.nxs for all configs"              → /set config all maskfilename mask4m.nxs
+    "use mask4m.nxs for 4m configuration"         → /set config 4m maskfilename mask4m.nxs  (only if user names the specific config)
     "set sensitivity file to Sens_4m.nxs for 2m"  → /set config 2m sensitivityfilename Sens_4m.nxs
 /show outputdir                 - Show output directory
 /set outputdir <path>            - Set output directory

@@ -17,6 +17,11 @@ from eqsanscli.config.presets import CONFIG_PRESETS
 
 logger = logging.getLogger(__name__)
 
+# Special key in state.configurations for params that apply to ALL configs
+# (set via "/set config all <param> <val>"). matchruns propagates these to each
+# config it creates; per-config explicit values override.
+ALL_CONFIGS_KEY = "__all__"
+
 # Path to the canonical eqsans_reduction.json template
 _JSON_TEMPLATE_PATH = "/SNS/EQSANS/shared/script/eqsanstools/eqsans_reduction.json"
 

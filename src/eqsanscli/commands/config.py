@@ -87,12 +87,68 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
         return CommandResult(
             success=False,
             message="Usage: /set config <config_id> <param> <value>\n"
-            "  Example: /set config 4.0m_2.5a_60hz qbintype linear",
+            "       /set config all <param> <value>   — apply to every config in the table,\n"
+            "                                          and store as a sticky default for any\n"
+            "                                          future configs that get created.\n"
+            "  Example: /set config 4.0m_2.5a_60hz qbintype linear\n"
+            "  Example: /set config all numqbins 33",
         )
 
-    config_id = normalize_config_id(args[0])
+    raw_id = args[0]
     param = args[1]
     value = " ".join(args[2:])
+
+    # --- /set config all <param> <val> ---
+    # The token "all" means "apply to every current config in the working table,
+    # and stick as a default for future configs". This is the right choice when
+    # the user (or LLM) doesn't know which config IDs exist yet — e.g. before
+    # /load ipts or /matchruns.
+    if raw_id.lower() == "all":
+        from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+
+        resolve_note: str | None = None
+        if param.lower() in _FILE_PATH_PARAMS:
+            value, resolve_note = _resolve_file_path(value, state.ipts)
+
+        # 1) Apply to each existing config in the working table
+        table_configs = state.current_table.configurations
+        results: list[str] = []
+        n_reset_total = 0
+        for cfg in table_configs:
+            ok, msg = set_config_param(cfg, param, value, state.configurations)
+            if ok:
+                results.append(f"  [green]✓[/green] {cfg}")
+                # Mark done rows modified
+                for row in state.current_table.rows:
+                    if row.status == "done" and normalize_config_id(row.configuration) == cfg:
+                        row.status = "modified"
+                        n_reset_total += 1
+            else:
+                results.append(f"  [red]✗[/red] {cfg}: {msg}")
+
+        # 2) Also store under the global "__all__" key so future configs inherit
+        ok_all, _ = set_config_param(ALL_CONFIGS_KEY, param, value, state.configurations)
+
+        if not table_configs:
+            msg = (
+                f"No configs in the working table yet — saved {param}={value} "
+                f"as a global default.\n"
+                "  It will be applied to every config created by future /matchruns\n"
+                "  or /autopilot runs (won't overwrite per-config user settings)."
+            )
+        else:
+            msg = f"Set {param}={value} on {len(table_configs)} config(s):\n" + "\n".join(results)
+            msg += f"\n  Also saved as a sticky default for future configs."
+            if n_reset_total:
+                msg += f"\n  ⚠ {n_reset_total} row(s) marked as modified — will be re-reduced."
+
+        if resolve_note:
+            msg = f"{msg}\n  {resolve_note}"
+
+        return CommandResult(success=True, message=msg)
+
+    # --- /set config <id> <param> <val> ---
+    config_id = normalize_config_id(raw_id)
 
     resolve_note: str | None = None
     if param.lower() in _FILE_PATH_PARAMS:
@@ -117,19 +173,35 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
 
 
 async def handle_list_configs(args: list[str], state: SessionState) -> CommandResult:
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+
     table = state.current_table
-    if not table.rows:
-        return CommandResult(success=True, message="No configurations — working table is empty.")
+    lines: list[str] = []
 
-    configs = table.configurations
-    lines = [f"Configurations in table '{table.name}' ({len(configs)}):"]
-    for cfg in configs:
-        n_rows = len(table.rows_by_config(cfg))
-        norm = normalize_config_id(cfg)
-        has_overrides = any(normalize_config_id(k) == norm for k in state.configurations)
-        override_mark = " [cyan]*[/cyan]" if has_overrides else ""
-        lines.append(f"  {cfg:<24} {n_rows} rows{override_mark}")
+    if table.rows:
+        configs = table.configurations
+        lines.append(f"Configurations in table '{table.name}' ({len(configs)}):")
+        for cfg in configs:
+            n_rows = len(table.rows_by_config(cfg))
+            norm = normalize_config_id(cfg)
+            has_overrides = any(
+                normalize_config_id(k) == norm for k in state.configurations
+                if k != ALL_CONFIGS_KEY
+            )
+            override_mark = " [cyan]*[/cyan]" if has_overrides else ""
+            lines.append(f"  {cfg:<24} {n_rows} rows{override_mark}")
+    else:
+        lines.append("No configurations — working table is empty.")
 
-    lines.append("\n[dim]Use /show config <config_id> to see parameters.[/dim]")
+    # Show pending "all" defaults (from /set config all <p> <v> before any matchruns)
+    all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
+    if all_defaults:
+        lines.append("")
+        lines.append("[bold]Pending '/set config all' defaults (applied to every future config):[/bold]")
+        for k, v in sorted(all_defaults.items()):
+            lines.append(f"  {k} = {v}")
+
+    if table.rows:
+        lines.append("\n[dim]Use /show config <config_id> to see parameters.[/dim]")
 
     return CommandResult(success=True, message="\n".join(lines))
