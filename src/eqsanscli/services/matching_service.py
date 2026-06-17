@@ -370,16 +370,34 @@ def merge_new_runs(
     # Build fresh table from refreshed catalog
     fresh_table, fresh_warnings = match_runs(fresh_catalog, ipts=ipts)
 
-    # Collect bkg/empty/bkgtrans assignments from existing table per config
+    # Collect bkg/empty/bkgtrans assignments from existing table per config.
+    # For each field, take the FIRST NON-EMPTY value across all rows in the
+    # config — bkg-sample rows (e.g. banjo) deliberately have blank
+    # background_scatt/background_trans, so simply taking the first row's
+    # values would propagate those blanks to all new runs.
     config_assignments: dict[str, dict[str, str]] = {}
     for row in existing_table.rows:
         cfg = row.configuration
-        if cfg not in config_assignments:
-            config_assignments[cfg] = {
-                "background_scatt": row.background_scatt,
-                "background_trans": row.background_trans,
-                "empty_beam": row.empty_beam,
-            }
+        assignments = config_assignments.setdefault(cfg, {
+            "background_scatt": "",
+            "background_trans": "",
+            "empty_beam": "",
+        })
+        for field in ("background_scatt", "background_trans", "empty_beam"):
+            if not assignments[field]:
+                val = getattr(row, field, "")
+                if val:
+                    assignments[field] = val
+
+    # Lookup: run_number → run_class. Used to skip bkg-inheritance for new
+    # rows that are themselves bkg/empty samples (those rows deliberately have
+    # blank bkg fields and should NOT inherit their own run as a background).
+    bkg_like_classes = {"bkg_scatt", "bkg_trans", "empty_trans", "empty_scatt"}
+    bkg_like_runs: set[str] = set()
+    if "run_class" in fresh_catalog.columns and "run_number" in fresh_catalog.columns:
+        for _, r in fresh_catalog.iterrows():
+            if str(r.get("run_class", "")) in bkg_like_classes:
+                bkg_like_runs.add(str(r["run_number"]))
 
     # Find new rows
     new_rows: list[WorkingTableRow] = []
@@ -387,13 +405,13 @@ def merge_new_runs(
     for row in fresh_table.rows:
         if row.scattering_run not in existing_runs:
             cfg = row.configuration
-            if cfg in config_assignments:
+            if cfg in config_assignments and row.scattering_run not in bkg_like_runs:
                 # Inherit assignments from existing table for this config
                 assignments = config_assignments[cfg]
                 row.background_scatt = assignments["background_scatt"]
                 row.background_trans = assignments["background_trans"]
                 row.empty_beam = assignments["empty_beam"]
-            else:
+            elif cfg not in config_assignments:
                 # New config not seen before
                 new_config_ids.add(cfg)
             new_rows.append(row)
