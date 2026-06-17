@@ -159,11 +159,14 @@ CONFIGURATION:
 /show ipts                      - Show IPTS number
 
 PRESETS:
-/show presets                   - List preset configurations
+/show presets                   - List preset configurations from preset_configs/*.json
 /show preset <name>             - Show preset params
-/apply preset <name> <config>   - Apply preset to config
-/apply preset auto              - Auto-match closest preset to each config in the table
+/apply preset <name> <config>   - Apply preset to config (skips user-set values; --force to overwrite)
+/apply preset auto              - Re-apply matching preset to each config (mostly a no-op since /matchruns auto-applies)
 /compare <a> <b>                - Compare two configs/presets
+# /matchruns AUTO-APPLIES the matching JSON preset for each new config, so users
+# rarely need /apply preset explicitly. Use /apply preset --force when the user
+# wants to overwrite their own edits with the preset's values.
 
 REDUCTION:
 /reduce <row>                   - Run reduction. <row> = index, run number, range (1-4, 1,3,5), or all

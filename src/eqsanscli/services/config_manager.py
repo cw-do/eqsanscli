@@ -4,7 +4,13 @@ Each configuration (e.g., "4.0m 2.5A 60Hz") has its own set of reduction
 parameters. Defaults are loaded from eqsans_reduction.json (the actual
 drtsans template), so ALL parameters are visible and configurable.
 
-Priority: user overrides > preset > json defaults.
+Two-layer model: drtsans-template defaults < per-config user overrides.
+
+The "preset" layer is no longer a separate runtime tier — JSON preset files
+in preset_configs/ are auto-applied at /matchruns time (see commands/matching.py)
+and become part of state.configurations. list_config_params() distinguishes
+preset-derived values from explicit user edits by re-reading the matching
+JSON preset and comparing values.
 """
 
 from __future__ import annotations
@@ -12,8 +18,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-
-from eqsanscli.config.presets import CONFIG_PRESETS
 
 logger = logging.getLogger(__name__)
 
@@ -151,36 +155,41 @@ def _builtin_defaults() -> dict[str, object]:
     }
 
 
-def _find_preset(config_id: str) -> dict[str, object]:
-    from eqsanscli.models.config_id import normalize_config_id
-    import re
-    norm = normalize_config_id(config_id)
+def _load_matching_preset(config_id: str) -> dict[str, object]:
+    """Load the JSON preset that matches this config_id, dropping None values.
 
-    for key, preset in CONFIG_PRESETS.items():
-        if normalize_config_id(key) == norm:
-            return dict(preset)
-
-    # Fallback: strip trailing frequency (30hz/60hz) and retry
-    norm_no_freq = re.sub(r"\d+hz$", "", norm)
-    for key, preset in CONFIG_PRESETS.items():
-        key_no_freq = re.sub(r"\d+hz$", "", normalize_config_id(key))
-        if key_no_freq == norm_no_freq:
-            return dict(preset)
-
-    return {}
+    Used for source attribution in list_config_params — lets us tell whether
+    a value in user_configs came from preset auto-apply or an explicit /set.
+    Returns {} if no preset matches or none is available.
+    """
+    from eqsanscli.services.preset_service import (
+        find_closest_preset, list_presets, load_preset,
+    )
+    presets = list_presets()
+    if not presets:
+        return {}
+    best, _ = find_closest_preset(config_id, [p["name"] for p in presets])
+    if not best:
+        return {}
+    loaded = load_preset(best)
+    if not loaded:
+        return {}
+    # Drop None values — those don't represent a meaningful preset setting.
+    return {k: v for k, v in loaded.items() if v is not None}
 
 
 def get_config(config_id: str, user_configs: dict[str, dict]) -> dict[str, object]:
     """Get the full configuration for a config ID.
 
-    Priority: user overrides > preset > json defaults.
+    Two layers: drtsans-template defaults, then per-config user overrides
+    (which includes preset values auto-applied at /matchruns time).
     """
     from eqsanscli.models.config_id import normalize_config_id
     result = dict(_load_json_defaults())
-    preset = _find_preset(config_id)
-    result.update(preset)
     norm = normalize_config_id(config_id)
     for key, overrides in user_configs.items():
+        if key == ALL_CONFIGS_KEY:
+            continue
         if normalize_config_id(key) == norm:
             result.update(overrides)
             break
@@ -244,18 +253,34 @@ def list_config_params(config_id: str, user_configs: dict[str, dict]) -> list[tu
 
     Returns list of (param_name, value, source) where source is
     "default", "preset", or "user".
+
+    Source attribution: a value in user_configs that matches the matching
+    JSON preset's value is labeled "preset" (came from auto-apply); a value
+    that differs is labeled "user" (explicit override). Values not in
+    user_configs at all show as "default" (from the drtsans template).
     """
-    preset = _find_preset(config_id)
-    user = user_configs.get(config_id, {})
+    from eqsanscli.models.config_id import normalize_config_id
+
+    norm = normalize_config_id(config_id)
+    user: dict[str, object] = {}
+    for key, overrides in user_configs.items():
+        if key == ALL_CONFIGS_KEY:
+            continue
+        if normalize_config_id(key) == norm:
+            user = overrides
+            break
+
+    preset_values = _load_matching_preset(config_id)
     full = get_config(config_id, user_configs)
 
     result = []
     for param in sorted(full.keys()):
         val = full[param]
         if param in user:
-            source = "user"
-        elif param in preset:
-            source = "preset"
+            if param in preset_values and preset_values[param] == user[param]:
+                source = "preset"
+            else:
+                source = "user"
         else:
             source = "default"
         result.append((param, str(val) if val is not None else "—", source))

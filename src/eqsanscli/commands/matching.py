@@ -60,15 +60,31 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     state.tables[state.active_table] = table
     table.name = state.active_table
 
-    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY, _load_matching_preset
     all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
+    preset_applied: list[str] = []
+    preset_missing: list[str] = []
     for cfg in table.configurations:
         if cfg not in state.configurations:
             state.configurations[cfg] = {}
-        state.configurations[cfg].setdefault("outputdir", os.path.abspath(state.output_directory))
+        cfg_dict = state.configurations[cfg]
+        cfg_dict.setdefault("outputdir", os.path.abspath(state.output_directory))
         # Propagate any "/set config all <param> <val>" defaults onto this config
         for k, v in all_defaults.items():
-            state.configurations[cfg].setdefault(k, v)
+            cfg_dict.setdefault(k, v)
+        # Auto-apply matching JSON preset from preset_configs/ (setdefault — never
+        # overwrites a value the user already set, and None values were dropped).
+        preset_params = _load_matching_preset(cfg)
+        if preset_params:
+            n_filled = 0
+            for k, v in preset_params.items():
+                if k not in cfg_dict:
+                    cfg_dict[k] = v
+                    n_filled += 1
+            if n_filled:
+                preset_applied.append(f"{cfg} ({n_filled})")
+        else:
+            preset_missing.append(cfg)
 
     configs = table.configurations
     matched_trans = sum(1 for r in table.rows if r.transmission_run)
@@ -83,7 +99,7 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             f"  Configurations: {', '.join(configs)}"
         )
         if new_config_ids:
-            summary += f"\n  ⚠ New configuration(s): {', '.join(new_config_ids)} — run /apply preset auto to assign presets."
+            summary += f"\n  New configuration(s): {', '.join(new_config_ids)}"
         if n_new == 0:
             summary += "\n  No new scattering runs found — table is unchanged."
         summary += (
@@ -98,6 +114,15 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             f"  Transmission matched: {matched_trans}/{len(table.rows)}\n"
             f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
             f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
+        )
+
+    if preset_applied:
+        summary += f"\n  Presets auto-applied: {', '.join(preset_applied)}"
+    if preset_missing:
+        summary += (
+            f"\n  ⚠ No matching preset for: {', '.join(preset_missing)} "
+            f"— using drtsans defaults. Add a JSON preset to preset_configs/ or "
+            f"use /set config to override."
         )
 
     missing_trans = [r for r in table.rows if not r.transmission_run]

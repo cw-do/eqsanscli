@@ -374,11 +374,26 @@ def run_autopilot_sync(
     # Snapshot anything the user set BEFORE autopilot started — these are
     # explicit overrides (maskfilename, sensitivityfilename, custom params, etc.)
     # that the user typed and must win over presets. Re-applied after Step 4.
+    #
+    # Filter out preset-derived values (a prior /matchruns auto-applies the
+    # matching JSON preset, which leaves preset-equal values in
+    # state.configurations). Only values that DIFFER from the preset are
+    # considered "user-set" for Step 4b's restore + summary.
     from eqsanscli.models.config_id import normalize_config_id
-    user_param_snapshot: dict[str, dict] = {
-        normalize_config_id(cfg): dict(params)
-        for cfg, params in state.configurations.items()
-    }
+    from eqsanscli.services.config_manager import _load_matching_preset
+    user_param_snapshot: dict[str, dict] = {}
+    for cfg, params in state.configurations.items():
+        if cfg == ALL_CONFIGS_KEY:
+            # /set config all values are always user intent — no preset filter
+            user_param_snapshot[cfg] = dict(params)
+            continue
+        preset_for_cfg = _load_matching_preset(cfg)
+        user_only = {
+            k: v for k, v in params.items()
+            if not (k in preset_for_cfg and preset_for_cfg[k] == v)
+        }
+        if user_only:
+            user_param_snapshot[normalize_config_id(cfg)] = user_only
 
     # Validate --from
     if continue_mode and from_step > 1:

@@ -147,6 +147,10 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
                         n_new = 0
                         n_preserved = 0
                         for key, value in params.items():
+                            if value is None:
+                                # JSON nulls aren't a meaningful preset value —
+                                # skip so they don't shadow defaults or user values.
+                                continue
                             if not force and key in existing:
                                 n_preserved += 1
                                 continue
@@ -205,6 +209,10 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
     count = 0
     preserved = 0
     for key, value in params.items():
+        if value is None:
+            # JSON nulls aren't a meaningful preset value — skip so they
+            # don't shadow defaults or user values.
+            continue
         if not force and key in existing:
             preserved += 1
             continue

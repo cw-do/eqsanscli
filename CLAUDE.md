@@ -15,7 +15,7 @@ src/eqsanscli/
   services/           — Business logic (matching, reduction, calibration, stitch, etc.)
   models/             — Data models (session_state, working_table, run_metadata, config_id)
   integrations/       — External interfaces (oncat, drtsans_runner, json_builder)
-  config/             — Presets and settings
+  config/             — App settings (preset content lives in preset_configs/ at repo root)
   tui/widgets/        — TUI components
 preset_configs/       — Preset JSON configs for known instrument configurations
 ```
@@ -40,6 +40,79 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-06-17: Remove CONFIG_PRESETS Python dict — JSON presets are the single source of truth
+
+**Problem:** Two parallel preset systems existed and silently overrode each other:
+
+1. **`src/eqsanscli/config/presets.py`** — a Python `CONFIG_PRESETS` dict baked into
+   `services/config_manager.py:get_config()` as a middle layer between drtsans
+   defaults and user overrides. Active on every `/show config`, `/reduce`, etc.,
+   even if the user never ran `/apply preset`.
+2. **`preset_configs/*.json`** — JSON files loaded lazily by `/apply preset`,
+   which writes flattened `configuration` keys into `state.configurations[cfg]`.
+
+Most JSON presets had `"Qmin": null, "Qmax": null`, while the Python preset for
+`4m10a` had `qmin: 0.003, qmax: 0.05`. Applying the JSON preset would write
+`user_configs['4m10a']['qmin'] = None`, which then shadowed the Python preset's
+`0.003` — silently *removing* values the user had via the prior layer. For
+`8m10a` (no Python preset entry), `qmin`/`qmax` simply never landed because the
+JSON had nulls and there was nowhere else for them to come from.
+
+**Solution:** JSON files in `preset_configs/` become the single source of truth.
+
+1. **Deleted `src/eqsanscli/config/presets.py`** entirely. `CONFIG_PRESETS`,
+   `get_preset()`, `list_presets()`, `MP_DIR_PATTERN`, `MP_DIRS` — all dead.
+2. **`/matchruns` auto-applies the matching JSON preset** for each new config.
+   `commands/matching.py:handle_matchruns` calls
+   `_load_matching_preset(cfg)` (via `services/preset_service.find_closest_preset`
+   + `load_preset`) and merges non-None values into `state.configurations[cfg]`
+   with `setdefault` semantics — never overwrites a user value or a
+   `/set config all` default. Reports per-config preset apply + missing presets
+   in the command output.
+3. **`/apply preset` skips None values** in both the `auto` and explicit
+   branches (`commands/preset.py`). JSON `null` no longer clobbers anything,
+   even with `--force`.
+4. **`services/config_manager.py` refactored:**
+   - Removed `_find_preset()` (the Python-dict lookup).
+   - Removed `CONFIG_PRESETS` import.
+   - `get_config()` is now two layers: drtsans-template defaults + user
+     overrides. No middle preset tier.
+   - `list_config_params()` source attribution now compares each user-set value
+     against the matching JSON preset (loaded via new `_load_matching_preset()`
+     helper). Match → `source="preset"`; differ → `source="user"`; absent →
+     `source="default"`. Keeps the `*`/blank/`d` annotation in `/show config`
+     meaningful after auto-apply.
+
+5. **Autopilot snapshot filtered:** `services/autopilot.py` snapshot at the top
+   of `run_autopilot_sync` now filters out values that match the JSON preset,
+   so the "User-set parameters per config" summary in Step 4b actually shows
+   what the user explicitly set — not preset-defaulted values from a prior
+   `/matchruns`. `__all__` values are still always considered user intent.
+
+**Files changed:**
+- DELETED `src/eqsanscli/config/presets.py`
+- `src/eqsanscli/services/config_manager.py` — removed `_find_preset`/import,
+  added `_load_matching_preset`, simplified `get_config`, rewrote
+  `list_config_params` source logic
+- `src/eqsanscli/commands/matching.py` — auto-apply preset loop in
+  `handle_matchruns`; updated summary message
+- `src/eqsanscli/commands/preset.py` — skip `None`-valued keys in both
+  apply branches
+- `src/eqsanscli/services/autopilot.py` — filter pre-autopilot snapshot
+  against matching preset
+
+**Behavioral implications:**
+- Configs that previously got values ONLY from the Python `CONFIG_PRESETS`
+  (e.g. `9m8a`, `1.3m4a`, `1.3m1a`) will now fall through to drtsans defaults
+  unless a matching JSON preset is added to `preset_configs/`. If those configs
+  matter, create the JSON files.
+- Configs covered by a JSON preset (`4m10a`, `4m2.5a`, `2.5m2.5a`, `8m10a`,
+  `8m12a`) get all non-null preset values automatically at `/matchruns` time.
+- `/show config <id>` immediately after `/matchruns` now shows real values
+  (with `src=preset` marker) instead of blank `—` for things the preset set.
+- Existing `state.configurations` saved in session files keep working — the
+  values are already there, just attributed differently in `/show config`.
 
 ### 2026-04-06: Run classification system (`run_class` column)
 
