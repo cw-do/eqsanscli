@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 # config it creates; per-config explicit values override.
 ALL_CONFIGS_KEY = "__all__"
 
+# Params that must always be stored as float, regardless of how they appear
+# in drtsans-template defaults or JSON preset literals. Without this, a JSON
+# preset with `"StandardAbsoluteScale": 1` would store an int and then
+# silently reject a later float update (e.g. a calibrated scale factor).
+_FLOAT_PARAMS = {
+    "standardabsolutescale",
+}
+
 # Path to the canonical eqsans_reduction.json template
 _JSON_TEMPLATE_PATH = "/SNS/EQSANS/shared/script/eqsanstools/eqsans_reduction.json"
 
@@ -175,7 +183,16 @@ def _load_matching_preset(config_id: str) -> dict[str, object]:
     if not loaded:
         return {}
     # Drop None values — those don't represent a meaningful preset setting.
-    return {k: v for k, v in loaded.items() if v is not None}
+    # Coerce known-float params (e.g. standardabsolutescale) so a JSON literal
+    # like `1` doesn't lock the param into int type for later /set updates.
+    out: dict[str, object] = {}
+    for k, v in loaded.items():
+        if v is None:
+            continue
+        if k in _FLOAT_PARAMS and isinstance(v, (int, float)):
+            v = float(v)
+        out[k] = v
+    return out
 
 
 def get_config(config_id: str, user_configs: dict[str, dict]) -> dict[str, object]:
@@ -221,12 +238,24 @@ def set_config_param(
     # Sentinel values that clear a param back to None (drtsans treats null as "not set")
     if value.strip().lower() in ("none", "null"):
         parsed: object = None
+    elif param_lower in _FLOAT_PARAMS:
+        # Always float, regardless of what `current` happens to be.
+        try:
+            parsed = float(value)
+        except (ValueError, TypeError):
+            return False, f"Invalid value for {param}: {value}"
     else:
         try:
             if isinstance(current, bool) or param_lower in bool_params:
                 parsed = value.lower() in ("true", "1", "yes")
             elif isinstance(current, int) and not isinstance(current, bool):
-                parsed = int(value)
+                # Allow int → float upgrade. The current value being int is
+                # often an accident of preset JSON literals; the user may
+                # legitimately set a decimal value.
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    parsed = float(value)
             elif isinstance(current, float):
                 parsed = float(value)
             elif current is None:

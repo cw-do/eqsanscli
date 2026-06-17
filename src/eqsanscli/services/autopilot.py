@@ -1069,13 +1069,19 @@ def run_autopilot_sync(
         for cfg in table.configurations:
             if cfg in calibrated_configs:
                 scale = calibrated_configs[cfg]
-                dispatch_sync(f"/set config {cfg} standardabsolutescale {scale}")
-                write(f"  [green]✓[/green] {cfg}: {scale:.7f}")
-                if reference_config is None:
-                    reference_config = cfg
+                r = dispatch_sync(f"/set config {cfg} standardabsolutescale {scale}")
+                if not r.success:
+                    write(f"  [red]✗[/red] {cfg}: failed to apply scale {scale:.7f} — {r.message}")
+                else:
+                    write(f"  [green]✓[/green] {cfg}: {scale:.7f}")
+                    if reference_config is None:
+                        reference_config = cfg
             else:
-                dispatch_sync(f"/set config {cfg} standardabsolutescale 1.0")
-                write(f"  [dim]  {cfg}: 1.0 (no {std_label} calibration)[/dim]")
+                r = dispatch_sync(f"/set config {cfg} standardabsolutescale 1.0")
+                if not r.success:
+                    write(f"  [red]✗[/red] {cfg}: failed to set scale 1.0 — {r.message}")
+                else:
+                    write(f"  [dim]  {cfg}: 1.0 (no {std_label} calibration)[/dim]")
         write("")
     else:
         write(f"[bold]Step 6/13:[/bold] Reduce {std_label} standard — [dim]Skipped[/dim]")
