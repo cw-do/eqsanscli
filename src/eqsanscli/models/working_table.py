@@ -36,7 +36,7 @@ class WorkingTableRow:
     # row means the previous output is stale and needs re-reduction.
     _REDUCTION_FIELDS = frozenset({
         "transmission_run", "background_scatt", "background_trans",
-        "empty_beam", "thickness",
+        "empty_beam", "thickness", "sample_name",
     })
 
     def set_field(self, attr_name: str, value) -> None:

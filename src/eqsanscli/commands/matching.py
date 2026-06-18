@@ -194,6 +194,9 @@ SETTABLE_FIELDS = {
     "emp": "empty_beam",
     "empty": "empty_beam",
     "thickness": "thickness",
+    "sample": "sample_name",
+    "name": "sample_name",
+    "sample_name": "sample_name",
 }
 
 
@@ -201,7 +204,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
     """Handle /set <run> <field> <value> — set a run association on a working table row.
 
     Run number values are strings (supports comma-separated multi-run like "111, 112").
-    Use "none", "null", or "" to clear a value.
+    Use "none", "null", or "" to clear a value (thickness and sample_name can't be cleared).
 
     Examples:
         /set 167942 trans 167931
@@ -210,6 +213,8 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         /set 167942 bkg none            ← clears background
         /set 167942 trans "111, 112"    ← multi-run for combined statistics
         /set 167942 thickness 0.1
+        /set 167942 sample MyNewName    ← rename the sample on this row
+        /set 3 name S3                  ← 'name' is an alias for 'sample'
     """
     if not args:
         return CommandResult(
@@ -292,6 +297,8 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         if value_str.lower() in ("none", "null", '""', "''", ""):
             if attr_name == "thickness":
                 return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
+            if attr_name == "sample_name":
+                return CommandResult(success=False, message="Cannot clear sample_name — provide a non-empty name.")
             for row in matching_rows:
                 row.set_field(attr_name, "")
             return CommandResult(
@@ -351,6 +358,8 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
     if value_str.lower() in ("none", "null", '""', "''", ""):
         if attr_name == "thickness":
             return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
+        if attr_name == "sample_name":
+            return CommandResult(success=False, message="Cannot clear sample_name — provide a non-empty name.")
         for r in target_rows:
             r.set_field(attr_name, "")
         label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"

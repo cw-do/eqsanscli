@@ -140,9 +140,14 @@ WORKING TABLE:
     "reduce only the new ones" → /reduce --new   (skips rows already done)
     OR replace /reduce --new + manual stitch with /autopilot --continue (preferred — auto-stitches/plots).
 /assign bkg <sample>            - Reassign background for ALL rows (config-aware, sets both bkg+bkgtrans) — PREFER this over per-row /set for background
-/set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness). <row> = index, run number, range (1-5, 1,3,5), or all
-/set <row> <field> none         - Clear a field
+/set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness, sample/name). <row> = index, run number, range (1-5, 1,3,5), or all
+/set <row> <field> none         - Clear a field (thickness and sample name can't be cleared)
+/set <row> sample <newname>     - Rename the sample on a row (alias: 'name'). Marks done rows as modified.
 /set --sample <name> <field> <value> - Set field for ALL rows matching sample name (case-insensitive substring)
+  IMPORTANT: When user wants to rename a sample, use the 'sample' field:
+    "rename sample MisLabel to S3" → /set --sample MisLabel sample S3
+    "change row 4's sample name to Banjo" → /set 4 sample Banjo
+    "fix typo: rename porasil to porsil" → /set --sample porasil sample porsil
 /remove <row>                   - Remove rows. <row> = index, run number, range (1-5, 1,3,5), or all
 /remove all --keep <sample>     - Remove all rows EXCEPT named sample
 /remove --sample <name>         - Remove all rows matching sample name
