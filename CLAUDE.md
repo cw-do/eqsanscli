@@ -40,6 +40,26 @@ preset_configs/       — Preset JSON configs for known instrument configuration
 - Session state auto-saves after every command. `catalog_data` is stored as list-of-dicts.
 - `SKILL.md` and `AGENT_SKILL.md` document the tool for TUI and headless agent use respectively.
 
+### Knowledge base
+
+`knowledge/` holds instrument knowledge — physics and protocol, **not** command
+reference. `knowledge/protocol.md` is authoritative: numbered rules with a
+severity and an enforcement status. Code that contradicts it is a bug; a rule
+that nothing checks yet is marked `unenforced` and is backlog for the `/review`
+validators.
+
+- Loaded by `services/knowledge.py:load_knowledge(topics)`. Only `protocol.md` is
+  `load: always` (paid for on every natural-language call); everything else is
+  `on-demand` and requested by topic.
+- Command syntax and natural-language routing stay in
+  `services/llm_handler.py:_SYSTEM_PROMPT` — exactly one home, because the two
+  copies drifted before.
+- `tests/test_knowledge.py` enforces structure: headers, unique rule ids, rule
+  cross-references resolving, no hardcoded cycle constants, no concrete IPTS
+  paths, and agreement with the code on the rules it can check.
+- When you change behaviour that a rule describes, update the rule in the same
+  commit.
+
 ### Versioning
 
 **Bump the version with every revision** — the user relies on `/version` and the
@@ -62,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.13.0 | 2026-08-17 | Knowledge base restructured into `knowledge/` with `protocol.md` as the authority; topic-aware loader; stale/contradicting `preset_configs/knowledge.md` removed. |
 | 0.12.0 | 2026-08-17 | `/reduce` preflight: refuses rows with no empty beam (beam centre), with `--skip-missing` / `--force`; autopilot's `--from 4+` gap closed and `_reduce_phase` skips unreducible rows. |
 | 0.11.0 | 2026-08-17 | Masks resolved per configuration from the working folder → this IPTS's shared folder → the cycle's `masks/` default; foreign-IPTS paths removed from presets; per-config mask note printed. |
 | 0.10.1 | 2026-08-17 | Fix: compound commands (`/export script`, `/apply preset`) were silently not executed via natural language; actionable `/export script` guidance; LLM sees empty-table/no-catalog state and chains prerequisites. |
@@ -86,6 +107,65 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.13.0): Knowledge base — one authority, no contradictions
+
+Phase 0 of the agentic-reduction plan: before anything reviews a reduction, the
+rules it reviews against have to exist and be coherent.
+
+**What was wrong.** Six places described how to drive the tool and one described
+the physics — `preset_configs/knowledge.md` (20 KB, last touched April), injected
+into *every* natural-language call. It had drifted into contradicting both itself
+and the code:
+
+- `MP_DIR = ".../2025B_mp/"` with hardcoded `FLOOD_4m` / `DARK_FILE` / `FLUX_FILE`
+  constants, plus "as of 2026-3-3 we are at 2026A but haven't prepared 2026A_mp" —
+  three cycles stale, and superseded by the v0.11.0 run-aware resolver.
+- masks "found in `IPTS-{ipts}/shared/` or current folder, else use
+  `eqsanstools/mask_4m.nxs` temporarily" — the fallback removed in v0.11.0.
+- line 142 said `--sample` matching is exact-unless-wildcard (correct); line 193
+  said case-insensitive substring (wrong) — in the same file.
+- "`/assign bkg` gives the background sample the empty beam as its background" —
+  changed in 2026-06-09 to *no* background.
+- ~200 lines of natural-language→command examples duplicating
+  `_SYSTEM_PROMPT` (27.6 KB), so today's routing edits landed in only one copy.
+
+**New structure.** `knowledge/`, one file per decision domain, each with a
+`topic` / `summary` / `load` / `updated` header:
+
+- `protocol.md` — **the authority.** Numbered rules (`CAT-`, `EMP-`, `TBL-`,
+  `BKG-`, `CAL-`, `CFG-`, `SCL-`, `STC-`) each with a severity
+  (blocking/warning/info) and an enforcement status (enforced + the file that
+  does it / advisory / unenforced). The `unenforced` set is the backlog for the
+  `/review` validators; three `TBD` numbers are flagged for the instrument
+  scientist.
+- `instrument-files.md`, `configurations.md`, `background-selection.md`,
+  `absolute-scale.md`, `stitching.md`, `troubleshooting.md` — physics and
+  rationale, carried over from the old file with the stale parts corrected and
+  filenames demoted to cycle-labelled examples.
+- `README.md` — the editing contract: one fact one home; no command reference
+  here; no hardcoded cycle paths; rule ids are permanent; numbers need provenance
+  or `TBD`.
+
+**`services/knowledge.py`** replaces `_load_knowledge`'s single-file read.
+Topic-aware: only `protocol.md` is `load: always`, so a natural-language call now
+carries 9.5 KB of knowledge instead of 20 KB, and `_llm_suggest_config` asks for
+`["configurations", "instrument-files"]`. Reads fresh from disk (edits apply
+without restart), caches parsed headers on mtime, and warns once if a leftover
+`preset_configs/knowledge.md` is found rather than silently ignoring it.
+
+**Rules kept out of the deletion:** two routing rules existed *only* in the old
+file and moved into `_SYSTEM_PROMPT` — "show me X" means `/show table --sample`
+and never `/remove`, and the configuration-matching rule for catalog run lookups.
+
+**`tests/test_knowledge.py`** (20 checks) enforces the editing contract
+mechanically: headers complete, topics unique, exactly one `always` doc, rule ids
+unique, every rule declaring severity + enforcement, rule cross-references
+resolving, files named as enforcing a rule existing, and regression guards for
+each specific drift above (no `MP_DIR =`, no concrete `/SNS/EQSANS/IPTS-<n>` path,
+no "case-insensitive substring", no "empty beam as its background", no
+command-reference section). Two checks assert the docs still agree with the code
+on flood-distance mapping and the mandatory empty beam.
 
 ### 2026-08-17 (v0.12.0): Reduction preflight — empty beam is mandatory
 

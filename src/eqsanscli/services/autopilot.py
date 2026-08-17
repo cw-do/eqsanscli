@@ -241,7 +241,9 @@ def _llm_suggest_config(
     if not meta:
         return []
 
-    knowledge = _load_knowledge()
+    # Suggesting parameters for an unknown config needs the per-config rationale
+    # and the instrument-file rules, not just the protocol.
+    knowledge = _load_knowledge(["configurations", "instrument-files"])
 
     prompt = (
         f"I need reduction parameters for EQSANS configuration: {config_id}\n"

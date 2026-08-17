@@ -337,6 +337,32 @@ transmission or background is a warning only. Escape hatches:
 (send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
 skips unreducible rows at reduction time.
 
+## Knowledge base
+
+Instrument knowledge lives in `knowledge/`, one file per decision domain, with
+`knowledge/protocol.md` as the authority — numbered rules (`EMP-01`, `BKG-03`, …)
+each carrying a severity and whether code enforces it today. If code, a preset or
+a doc disagrees with `protocol.md`, the other thing is the bug.
+
+| File | Holds |
+|---|---|
+| `protocol.md` | the rules a reduction must satisfy (loaded on every LLM call) |
+| `instrument-files.md` | how mask / flood / dark / flux / offsets are chosen |
+| `configurations.md` | per-configuration parameters and why |
+| `background-selection.md` | what counts as a background and how it pairs |
+| `absolute-scale.md` | standard-sample calibration |
+| `stitching.md` | combining configurations |
+| `troubleshooting.md` | failure signatures → cause → fix |
+
+`knowledge/README.md` states the editing rules: one fact one home, no command
+reference (that lives in `llm_handler`), no hardcoded cycle paths, rule ids are
+permanent, numbers need provenance or `TBD`. `tests/test_knowledge.py` enforces
+the structural half of that, including that rule cross-references resolve and
+that the docs still agree with the code.
+
+This replaced `preset_configs/knowledge.md`, a single file that had drifted into
+contradicting itself and the code.
+
 ### Presets
 
 | Command | Description |

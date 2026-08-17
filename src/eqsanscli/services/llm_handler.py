@@ -14,31 +14,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Directories to search for knowledge.md (project root, then cwd)
-_KNOWLEDGE_DIRS = [
-    Path(__file__).resolve().parent.parent.parent.parent / "preset_configs",
-    Path.cwd() / "preset_configs",
-]
 
 
-def _load_knowledge() -> str:
-    """Load SANS domain knowledge from knowledge.md at runtime.
+def _load_knowledge(topics: list[str] | None = None) -> str:
+    """Instrument knowledge for an LLM call — see services/knowledge.py.
 
-    Always reads fresh from disk so edits are picked up immediately.
-    Returns empty string if file is not found.
+    Kept as a thin wrapper because several callers already use this name.
+    `topics=None` gives the always-loaded documents (the protocol).
     """
-    for d in _KNOWLEDGE_DIRS:
-        path = d / "knowledge.md"
-        if path.is_file():
-            try:
-                text = path.read_text(encoding="utf-8")
-                return (
-                    "SANS DOMAIN KNOWLEDGE (from knowledge.md — use this when suggesting "
-                    "configuration parameters or answering questions about reduction settings):\n\n"
-                    + text
-                )
-            except OSError as e:
-                logger.warning("Could not read %s: %s", path, e)
-    return ""
+    from eqsanscli.services.knowledge import load_knowledge
+
+    return load_knowledge(topics)
 
 
 def _parse_config_id(config_id: str) -> dict[str, float | int]:
@@ -142,6 +128,13 @@ CATALOG:
 WORKING TABLE:
 /show table                     - Show working table
 /show table --sample <name>     - Show only rows matching sample name (read-only filter, no deletion)
+  CRITICAL — "show me" means DISPLAY, never delete. "show me emptycupbob from the table",
+  "display only banjo runs", "what does the X row look like" → /show table --sample X.
+  /remove is ONLY for explicit deletion words: delete, remove, drop, get rid of.
+  CRITICAL — CONFIGURATION MATCHING when looking a run up from the catalog: every run belongs to
+  one configuration. A transmission or empty beam assigned to a row MUST come from the SAME
+  configuration as that row. With multiple configurations in the table, emit one /set --config per
+  configuration (or per-row /set) rather than a single /set --sample across all of them.
 /reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/ignore)
 /reclass --sample <name> <class> - Override run classification by sample name (matches title after S-/T- prefix)
   IMPORTANT: If the user references a NAME (text), use --sample. If the user references a NUMBER (run number), don't use --sample:
