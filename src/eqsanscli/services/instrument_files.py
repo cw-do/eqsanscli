@@ -65,6 +65,7 @@ DEFAULT_VARIANT = "thinPMMA"
 FLUX_FALLBACK_CYCLES = 1
 
 # Flattened, lowercased config keys this module owns (see config_manager).
+PARAM_MASK = "maskfilename"
 PARAM_SENSITIVITY = "sensitivityfilename"
 PARAM_DARK = "darkfilename"
 PARAM_FLUX = "beamfluxfilename"
@@ -74,12 +75,13 @@ PARAM_SCALECOMP = "scalecomponents.detector1"
 
 #: Every parameter this module may write, in report order.
 MANAGED_PARAMS: tuple[str, ...] = (
-    PARAM_SENSITIVITY, PARAM_DARK, PARAM_FLUX,
+    PARAM_MASK, PARAM_SENSITIVITY, PARAM_DARK, PARAM_FLUX,
     PARAM_DETOFFSET, PARAM_SCALECOMP, PARAM_SAMPLEOFFSET,
 )
 
 #: Short labels for display.
 PARAM_LABELS = {
+    PARAM_MASK: "mask",
     PARAM_SENSITIVITY: "sensitivity",
     PARAM_DARK: "dark current",
     PARAM_FLUX: "beam flux",
@@ -126,6 +128,21 @@ class SensitivityFile:
 @dataclass(frozen=True)
 class FluxFile:
     path: str
+
+    @property
+    def name(self) -> str:
+        return os.path.basename(self.path)
+
+
+@dataclass(frozen=True)
+class MaskFile:
+    """A beamstop/detector mask candidate, with whatever its name reveals."""
+
+    path: str
+    distance: Optional[float] = None
+    wavelength: Optional[float] = None
+    frame_skip: bool = False
+    origin: str = ""  # "cwd", "IPTS-38773/shared", "2026B masks/"
 
     @property
     def name(self) -> str:
@@ -445,6 +462,162 @@ def _agbe_for_cycle(cycle_dir: str) -> Optional[AgBeCalibration]:
 
 
 # --------------------------------------------------------------------------
+# Masks
+# --------------------------------------------------------------------------
+#
+# A mask belongs to an experiment, not to an instrument configuration, so it
+# must never be taken from another IPTS's shared folder — those are frequently
+# unreadable to other users, which is how a reduction ends up failing on a
+# permission error. Search order, first hit wins:
+#
+#   1. the folder eqsanscli was started in       (the user's own working files)
+#   2. /SNS/EQSANS/IPTS-<current>/shared/        (this experiment's own folder)
+#   3. <cycle>_mp/masks/*mask.nxs                (the cycle's default mask)
+#
+# Within a folder, the file whose name best describes the configuration wins:
+# distance must agree, a matching wavelength is preferred, and a frame-skipping
+# hint (_FS) breaks ties for 30 Hz. Names seen in the wild:
+#   mask_4m.nxs  mask_4m2.nxs  mask_8m3mm.nxs  mask_9m.nxs
+#   maskWS4m10A.nxs  maskWS4m2p5A_FS.nxs   (2p5 = 2.5 Å)
+#   EQSANS_186104_mask.nxs                  (cycle default, no tokens)
+
+_MASK_GLOB_PREFIX = "mask"
+_MASK_CYCLE_SUFFIX = "mask.nxs"
+
+#: Opening words of the "no mask" entry in Resolution.missing. Callers key off
+#: this to pull the mask problem out of the list, so keep them in step.
+MASK_MISSING_PREFIX = "No mask for "
+
+
+def _parse_mask_tokens(name: str) -> tuple[Optional[float], Optional[float], bool]:
+    """Extract (distance_m, wavelength_A, frame_skip) hints from a mask name."""
+    stem = os.path.basename(name).split(".nxs")[0].lower()
+    # "2p5" and "2o5" both mean 2.5 in these filenames
+    norm = re.sub(r"(\d)[po](\d)", r"\1.\2", stem)
+    frame_skip = bool(re.search(r"(?:^|[_\-])fs(?:$|[_\-])|frameskip|30hz", norm))
+    dist_match = re.search(r"(\d+(?:\.\d+)?)\s*m(?![m])", norm)
+    wl_match = re.search(r"(\d+(?:\.\d+)?)\s*a(?![a-z])", norm)
+    distance = float(dist_match.group(1)) if dist_match else None
+    wavelength = float(wl_match.group(1)) if wl_match else None
+    return distance, wavelength, frame_skip
+
+
+def _masks_in_dir(directory: str, origin: str, *, suffix: Optional[str] = None) -> list[MaskFile]:
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    out: list[MaskFile] = []
+    for name in names:
+        low = name.lower()
+        if suffix is not None:
+            if not low.endswith(suffix):
+                continue
+        elif not (low.startswith(_MASK_GLOB_PREFIX) and low.endswith(".nxs")):
+            continue
+        distance, wavelength, frame_skip = _parse_mask_tokens(name)
+        out.append(MaskFile(
+            path=os.path.join(directory, name), distance=distance,
+            wavelength=wavelength, frame_skip=frame_skip, origin=origin,
+        ))
+    return out
+
+
+def local_masks(cwd: Optional[str] = None, ipts: object = None) -> list[tuple[str, list[MaskFile]]]:
+    """Mask candidates outside the cycle folders, in priority order.
+
+    Returns [(location_label, candidates), ...]; the first group with a usable
+    match wins, so a mask in the working folder always beats one in the IPTS
+    shared folder. Empty groups are included so callers can report every place
+    they looked.
+    """
+    groups: list[tuple[str, list[MaskFile]]] = []
+    working = cwd or os.getcwd()
+    groups.append((working, _masks_in_dir(working, "cwd")))
+    if ipts:
+        shared = f"/SNS/EQSANS/IPTS-{ipts}/shared"
+        if os.path.abspath(shared) != os.path.abspath(working):
+            groups.append((shared, _masks_in_dir(shared, f"IPTS-{ipts}/shared")))
+    return groups
+
+
+def cycle_masks(cycle: Cycle) -> list[MaskFile]:
+    """The cycle's default mask(s) from ``<cycle>_mp/masks/*mask.nxs``."""
+    masks = _masks_in_dir(
+        os.path.join(cycle.path, "masks"), f"{cycle.cycle_id} masks/",
+        suffix=_MASK_CYCLE_SUFFIX,
+    )
+    if masks:
+        return masks
+    # Some cycles keep the mask at the top level instead of in masks/.
+    return _masks_in_dir(cycle.path, f"{cycle.cycle_id}", suffix=_MASK_CYCLE_SUFFIX)
+
+
+def pick_mask(config_id: str, candidates: Sequence[MaskFile]) -> Optional[MaskFile]:
+    """Best mask for `config_id` from one folder's candidates.
+
+    A mask whose name states a *different* distance or wavelength is excluded
+    outright — using it would silently mask the wrong pixels. A mask with no
+    tokens at all is a generic fallback.
+    """
+    from eqsanscli.models.config_id import parse_config_id
+
+    if not candidates:
+        return None
+    distance, wavelength, frequency = parse_config_id(config_id)
+
+    scored: list[tuple[tuple[int, int, int], MaskFile]] = []
+    for mask in candidates:
+        if mask.distance is not None and distance and abs(mask.distance - distance) > 0.05:
+            continue
+        if (
+            mask.wavelength is not None and wavelength
+            and abs(mask.wavelength - wavelength) > 0.05
+        ):
+            continue
+        score = (
+            1 if mask.distance is not None else 0,
+            1 if mask.wavelength is not None else 0,
+            1 if (mask.frame_skip and frequency == 30) else 0,
+        )
+        scored.append((score, mask))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda pair: (pair[0], pair[1].name), reverse=True)
+    return scored[0][1]
+
+
+def resolve_mask(
+    config_id: str,
+    chain: Sequence[Cycle],
+    *,
+    cwd: Optional[str] = None,
+    ipts: object = None,
+) -> tuple[Optional[MaskFile], list[str]]:
+    """Find the mask for one config.
+
+    Returns (mask, searched) where `searched` names every location examined —
+    so a failure can tell the user exactly where to put a mask.
+    """
+    searched: list[str] = []
+    for location, group in local_masks(cwd, ipts):
+        searched.append(location if group else f"{location} (no mask*.nxs)")
+        chosen = pick_mask(config_id, group)
+        if chosen:
+            return chosen, searched
+    for cycle in chain:
+        masks = cycle_masks(cycle)
+        folder = os.path.join(cycle.path, "masks")
+        searched.append(folder if masks else f"{folder} (no *{_MASK_CYCLE_SUFFIX})")
+        chosen = pick_mask(config_id, masks)
+        if chosen:
+            return chosen, searched
+        break  # only the resolved cycle's default is relevant
+    return None, searched
+
+
+# --------------------------------------------------------------------------
 # Selection
 # --------------------------------------------------------------------------
 
@@ -508,11 +681,15 @@ def resolve_for_run(
     cycles: Optional[Sequence[Cycle]] = None,
     pin_cycle: Optional[str] = None,
     variant_pref: str = DEFAULT_VARIANT,
+    config_id: str = "",
+    cwd: Optional[str] = None,
+    ipts: object = None,
 ) -> Resolution:
     """Resolve the calibration set for a data run at `distance` metres.
 
     `pin_cycle` forces a specific cycle id ("2026A") regardless of run number,
-    for reproducing an earlier reduction.
+    for reproducing an earlier reduction. `config_id`, `cwd` and `ipts` are used
+    for mask resolution (see `resolve_mask`); pass them to get a mask.
     """
     all_cycles = list(cycles if cycles is not None else scan_cycles(root))
     res = Resolution(run=run, distance=distance)
@@ -606,6 +783,27 @@ def resolve_for_run(
             f"No beam flux file in {start.cycle_id} or the cycle before it — "
             f"existing value kept (flux files only appear in recent cycles)."
         )
+
+    # --- mask (experiment-specific: working folder, then this IPTS, then cycle) ---
+    if config_id:
+        mask, searched = resolve_mask(config_id, chain, cwd=cwd, ipts=ipts)
+        if mask:
+            note_bits = [f"from {mask.origin}"]
+            if mask.distance is None and mask.wavelength is None:
+                note_bits.append("cycle default, no config in the name")
+            res.params[PARAM_MASK] = ResolvedParam(
+                param=PARAM_MASK, value=mask.path,
+                cycle_id=start.cycle_id if "masks/" in mask.origin else "",
+                source=mask.path, note="; ".join(note_bits),
+            )
+        else:
+            res.missing.append(
+                f"{MASK_MISSING_PREFIX}{config_id}. Looked in:\n"
+                + "".join(f"        {loc}\n" for loc in searched)
+                + f"      Create a mask (name it so the config is visible, e.g. "
+                f"mask_{config_id}.nxs), put it in the folder you start eqsanscli in, "
+                f"then: /set config {config_id} maskfilename <file>"
+            )
 
     # --- AgBe calibration ---
     for i, cycle in enumerate(chain):
@@ -836,6 +1034,7 @@ def sync_state_configs(state, *, force: bool = False) -> tuple[list[ApplyOutcome
     for target in config_targets(state):
         resolution = resolve_for_run(
             target.run, target.distance, cycles=cycles, pin_cycle=pin,
+            config_id=target.config_id, ipts=state.ipts,
         )
         params = state.configurations.setdefault(target.config_id, {})
         provenance = state.instrument_provenance.setdefault(target.config_id, {})
@@ -861,7 +1060,7 @@ def sync_state_configs(state, *, force: bool = False) -> tuple[list[ApplyOutcome
 def verify_paths(values: dict[str, object]) -> list[str]:
     """Report missing or empty files among path-valued params."""
     problems: list[str] = []
-    for param in (PARAM_SENSITIVITY, PARAM_DARK, PARAM_FLUX):
+    for param in (PARAM_MASK, PARAM_SENSITIVITY, PARAM_DARK, PARAM_FLUX):
         val = values.get(param)
         if not val or not isinstance(val, str):
             continue

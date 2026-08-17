@@ -747,17 +747,9 @@ def run_autopilot_sync(
             else:
                 write(f"  [yellow]⚠[/yellow] {cfg} — no preset found, asking LLM...")
 
-                # Dark/flood/flux are NOT set here — Step 4c resolves them for
-                # every config from the machine-physics folders by run number.
-                ipts_mask = f"/SNS/EQSANS/IPTS-{ipts}/shared/mask_4m.nxs"
-                cwd_mask = os.path.join(os.getcwd(), "mask_4m.nxs")
-                fallback_mask = "/SNS/EQSANS/shared/script/eqsanstools/mask_4m.nxs"
-                for mpath in [ipts_mask, cwd_mask, fallback_mask]:
-                    if os.path.exists(mpath):
-                        dispatch_sync(f"/set config {cfg} maskfilename {mpath}")
-                        write(f"    [green]✓[/green] Mask: {mpath}")
-                        break
-
+                # Mask, dark, flood and flux are NOT set here — Step 4c resolves
+                # them for every config: mask from the working folder / this
+                # IPTS / the cycle's masks/, the rest from machine physics.
                 suggestions = _llm_suggest_config(cfg, state, write)
                 if suggestions:
                     for param, val in suggestions:
@@ -939,6 +931,10 @@ def run_autopilot_sync(
             try:
                 inst_outcomes, inst_warnings = sync_state_configs(state)
                 for line in format_outcomes(inst_outcomes, inst_warnings).split("\n"):
+                    write(line)
+                from eqsanscli.commands.instrument import format_mask_note
+                mask_note = format_mask_note(inst_outcomes)
+                for line in mask_note.split("\n") if mask_note else []:
                     write(line)
             except Exception as exc:  # never let this stop a reduction
                 write(f"  [yellow]⚠ Instrument-file resolution failed: {exc}[/yellow]")

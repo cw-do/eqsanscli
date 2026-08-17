@@ -328,12 +328,15 @@ def _session(runs=((305000, 4.0),)):
     return state
 
 
-def test_sync_writes_all_six_params():
+def test_sync_writes_every_managed_param_it_can_resolve():
     with _Tree():
         state = _session()
         outcomes, warnings = ifiles.sync_state_configs(state)
         assert len(outcomes) == 1
-        assert set(outcomes[0].written) == set(MANAGED_PARAMS)
+        # The synthetic tree has no mask anywhere, so mask is expected to be
+        # absent; everything else must be written.
+        expected = set(MANAGED_PARAMS) - {ifiles.PARAM_MASK}
+        assert set(outcomes[0].written) == expected
         assert warnings == []
 
 
@@ -468,7 +471,123 @@ def test_session_round_trip_keeps_provenance_and_switches():
     assert loaded.instrument_cycle_pin == "2030A"
     assert loaded.auto_instrument_files is False
     cfg = next(iter(loaded.instrument_provenance))
-    assert set(loaded.instrument_provenance[cfg]) == set(MANAGED_PARAMS)
+    assert set(loaded.instrument_provenance[cfg]) == set(MANAGED_PARAMS) - {ifiles.PARAM_MASK}
+
+
+# --------------------------------------------------------------------------
+# Masks
+# --------------------------------------------------------------------------
+
+def test_mask_token_parsing_on_real_names():
+    from eqsanscli.services.instrument_files import _parse_mask_tokens
+
+    assert _parse_mask_tokens("mask_4m.nxs") == (4.0, None, False)
+    assert _parse_mask_tokens("mask_8m3mm.nxs") == (8.0, None, False)      # not 3 m
+    assert _parse_mask_tokens("mask_2o5m.nxs") == (2.5, None, False)
+    assert _parse_mask_tokens("maskWS4m10A.nxs") == (4.0, 10.0, False)
+    assert _parse_mask_tokens("maskWS4m2p5A_FS.nxs") == (4.0, 2.5, True)   # 2p5 = 2.5
+    assert _parse_mask_tokens("EQSANS_186104_mask.nxs") == (None, None, False)
+
+
+def test_mask_pick_matches_distance_and_wavelength():
+    from eqsanscli.services.instrument_files import MaskFile, pick_mask
+
+    cands = [
+        MaskFile("/x/maskWS4m10A.nxs", 4.0, 10.0, False, "cwd"),
+        MaskFile("/x/maskWS4m2p5A_FS.nxs", 4.0, 2.5, True, "cwd"),
+    ]
+    assert pick_mask("4m10a", cands).name == "maskWS4m10A.nxs"
+    assert pick_mask("4m2.5a", cands).name == "maskWS4m2p5A_FS.nxs"
+    # A different distance must not borrow a 4 m mask.
+    assert pick_mask("8m10a", cands) is None
+
+
+def test_mask_pick_prefers_specific_over_generic():
+    from eqsanscli.services.instrument_files import MaskFile, pick_mask
+
+    cands = [
+        MaskFile("/x/mask_4m.nxs", 4.0, None, False, "cwd"),
+        MaskFile("/x/mask.nxs", None, None, False, "cwd"),
+    ]
+    assert pick_mask("4m10a", cands).name == "mask_4m.nxs"
+    # A token-less mask still serves a config nothing else matches.
+    assert pick_mask("1.3m2.5a", cands).name == "mask.nxs"
+
+
+def test_mask_prefers_working_folder_over_ipts_shared(tmp=None):
+    import tempfile
+
+    from eqsanscli.services.instrument_files import resolve_mask
+
+    with _Tree():
+        cycles = scan_cycles()
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "mask_4m.nxs"), "w") as fh:
+                fh.write("x")
+            mask, searched = resolve_mask("4m10a", cycles, cwd=d, ipts=38773)
+    assert mask is not None
+    assert mask.origin == "cwd"
+    assert mask.name == "mask_4m.nxs"
+    assert searched and searched[0] == d
+
+
+def test_mask_falls_back_to_cycle_default():
+    import tempfile
+
+    from eqsanscli.services.instrument_files import resolve_mask
+
+    with _Tree() as root:
+        # Give the newest cycle a masks/ folder with a token-less default.
+        masks_dir = os.path.join(root, "2030B_mp", "masks")
+        os.makedirs(masks_dir, exist_ok=True)
+        with open(os.path.join(masks_dir, "EQSANS_310004_mask.nxs"), "w") as fh:
+            fh.write("x")
+        ifiles.clear_cache()
+        cycles = scan_cycles()
+        newest = [c for c in cycles if c.cycle_id == "2030B"]
+        with tempfile.TemporaryDirectory() as empty:
+            mask, searched = resolve_mask("4m10a", newest, cwd=empty, ipts=None)
+    assert mask is not None
+    assert mask.name == "EQSANS_310004_mask.nxs"
+    assert "masks/" in mask.origin
+
+
+def test_mask_missing_reports_every_location_searched():
+    import tempfile
+
+    from eqsanscli.services.instrument_files import (
+        MASK_MISSING_PREFIX, PARAM_MASK, resolve_for_run,
+    )
+
+    with _Tree():
+        cycles = scan_cycles()
+        with tempfile.TemporaryDirectory() as empty:
+            res = resolve_for_run(
+                305000, 4.0, cycles=cycles, config_id="4m10a", cwd=empty, ipts=None,
+            )
+    assert PARAM_MASK not in res.params
+    problem = next(m for m in res.missing if m.startswith(MASK_MISSING_PREFIX))
+    assert "Looked in:" in problem
+    assert "/set config 4m10a maskfilename" in problem
+
+
+def test_mask_is_a_managed_param_and_verified():
+    from eqsanscli.services.instrument_files import MANAGED_PARAMS, PARAM_MASK, verify_paths
+
+    assert PARAM_MASK in MANAGED_PARAMS
+    problems = verify_paths({PARAM_MASK: "/definitely/not/here_mask.nxs"})
+    assert any("mask" in p for p in problems)
+
+
+def test_presets_carry_no_foreign_ipts_paths():
+    """A mask from another IPTS's shared folder is often unreadable to others."""
+    import glob
+    import json
+
+    for path in glob.glob(str(Path(__file__).resolve().parent.parent
+                              / "preset_configs" / "conf_*.json")):
+        text = json.dumps(json.load(open(path)))
+        assert "/SNS/EQSANS/IPTS-" not in text, path
 
 
 if __name__ == "__main__":

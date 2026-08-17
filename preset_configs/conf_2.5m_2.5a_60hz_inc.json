@@ -45,7 +45,7 @@
         "sampleApertureSize": 10,
         "sourceApertureDiameter": null,
         "usePixelCalibration": null,
-        "maskFileName": "/SNS/EQSANS/shared/script/eqsanstools/mask_4m.nxs",
+        "maskFileName": null,
         "useDefaultMask": true,
         "defaultMask": null,
         "useMaskBackTubes": false,
@@ -115,5 +115,5 @@
             ]
         }
     },
-    "dataDirectories": "/SNS/EQSANS/IPTS-35884/shared/output_bkgsub/"
+    "dataDirectories": "./output/"
 }

@@ -276,6 +276,39 @@ async def _check(state: SessionState) -> CommandResult:
     )
 
 
+def format_mask_note(outcomes) -> str:
+    """Which mask each configuration will use — printed after resolution.
+
+    Masks are the parameter users most often need to see confirmed, because a
+    wrong or missing one silently ruins the reduction.
+    """
+    if not outcomes:
+        return ""
+    lines = ["  [bold]Masks per configuration:[/bold]"]
+    width = max((len(o.config_id) for o in outcomes), default=8)
+    for outcome in outcomes:
+        resolved = outcome.resolution.params.get(ifiles.PARAM_MASK)
+        if resolved:
+            origin = f" [dim]({resolved.note})[/dim]" if resolved.note else ""
+            lines.append(
+                f"    {outcome.config_id:<{width}}  {os.path.basename(str(resolved.value))}{origin}"
+            )
+        elif ifiles.PARAM_MASK in outcome.kept_user:
+            kept = os.path.basename(str(outcome.kept_user[ifiles.PARAM_MASK]))
+            lines.append(f"    {outcome.config_id:<{width}}  {kept} [dim](yours, kept)[/dim]")
+        else:
+            missing = next(
+                (m for m in outcome.resolution.missing
+                 if m.startswith(ifiles.MASK_MISSING_PREFIX)), ""
+            )
+            lines.append(
+                f"    {outcome.config_id:<{width}}  [yellow]⚠ none found[/yellow]"
+            )
+            for line in (missing.split("\n") if missing else []):
+                lines.append(f"      [dim]{line.rstrip()}[/dim]")
+    return "\n".join(lines)
+
+
 def format_outcomes(outcomes, warnings, *, verbose: bool = False) -> str:
     """Render apply results — shared with /matchruns and autopilot."""
     lines: list[str] = []

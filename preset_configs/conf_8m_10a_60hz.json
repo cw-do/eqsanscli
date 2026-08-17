@@ -26,7 +26,7 @@
     },
     "outputFileName": "porsil_8m",
     "configuration": {
-        "outputDir": "/SNS/EQSANS/IPTS-37174/shared/porsil/",
+        "outputDir": "./output/",
         "instrumentConfigurationDir": "/SNS/EQSANS/shared/instrument_configuration",
         "useTimeSlice": false,
         "timeSliceInterval": 300,
@@ -45,7 +45,7 @@
         "sampleApertureSize": 10,
         "sourceApertureDiameter": null,
         "usePixelCalibration": null,
-        "maskFileName": "/SNS/EQSANS/IPTS-37174/shared/mask_8m.nxs",
+        "maskFileName": null,
         "useDefaultMask": true,
         "defaultMask": null,
         "useMaskBackTubes": false,
@@ -116,5 +116,5 @@
             ]
         }
     },
-    "dataDirectories": "/SNS/EQSANS/IPTS-37174/shared/porsil/"
+    "dataDirectories": "./output/"
 }

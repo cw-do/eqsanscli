@@ -238,6 +238,15 @@ CONFIGURATION:
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a). Src column: * = you set it,
                                   blank = preset, d = drtsans default, mp:<cycle> = machine-physics calibration
 
+MASKS: resolved automatically per configuration — (1) mask*.nxs in the folder eqsanscli was started in,
+(2) /SNS/EQSANS/IPTS-<current>/shared/, (3) the cycle's <cycle>_mp/masks/*mask.nxs default. Matched by the
+distance and wavelength in the filename (maskWS4m10A.nxs → 4m10a; maskWS4m2p5A_FS.nxs → 4m2.5a). NEVER
+suggest a mask from a different IPTS — those are often unreadable to other users. If no mask is found,
+eqsanscli warns and names every folder it searched; tell the user to create one and set it with
+/set config <id> maskfilename <file>. Do not invent a mask path.
+    "which mask am I using" / "what masks were picked" → /instrument show
+    "use mask_8m.nxs for the 8m config" → /set config 8m10a maskfilename mask_8m.nxs   (bare name is resolved)
+
 INSTRUMENT CALIBRATION FILES (dark current, sensitivity/flood, beam flux, detector offset, scale components, sample offset):
 These are CYCLE-specific and live in /SNS/EQSANS/shared/NeXusFiles/EQSANS/<cycle>_mp/. eqsanscli resolves them
 automatically at /matchruns and in autopilot, by run number: the newest cycle whose calibration started at or

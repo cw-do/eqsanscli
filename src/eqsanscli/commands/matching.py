@@ -131,13 +131,16 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     # preset apply, so preset values are the thing being refreshed; explicit
     # /set config edits are preserved.
     if state.auto_instrument_files:
-        from eqsanscli.commands.instrument import format_outcomes
+        from eqsanscli.commands.instrument import format_mask_note, format_outcomes
         from eqsanscli.services.instrument_files import sync_state_configs
 
         outcomes, inst_warnings = sync_state_configs(state)
         if outcomes:
             summary += "\n  Instrument files (machine physics):\n"
             summary += format_outcomes(outcomes, inst_warnings)
+            mask_note = format_mask_note(outcomes)
+            if mask_note:
+                summary += "\n" + mask_note
             summary += "\n  [dim]/instrument show for detail; /instrument off to manage by hand[/dim]"
     else:
         summary += "\n  [dim]Instrument-file resolution is off (/instrument on to enable)[/dim]"

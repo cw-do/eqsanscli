@@ -357,6 +357,15 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + frequency)
 
+**Masks** resolve per configuration: `mask*.nxs` in the folder eqsanscli was
+started in → `/SNS/EQSANS/IPTS-<current>/shared/` → the cycle's
+`<cycle>_mp/masks/*mask.nxs` default. Matched on the distance and wavelength in
+the filename (`maskWS4m10A.nxs` → `4m10a`, `maskWS4m2p5A_FS.nxs` → `4m2.5a`); a
+mask naming a different distance/wavelength is never borrowed. Never a mask from
+another IPTS — unreadable to other users. `/matchruns` and autopilot print the
+mask chosen per config; if none is found they name every folder searched and ask
+you to create one and set it with `/set config <id> maskfilename <file>`.
+
 **Instrument calibration files are resolved automatically — do not hand-set them.**
 `sensitivityfilename`, `darkfilename`, `beamfluxfilename`, `detectoroffset`,
 `scalecomponents.detector1` and `sampleoffset` come from

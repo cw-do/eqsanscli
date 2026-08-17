@@ -276,6 +276,32 @@ eqsanscli resolves them from each config's **run number** — automatically at
 | `/instrument off` / `on` | Disable/enable the automatic resolution |
 | `/instrument check` | Verify every referenced calibration file still exists |
 
+**Masks.** A mask belongs to an *experiment*, not to an instrument
+configuration, so it is never taken from another IPTS's shared folder — those
+are frequently unreadable to other users. Search order, first match wins:
+
+1. the folder you started eqsanscli in — any `mask*.nxs`
+2. `/SNS/EQSANS/IPTS-<current>/shared/` — the current experiment's own folder
+3. `<cycle>_mp/masks/*mask.nxs` — the cycle's default mask
+
+Within a folder the file whose name best describes the configuration wins: the
+distance must agree, a matching wavelength is preferred, and `_FS` breaks ties
+for 30 Hz frame-skipping. So with `maskWS4m10A.nxs` and `maskWS4m2p5A_FS.nxs`
+present, `4m10a` takes the first and `4m2.5a` the second. A mask naming a
+*different* distance or wavelength is never borrowed; a mask with no tokens at
+all (like the cycle default `EQSANS_186104_mask.nxs`) serves any configuration.
+
+`/matchruns` and autopilot print which mask each configuration will use. If none
+is found, you get a warning naming every location searched plus the command to
+set one:
+
+```
+Masks per configuration:
+  4m10a     maskWS4m10A.nxs      (from IPTS-38773/shared)
+  4m2.5a    maskWS4m2p5A_FS.nxs  (from IPTS-38773/shared)
+  1.3m2.5a  EQSANS_186104_mask.nxs  (from 2026B masks/; cycle default)
+```
+
 **How a run maps to files.** The chosen cycle is the newest one whose
 calibration campaign started at or before the run (its lowest dark/flood run),
 and the whole set comes from that one cycle — this cycle's dark is never paired

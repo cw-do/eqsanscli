@@ -45,7 +45,7 @@
         "sampleApertureSize": 10,
         "sourceApertureDiameter": null,
         "usePixelCalibration": null,
-        "maskFileName": "/SNS/EQSANS/IPTS-36548/shared/mask_4m2.nxs",
+        "maskFileName": null,
         "useDefaultMask": true,
         "defaultMask": null,
         "useMaskBackTubes": false,
@@ -115,5 +115,5 @@
             ]
         }
     },
-    "dataDirectories": "/SNS/EQSANS/IPTS-36548/shared/output/"
+    "dataDirectories": "./output/"
 }

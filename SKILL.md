@@ -298,6 +298,15 @@ config needs different params (e.g. a different mask):
 /set --sample MySample cfg 4m10a_v2
 /set config 4m10a_v2 maskfilename mask_v2.nxs
 ```
+**Masks** resolve per configuration: `mask*.nxs` in the folder eqsanscli was
+started in → `/SNS/EQSANS/IPTS-<current>/shared/` → the cycle's
+`<cycle>_mp/masks/*mask.nxs` default. Matched on the distance and wavelength in
+the filename (`maskWS4m10A.nxs` → `4m10a`, `maskWS4m2p5A_FS.nxs` → `4m2.5a`); a
+mask naming a different distance/wavelength is never borrowed. Never a mask from
+another IPTS — unreadable to other users. `/matchruns` and autopilot print the
+mask chosen per config; if none is found they name every folder searched and ask
+you to create one and set it with `/set config <id> maskfilename <file>`.
+
 **Instrument calibration files** — dark, flood, flux, detoffset, scalecomp and
 samoffset resolve automatically from the machine-physics cycle folders by run
 number at `/matchruns` and in autopilot. Sensitivity follows the detector

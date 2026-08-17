@@ -62,6 +62,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.11.0 | 2026-08-17 | Masks resolved per configuration from the working folder → this IPTS's shared folder → the cycle's `masks/` default; foreign-IPTS paths removed from presets; per-config mask note printed. |
 | 0.10.1 | 2026-08-17 | Fix: compound commands (`/export script`, `/apply preset`) were silently not executed via natural language; actionable `/export script` guidance; LLM sees empty-table/no-catalog state and chains prerequisites. |
 | 0.10.0 | 2026-08-17 | Three revisions, all shipped together (see the Change Log entries below, each tagged `v0.10.0`): **(1)** `/config` namespace + per-row `configuration_override`, clone naming rule, physics-based output naming, single command registry; **(2)** run-aware instrument calibration files from machine physics + `/instrument`; **(3)** `/set --config` selector + classify-vs-assign LLM routing. Also: `__init__.py` became the single version source. |
 | 0.9.0 | earlier | `/version` command added |
@@ -84,6 +85,55 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.11.0): Masks resolved per configuration, never from another IPTS
+
+**Problem:** reducing IPTS-38773 pulled a mask out of *another* experiment's
+shared folder (`/SNS/EQSANS/IPTS-36548/shared/mask_4m2.nxs` and friends, baked
+into every preset). Those folders are frequently unreadable to other users, so
+the reduction fails on permissions — and even when readable, a mask from someone
+else's experiment is the wrong mask. Autopilot's preset-less branch had the same
+bug in code: it tried `IPTS-<current>/shared/mask_4m.nxs`, then cwd, then a
+hardcoded `eqsanstools/mask_4m.nxs`.
+
+**Model:** a mask belongs to an *experiment*, not to an instrument
+configuration, so it does not belong in a preset at all. `maskfilename` becomes
+the 7th managed param of `services/instrument_files.py` (so it inherits the
+provenance rules: preset-derived values are replaced, `/set config` values are
+kept). Search order, first match wins:
+
+1. the folder eqsanscli was started in — any `mask*.nxs`
+2. `/SNS/EQSANS/IPTS-<current>/shared/` — this experiment's own folder
+3. `<cycle>_mp/masks/*mask.nxs` — the cycle's default (only 2026B has one today:
+   `EQSANS_186104_mask.nxs`)
+
+**Matching within a folder** (`_parse_mask_tokens` + `pick_mask`): distance must
+agree, a matching wavelength is preferred, `_FS`/`30hz` breaks ties for
+frame-skipping. `2p5`/`2o5` both read as 2.5. A mask naming a *different*
+distance or wavelength is excluded outright rather than borrowed; a token-less
+mask is a generic fallback. Verified against every real naming style found on
+disk — `mask_4m.nxs`, `mask_4m2.nxs`, `mask_8m3mm.nxs` (8 m, not 3 m),
+`mask_9m.nxs`, `mask_2o5m.nxs`, `maskWS4m10A.nxs`, `maskWS4m2p5A_FS.nxs`,
+`EQSANS_186104_mask.nxs`. On IPTS-38773 this maps `4m10a → maskWS4m10A.nxs` and
+`4m2.5a → maskWS4m2p5A_FS.nxs` with no user input.
+
+**Visibility (requested):** `/matchruns` and autopilot Step 4c print a *Masks per
+configuration* block naming the file and where it came from. When nothing is
+found, the warning lists every folder searched and gives the exact command to
+fix it — `/set config <id> maskfilename <file>`.
+
+**Presets cleaned:** `maskFileName` set to null in all six, and the leftover
+foreign-IPTS `outputDir`/`dataDirectories` values normalised to `./output/`.
+A test now asserts no preset contains `/SNS/EQSANS/IPTS-` at all.
+
+**Files:** `services/instrument_files.py` (MaskFile, `_parse_mask_tokens`,
+`local_masks`, `cycle_masks`, `pick_mask`, `resolve_mask`, mask branch in
+`resolve_for_run`), `commands/instrument.py` (`format_mask_note`),
+`commands/matching.py`, `services/autopilot.py` (old mask search removed),
+`services/llm_handler.py`, all six `preset_configs/conf_*.json`,
+`tests/test_instrument_files.py` (+7 mask checks, 39 total), README/SKILL/AGENT_SKILL.
+
+**Next:** a skill for *creating* masks on request (not in this revision).
 
 ### 2026-08-17 (v0.10.1): Compound commands silently ignored via natural language
 
