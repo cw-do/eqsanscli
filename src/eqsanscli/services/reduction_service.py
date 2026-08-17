@@ -64,6 +64,106 @@ def reduce_row(
     return result
 
 
+# --------------------------------------------------------------------------
+# Preflight — what a row must have before drtsans can reduce it
+# --------------------------------------------------------------------------
+#
+# Empty beam is mandatory: json_builder puts it in BOTH beamCenter.runNumber
+# and emptyTransmission.runNumber, so without it the reduction has no beam
+# centre. Transmission and background are advisory — drtsans accepts a
+# transmission value instead of a run, and background-cell rows deliberately
+# have no background (see matching_service.assign_background).
+
+
+def blocking_problems(row: WorkingTableRow) -> list[str]:
+    """Reasons this row cannot be reduced at all."""
+    problems: list[str] = []
+    if not str(row.scattering_run).strip():
+        problems.append("no scattering run")
+    if not str(row.empty_beam).strip():
+        problems.append("no empty beam (needed for beam centre + empty transmission)")
+    return problems
+
+
+def advisory_problems(row: WorkingTableRow) -> list[str]:
+    """Reasons this row will reduce but may not be what the user wants."""
+    problems: list[str] = []
+    if not str(row.transmission_run).strip():
+        problems.append("no transmission")
+    if not str(row.background_scatt).strip():
+        problems.append("no background")
+    try:
+        if float(row.thickness) <= 0:
+            problems.append(f"thickness={row.thickness}")
+    except (TypeError, ValueError):
+        problems.append(f"thickness={row.thickness!r} is not a number")
+    return problems
+
+
+def preflight(rows: list[WorkingTableRow]) -> tuple[
+    list[tuple[WorkingTableRow, list[str]]], list[tuple[WorkingTableRow, list[str]]]
+]:
+    """Split `rows` into (blocked, advisory) with their reasons."""
+    blocked = [(r, p) for r in rows if (p := blocking_problems(r))]
+    advisory = [(r, p) for r in rows if not blocking_problems(r) and (p := advisory_problems(r))]
+    return blocked, advisory
+
+
+def format_preflight(
+    blocked: list[tuple[WorkingTableRow, list[str]]],
+    advisory: list[tuple[WorkingTableRow, list[str]]],
+    *,
+    n_selected: int,
+    command: str = "/reduce",
+) -> str:
+    """Explain what is missing and exactly how to fix it."""
+    lines: list[str] = []
+    if blocked:
+        lines.append(
+            f"[red]✗ {len(blocked)} of {n_selected} selected row(s) cannot be reduced:[/red]"
+        )
+        for row, problems in blocked[:15]:
+            lines.append(
+                f"    Row {row.index}: {row.sample_name} (run {row.scattering_run or '—'}, "
+                f"{row.configuration}) — {'; '.join(problems)}"
+            )
+        if len(blocked) > 15:
+            lines.append(f"    ... and {len(blocked) - 15} more")
+
+        missing_empty = [r for r, p in blocked if any("empty beam" in x for x in p)]
+        if missing_empty:
+            configs = sorted({r.configuration for r in missing_empty})
+            lines.append("")
+            lines.append(f"  Configurations without an empty beam: [bold]{', '.join(configs)}[/bold]")
+            lines.append("  Fix one of these ways:")
+            lines.append("    /show catalog                     find the empty-beam run (Class = EmpT)")
+            lines.append("    /reclass <run> empty              if it exists but is misclassified,")
+            lines.append("    /matchruns                        then re-match (assigns it per config)")
+            lines.append(f"    /set --config <id> emp <run>      assign it to one configuration")
+            lines.append("    /set <row> emp <run>              or just one row")
+        lines.append("")
+        lines.append(
+            f"  [dim]{command} --skip-missing   reduce the {n_selected - len(blocked)} valid row(s) "
+            f"and skip these[/dim]"
+        )
+        lines.append(
+            f"  [dim]{command} --force          send them to drtsans anyway "
+            f"(expect failures)[/dim]"
+        )
+
+    if advisory:
+        if blocked:
+            lines.append("")
+        lines.append(f"[yellow]⚠ {len(advisory)} row(s) missing optional fields:[/yellow]")
+        for row, problems in advisory[:10]:
+            lines.append(
+                f"    Row {row.index}: {row.sample_name} ({row.configuration}) — {', '.join(problems)}"
+            )
+        if len(advisory) > 10:
+            lines.append(f"    ... and {len(advisory) - 10} more")
+    return "\n".join(lines)
+
+
 def parse_row_selection(selection: str, table: WorkingTable) -> list[int]:
     """Parse row selection: "1", "1-4", "1,3,5", "all" → list of 1-based indices.
 

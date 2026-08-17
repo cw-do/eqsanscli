@@ -410,6 +410,14 @@ Constraints (all enforced, with an explanatory error):
 - Clones survive `/autopilot` even while unassigned; a `/set config` typo that
   names a nonexistent plain config ID is still cleaned up.
 
+**Empty beam is mandatory.** It supplies the beam centre (`beamCenter.runNumber`)
+as well as the empty transmission, so `/reduce` refuses up front for any selected
+row without one, naming the rows and configurations and how to fix them. Missing
+transmission or background is a warning only. Escape hatches:
+`/reduce <rows> --skip-missing` (reduce the valid rows) and `/reduce <rows> --force`
+(send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
+skips unreducible rows at reduction time.
+
 ### Reduction
 
 | Command | Purpose |

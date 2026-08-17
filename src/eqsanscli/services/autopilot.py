@@ -72,8 +72,19 @@ def _reduce_phase(
 
     Returns (n_success, n_fail). Stops early on cancellation.
     """
-    from eqsanscli.services.reduction_service import reduce_row
+    from eqsanscli.services.reduction_service import blocking_problems, reduce_row
     from eqsanscli.commands.reduction import _summarize_error
+
+    # Never hand drtsans a row that cannot reduce (no empty beam = no beam
+    # centre). Step 3 normally catches these; this also covers --from 4+, where
+    # Step 3 is skipped. Autopilot-only — /reduce does its own preflight and has
+    # an explicit --force.
+    unreducible = [(r, p) for r in rows if (p := blocking_problems(r))]
+    if unreducible:
+        for row, problems in unreducible:
+            write(f"  [yellow]⊘[/yellow] {row.sample_name} ({row.configuration}) — "
+                  f"skipped: {'; '.join(problems)}")
+        rows = [r for r in rows if not blocking_problems(r)]
 
     total = len(rows)
     n_ok = 0
@@ -642,7 +653,25 @@ def run_autopilot_sync(
 
     # === Step 3: Verify assignments — show the table ===
     if from_step >= 4:
-        write(f"[bold]Step 3/13:[/bold] Verify assignments — [dim]Skipped (--from {from_step})[/dim]\n")
+        # Step 3's interactive gate is skipped, but an empty beam is mandatory
+        # (it supplies the beam centre), so still refuse to reduce rows without
+        # one — otherwise --from 4+ hands them to drtsans to fail one by one.
+        write(f"[bold]Step 3/13:[/bold] Verify assignments — [dim]Skipped (--from {from_step})[/dim]")
+        from eqsanscli.services.reduction_service import preflight
+
+        blocked, _ = preflight(table.rows)
+        if blocked:
+            write(f"  [yellow]⚠ {len(blocked)} row(s) still missing required fields — "
+                  f"they will be skipped at reduction:[/yellow]")
+            for row, problems in blocked[:10]:
+                write(f"    Row {row.index}: {row.sample_name} ({row.configuration}) — "
+                      f"{'; '.join(problems)}")
+            if len(blocked) > 10:
+                write(f"    ... and {len(blocked) - 10} more")
+            if len(blocked) == len(table.rows):
+                write("  [red]✗ No row has an empty beam — cannot proceed.[/red]")
+                return
+        write("")
     else:
         write("[bold]Step 3/13:[/bold] Verifying assignments...")
         missing_empty = [row for row in table.rows if not row.empty_beam]

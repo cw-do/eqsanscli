@@ -62,6 +62,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.12.0 | 2026-08-17 | `/reduce` preflight: refuses rows with no empty beam (beam centre), with `--skip-missing` / `--force`; autopilot's `--from 4+` gap closed and `_reduce_phase` skips unreducible rows. |
 | 0.11.0 | 2026-08-17 | Masks resolved per configuration from the working folder → this IPTS's shared folder → the cycle's `masks/` default; foreign-IPTS paths removed from presets; per-config mask note printed. |
 | 0.10.1 | 2026-08-17 | Fix: compound commands (`/export script`, `/apply preset`) were silently not executed via natural language; actionable `/export script` guidance; LLM sees empty-table/no-catalog state and chains prerequisites. |
 | 0.10.0 | 2026-08-17 | Three revisions, all shipped together (see the Change Log entries below, each tagged `v0.10.0`): **(1)** `/config` namespace + per-row `configuration_override`, clone naming rule, physics-based output naming, single command registry; **(2)** run-aware instrument calibration files from machine physics + `/instrument`; **(3)** `/set --config` selector + classify-vs-assign LLM routing. Also: `__init__.py` became the single version source. |
@@ -85,6 +86,48 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.12.0): Reduction preflight — empty beam is mandatory
+
+**Question that started it:** does anything check that the working table has the
+must-have runs before reducing? Answer at the time: autopilot yes, `/reduce` no.
+
+- `/autopilot` Step 3 listed rows missing an empty beam, asked the LLM to explain,
+  aborted if *no* row had one, else prompted "proceed without those N rows?" and
+  dropped them. **But** `--from 4` or higher skipped Step 3 entirely, and in
+  headless mode (no `prompt_user`) it just aborted.
+- `/reduce` validated only "table non-empty" and "selection resolves". A row with
+  a blank `empty_beam` went straight to drtsans with `beamCenter.runNumber = ""`
+  *and* `emptyTransmission.runNumber = ""` (json_builder sets both from the same
+  field), so the user learned about it as a per-row `✗` with whatever error text
+  `_summarize_error` scraped out of the `.err` file.
+
+**What is mandatory vs advisory.** Blocking: empty beam (it supplies the beam
+centre — there is no fallback) and a scattering run. Advisory: transmission
+(drtsans accepts a value instead of a run) and background (a background-cell row
+such as banjo deliberately has none — see `matching_service.assign_background`),
+plus a non-positive/non-numeric thickness.
+
+**`services/reduction_service.py`** gains `blocking_problems`,
+`advisory_problems`, `preflight` and `format_preflight`. The failure text names
+the rows and configurations and then the actual fixes, in the order most likely
+to be right — `/show catalog` to find the `EmpT` run, `/reclass <run> empty` +
+`/matchruns` when the run exists but was misclassified (the common cause), or
+`/set --config <id> emp <run>`.
+
+**`/reduce`** refuses before starting when any selected row is blocked, and takes
+`--skip-missing` (reduce the valid rows, skip the rest) or `--force` (hand them
+to drtsans anyway). Flags are stripped before selection parsing, so
+`/reduce --sample Good --force` and `/reduce --new --skip-missing` work. Advisory
+problems print a warning and proceed.
+
+**Autopilot:** the `--from 4+` path now runs the same preflight and refuses when
+*no* row can reduce; `_reduce_phase` skips blocked rows with a `⊘` line rather
+than handing them over. That is autopilot-only, so it never fights `/reduce --force`.
+
+**Tests:** `tests/test_reduce_preflight.py` (new, 16 checks) covers the
+classification, all `/reduce` modes, flag/selection interaction, and a stubbed
+`_reduce_phase` proving unreducible rows never reach `reduce_row`.
 
 ### 2026-08-17 (v0.11.0): Masks resolved per configuration, never from another IPTS
 

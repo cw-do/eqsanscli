@@ -5,7 +5,9 @@ from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.sample_match import sample_matches
-from eqsanscli.services.reduction_service import parse_row_selection, reduce_row
+from eqsanscli.services.reduction_service import (
+    format_preflight, parse_row_selection, preflight, reduce_row,
+)
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -43,8 +45,21 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
             "       /reduce --new\n"
             "  <row> = index, run number, range, or all\n"
             "  --new = reduce only rows whose status is not 'done' (new/error/modified)\n"
+            "  Rows missing an empty beam are refused up front; add --skip-missing to\n"
+            "  reduce the rest, or --force to send them to drtsans anyway.\n"
             "  Examples: /reduce 1  |  /reduce 172815  |  /reduce 1-4  |  /reduce all\n"
             "            /reduce --sample porsil  |  /reduce --sample *3b*  |  /reduce --new",
+        )
+
+    # Preflight modifiers, stripped before selection parsing.
+    force = any(a.lower() in ("--force", "-f") for a in args)
+    skip_missing = any(a.lower() in ("--skip-missing", "--skip") for a in args)
+    args = [a for a in args if a.lower() not in ("--force", "-f", "--skip-missing", "--skip")]
+    if not args:
+        return CommandResult(
+            success=False,
+            message="Usage: /reduce <row> [--skip-missing | --force]\n"
+            "  Give rows to reduce, e.g. /reduce all --skip-missing",
         )
 
     table = state.current_table
@@ -71,8 +86,41 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
         if not indices:
             return CommandResult(success=False, message=f"No valid rows for selection: {selection}")
 
+    # Preflight: an empty beam is mandatory (beam centre). Refuse rather than let
+    # drtsans fail per row with an opaque error.
+    selected = [r for r in table.rows if r.index in set(indices)]
+    blocked, advisory = preflight(selected)
+    report = format_preflight(blocked, advisory, n_selected=len(selected))
+
+    if blocked and not (force or skip_missing):
+        return CommandResult(success=False, message=report)
+
+    if blocked and skip_missing:
+        blocked_indices = {r.index for r, _ in blocked}
+        indices = [i for i in indices if i not in blocked_indices]
+        if not indices:
+            return CommandResult(
+                success=False,
+                message=report + "\n\n[red]Nothing left to reduce — every selected row is "
+                "missing something required.[/red]",
+            )
+
+    prefix = ""
+    if blocked and force:
+        prefix = (
+            f"[yellow]⚠ --force: reducing {len(blocked)} row(s) that are missing required "
+            f"fields — expect drtsans failures.[/yellow]\n"
+        )
+    elif blocked and skip_missing:
+        prefix = (
+            f"[yellow]⚠ Skipping {len(blocked)} row(s) missing required fields; "
+            f"reducing {len(indices)}.[/yellow]\n"
+        )
+    elif advisory:
+        prefix = report + "\n"
+
     return CommandResult(
         success=True,
-        message="",
+        message=prefix,
         data={"type": "start_reduction", "indices": indices},
     )

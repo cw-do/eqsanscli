@@ -308,6 +308,17 @@ REDUCTION:
 /reduce <row>                   - Run reduction. <row> = index, run number, range (1-4, 1,3,5), or all
 /reduce --new                   - Reduce ONLY rows whose status is not 'done' (i.e. newly added, modified, or previously errored)
 /reduce --sample <name>         - Reduce rows matching sample name (substring/glob)
+  EMPTY BEAM IS MANDATORY: it supplies the beam centre, so /reduce REFUSES up front for any selected row
+  without one, naming the rows and configurations. Do NOT respond by adding --force. The fix is to give
+  those rows an empty beam:
+    /show catalog                        find the run classified EmpT
+    /reclass <run> empty then /matchruns if the run exists but was misclassified (most common cause)
+    /set --config <id> emp <run>         assign per configuration
+/reduce <rows> --skip-missing   - Reduce the valid rows, skip those missing required fields
+/reduce <rows> --force          - Send incomplete rows to drtsans anyway. ONLY when the user explicitly
+                                  insists ("force it", "try anyway"). Expect failures.
+  Missing transmission or background is a WARNING only — reduction proceeds (a background-cell row such as
+  banjo legitimately has no background).
 /export script [filename]       - Export .py reduction script
 
 DATA & PLOTTING:
