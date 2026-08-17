@@ -177,10 +177,26 @@ class CommandRouter:
         )
 
     def _is_valid_command(self, text: str) -> bool:
+        """Is `text` a /command this router can dispatch?
+
+        Must accept compound registrations ("export script", "apply preset")
+        the same way `_dispatch_command` does. Checking only the first word made
+        the natural-language path silently swallow every command whose first
+        word is not also registered bare: `/export script` and
+        `/apply preset ...` were echoed back to the user as chat prose and never
+        executed.
+        """
         if not text.startswith("/"):
             return False
-        first_word = text[1:].split()[0].lower() if len(text) > 1 else ""
-        return first_word in self._handlers or first_word in self._aliases
+        parts = text[1:].split()
+        if not parts:
+            return False
+        first = parts[0].lower()
+        if first in self._handlers or first in self._aliases:
+            return True
+        if len(parts) >= 2 and f"{first} {parts[1].lower()}" in self._handlers:
+            return True
+        return False
 
     @property
     def commands(self) -> list[str]:

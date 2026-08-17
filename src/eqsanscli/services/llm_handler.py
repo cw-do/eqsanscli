@@ -100,6 +100,28 @@ You have two modes:
        3. /reduce --new — reduce only rows whose status isn't 'done'.
        Alternative: /autopilot --continue does all three plus stitch/plot."
 
+PREREQUISITES — never emit a command that the current session state cannot satisfy.
+Most commands need a working table: /export script, /reduce, /stitch, /plot, /calibrate,
+/set, /assign, /remove, /show table, /instrument apply. The session state below says
+explicitly when the table is EMPTY or the catalog is NOT LOADED. When a request needs
+something that is missing, emit the missing step(s) FIRST, in order, then the request:
+
+  Table EMPTY but catalog loaded:
+    "make reduction script for me"  → /matchruns
+                                      /export script
+    "reduce everything"             → /matchruns
+                                      /reduce all
+  Catalog NOT LOADED, and the user has given an IPTS number in this conversation:
+    "make reduction script for IPTS-38773" → /load ipts 38773
+                                             /matchruns
+                                             /export script
+  Catalog NOT LOADED and NO IPTS number is known — do NOT guess one. Use CHAT MODE:
+    say the catalog has to be loaded first and ask which IPTS, e.g.
+    "Nothing is loaded yet — which IPTS should I load? Then I'll run /load ipts <n>,
+     /matchruns and /export script."
+  Note /matchruns REBUILDS the table and resets row status, so only chain it when the
+  table is EMPTY. If the table already has rows, never silently re-run it.
+
 You know about SANS (Small-Angle Neutron Scattering) data reduction, I(Q) profiles,
 detector configurations, transmission measurements, background subtraction, and stitching.
 
@@ -419,6 +441,15 @@ def _build_context(state: SessionState) -> str:
                 f"bkg={r.background_scatt or '—'} emp={r.empty_beam or '—'} [{status}]"
             )
         parts.append("Working table rows:\n" + "\n".join(row_lines))
+    else:
+        # State this explicitly. Without it the model cannot tell an empty table
+        # from a table it simply wasn't told about, and emits table-dependent
+        # commands (/export script, /reduce, /stitch) that can only fail.
+        other = [n for n, t in state.tables.items() if t.rows and n != table.name]
+        note = f"Table '{table.name}': EMPTY — no rows. /matchruns has not been run for this table."
+        if other:
+            note += f" Other tables that DO have rows: {', '.join(other)} (switch with /table <name>)."
+        parts.append(note)
     _KEY_PARAMS = [
         "usedefaultmask", "usemask", "usedarkfilename", "usethetadependenttransmission",
         "usesensitivityfilename", "fitframeskipping", "useslicer",
@@ -447,6 +478,8 @@ def _build_context(state: SessionState) -> str:
         if configs_example:
             parts.append(f"Available configs in stitch: {', '.join(configs_example)}")
     catalog = state.catalog
+    if catalog is None or catalog.empty:
+        parts.append("Catalog: NOT LOADED — /load ipts <number> is required before anything else.")
     if catalog is not None and not catalog.empty:
         cat_lines = []
         for _, crow in catalog.iterrows():

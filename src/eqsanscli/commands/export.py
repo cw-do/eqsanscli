@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 async def handle_export_script(args: list[str], state: SessionState) -> CommandResult:
     table = state.current_table
     if not table.rows:
-        return CommandResult(success=False, message="Working table is empty. Use /matchruns first.")
+        return CommandResult(success=False, message=_nothing_to_export(state, table))
 
     if args:
         output_path = args[0]
@@ -44,6 +44,43 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
         message=f"Exported reduction script: {path}\n"
         f"  {n_rows} samples across {n_configs} configurations.\n"
         f"  Run with: drtsans {path}",
+    )
+
+
+def _nothing_to_export(state: SessionState, table) -> str:
+    """Explain what is missing, and the exact next step to take.
+
+    "Working table is empty. Use /matchruns first." was true but unhelpful when
+    the catalog was not loaded either — /matchruns alone cannot work then.
+    """
+    catalog = state.catalog
+    has_catalog = catalog is not None and not catalog.empty
+
+    others = [name for name, t in state.tables.items() if t.rows and name != table.name]
+    if others:
+        return (
+            f"Nothing to export — table '{table.name}' is empty, but these tables have rows: "
+            f"{', '.join(others)}.\n"
+            f"  Switch with /table {others[0]}, then /export script."
+        )
+
+    if has_catalog:
+        return (
+            f"Nothing to export — table '{table.name}' is empty "
+            f"(IPTS-{state.ipts} catalog is loaded, {len(catalog)} "
+            f"run{'s' if len(catalog) != 1 else ''}).\n"
+            f"  Next: /matchruns          build the working table from the catalog\n"
+            f"        /show table         check the matched runs\n"
+            f"        /export script      write the reduction script\n"
+            f"  Or /autopilot current to reduce end to end instead of exporting a script."
+        )
+
+    return (
+        "Nothing to export — no working table, and no catalog is loaded.\n"
+        "  Next: /load ipts <number>   fetch the catalog from ONCat\n"
+        "        /matchruns            build the working table\n"
+        "        /export script        write the reduction script\n"
+        "  Or /autopilot <ipts> to do the whole reduction in one go."
     )
 
 

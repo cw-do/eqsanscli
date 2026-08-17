@@ -62,6 +62,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.10.1 | 2026-08-17 | Fix: compound commands (`/export script`, `/apply preset`) were silently not executed via natural language; actionable `/export script` guidance; LLM sees empty-table/no-catalog state and chains prerequisites. |
 | 0.10.0 | 2026-08-17 | Three revisions, all shipped together (see the Change Log entries below, each tagged `v0.10.0`): **(1)** `/config` namespace + per-row `configuration_override`, clone naming rule, physics-based output naming, single command registry; **(2)** run-aware instrument calibration files from machine physics + `/instrument`; **(3)** `/set --config` selector + classify-vs-assign LLM routing. Also: `__init__.py` became the single version source. |
 | 0.9.0 | earlier | `/version` command added |
 | 0.1.0 | initial | first release |
@@ -83,6 +84,47 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.10.1): Compound commands silently ignored via natural language
+
+**Reported:** "make reduction script for me" (before any working table existed)
+printed `/export script` and then nothing — no result, no error. Typing
+`/export script` directly *did* report "Working table is empty."
+
+**Cause:** `CommandRouter._is_valid_command` checked only the **first word**
+against the handler registry, while `_dispatch_command` resolves compound
+two-word registrations. `export script` and `apply preset` are registered as
+compounds and neither `export` nor `apply` exists as a bare handler, so
+`_is_valid_command("/export script")` was False → `has_commands` was False →
+`_dispatch_natural_language` treated the LLM's output as **chat prose**, printed
+it back verbatim, and executed nothing. Two code paths, only one compound-aware.
+`/apply preset auto` was silently broken the same way ("apply the presets" via NL
+did nothing). Every other command happened to work because its first word is
+also registered bare (`show`, `set`, `list`, `refresh`, …).
+
+**Fix:** `_is_valid_command` now also accepts the two-word compound form,
+mirroring `_dispatch_command`.
+
+**Two follow-ons so the failure mode can't recur quietly:**
+
+1. `commands/export.py:_nothing_to_export()` — "Working table is empty. Use
+   /matchruns first." was true but wrong-footed when no catalog was loaded
+   either (`/matchruns` alone cannot help then). Now distinguishes no-catalog
+   (→ `/load ipts`), catalog-but-no-table (→ `/matchruns`), and rows-in-another-
+   table (→ `/table <name>`), and points at `/autopilot` as the one-shot path.
+2. `services/llm_handler.py` — `_build_context` said *nothing* when the table was
+   empty or the catalog missing, so the model could not distinguish "empty" from
+   "not mentioned" and emitted commands that could only fail. It now states
+   `Table 'x': EMPTY` / `Catalog: NOT LOADED` explicitly (plus which other tables
+   have rows), and the system prompt has a PREREQUISITES section: chain the
+   missing step first (`/matchruns` → `/export script`), never chain `/matchruns`
+   when the table already has rows (it rebuilds and resets status), and never
+   guess an IPTS number — ask instead.
+
+**Tests:** `tests/test_router_dispatch.py` (new, 11 checks) covers compound
+validity, alias validity, rejection of unknown commands, end-to-end NL dispatch
+of a compound command with the LLM stubbed, prose pass-through, all three
+`/export script` guidance branches, and the new context lines.
 
 ### 2026-08-17 (v0.10.0): `/set --config` + classify-vs-assign routing
 
