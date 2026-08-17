@@ -220,15 +220,43 @@ Use `--force` to re-reduce all rows regardless of status.
 
 | Command | Description |
 |---------|-------------|
-| `/list configs` | List configurations in current table |
+| `/config list` (alias: `/list configs`) | List configs in the table plus any stored extras (e.g. unassigned clones) |
+| `/config clone <src> <dst>` | Copy a config to a new name so it can be edited independently (`<dst>` must contain `<src>`'s config ID: `4m10a` → `4m10a_v2`) |
+| `/config rows <id>` | List rows currently referencing `<id>` |
 | `/show config <id>` | Show all reduction parameters (75 params from eqsans_reduction.json) |
 | `/set config <id> <param> <value>` | Set a config parameter |
+| `/set config all <param> <value>` | Apply to every config in the table; sticky default for future ones |
+| `/set <row> cfg <name>` | Reassign a row to a different (typically cloned) config; `none` clears (aliases: `config`, `configuration`) |
+| `/set --sample <name> cfg <new>` | Bulk-reassign rows matching `<name>` |
 | `/show outputdir` | Show output directory |
 | `/set outputdir <path>` | Set output directory |
 | `/set ipts <number>` | Set IPTS number |
 | `/set drtsans <version>` | Set drtsans version (`default`, `dev`, `qa`) |
 
 Config IDs are compact lowercase strings: `4m10a`, `4m2.5a`, `2.5m2.5a`. The 60Hz chopper frequency is omitted (default); 30Hz is shown: `4m10a30hz`. All matching is case-insensitive. Tab autocompletion is available.
+
+**Per-row config variants.** Use `/config clone` when only a subset of rows at the
+same physical config needs different params (e.g. a different mask file):
+
+```
+/config clone 4m10a 4m10a_v2                    # create the variant
+/set --sample MySample cfg 4m10a_v2             # point only those rows at it
+/set config 4m10a_v2 maskfilename mask_v2.nxs   # diverge from 4m10a
+/set <row> cfg none                             # clear override → use physical config
+```
+
+Three rules keep variants predictable:
+
+- **The clone name must contain the source config ID** — `4m10a` → `4m10a_v2`,
+  `4m10a-mask2`, `porsil_4m10a`. A bare name like `mask2` is rejected: preset
+  matching, cycle-file discovery and low-Q-first stitch ordering read the physics
+  back out of the config name.
+- **A row can only take a config with the same physics.** Assigning a `4m10a` row
+  to `8m10a` parameters is rejected — an override changes reduction parameters,
+  not the measured geometry.
+- **Output filenames never change.** They stay
+  `<sample>_<physical config>_Iq.dat`, so stitching, `merged_*` files and
+  `/autopilot --continue` behave the same whether or not a row uses a clone.
 
 ### Presets
 

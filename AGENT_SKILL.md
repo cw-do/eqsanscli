@@ -336,15 +336,45 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 | Command | Purpose |
 |---------|---------|
-| `/list configs` | List configs in the table |
+| `/config list` (alias `/list configs`) | List configs in the table + stored extras (clones) |
+| `/config clone <src> <dst>` | Copy a config to a new name (editable independently). `<dst>` must contain `<src>`'s config ID |
+| `/config rows <id>` | List rows referencing `<id>` |
 | `/show config <id>` | Show all parameters for a config |
 | `/set config <id> <param> <value>` | Set a config parameter |
+| `/set config all <param> <value>` | Apply to every config + sticky default for future ones |
+| `/set <row> cfg <name>` | Reassign a row to a different (typically cloned) config; `none` clears (aliases: `config`, `configuration`) |
+| `/set --sample <name> cfg <new>` | Bulk-reassign rows matching `<name>` |
 | `/apply preset auto` | Auto-match closest preset to each config |
 | `/apply preset <name> <config_id>` | Apply specific preset |
 | `/set outputdir <path>` | Set output directory (propagates to all configs) |
 | `/set drtsans <version>` | Set drtsans version: default, dev, qa |
 
 Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + frequency)
+
+**Per-row variant workflow** (when only some rows at the same physical config need different params):
+
+```
+/config clone 4m10a 4m10a_v2
+/set --sample MySample cfg 4m10a_v2
+/set config 4m10a_v2 maskfilename mask_v2.nxs
+```
+
+`cfg` is the canonical row-field name (aliases: `config`, `configuration`).
+The cloned config has its own entry in `state.configurations`; rows assigned to it
+look up params there, while other rows at `4m10a` continue using the original.
+
+Constraints (all enforced, with an explanatory error):
+
+- `<dst>` must contain `<src>`'s config ID — `4m10a_v2`, `4m10a-mask2`,
+  `porsil_4m10a`. `mask2` is rejected. Preset matching, cycle-file discovery and
+  stitch ordering recover the physics from the name.
+- A row only accepts a config with matching physics: `/set 3 cfg 4m10a_v2` fails
+  when row 3 is `8m10a`.
+- Output filenames are unaffected: always `<sample>_<physical config>_Iq.dat`.
+  Cloned configs change reduction parameters, not file naming — so stitch
+  grouping, `merged_*` outputs and `--continue` discovery are unchanged.
+- Clones survive `/autopilot` even while unassigned; a `/set config` typo that
+  names a nonexistent plain config ID is still cleaned up.
 
 ### Reduction
 

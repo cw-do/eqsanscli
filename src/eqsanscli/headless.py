@@ -22,32 +22,8 @@ import threading
 import time
 from typing import Any
 
-from eqsanscli.commands.autopilot import handle_autopilot
-from eqsanscli.commands.calibrate import handle_calibrate
-from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass, handle_refresh_catalog
-from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
-from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
-from eqsanscli.commands.export import handle_export_script, handle_zipnsend, handle_confirm
-from eqsanscli.commands.note import handle_note
-from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
-from eqsanscli.commands.models import handle_models
-from eqsanscli.commands.preset import (
-    handle_apply_preset, handle_compare, handle_show_preset, handle_show_presets,
-)
-from eqsanscli.commands.reduction import handle_reduce
+from eqsanscli.commands.registry import register_all
 from eqsanscli.commands.router import CommandResult, CommandRouter
-from eqsanscli.commands.session import (
-    handle_save, handle_load, handle_list_tables, handle_continue, handle_session,
-)
-from eqsanscli.commands.settings import handle_settings
-from eqsanscli.commands.share import handle_share
-from eqsanscli.commands.shell import (
-    handle_ls, handle_cd, handle_pwd, handle_mkdir,
-    handle_cat, handle_head, handle_tail,
-    handle_cp, handle_mv, handle_rm, handle_shell,
-)
-from eqsanscli.commands.stitch import handle_stitch
-from eqsanscli.commands.tables import handle_move, handle_table
 from eqsanscli.models.session_state import SessionState
 
 
@@ -70,60 +46,12 @@ def _strip_markup(text: str) -> str:
 
 
 def _register_commands(router: CommandRouter, state: SessionState) -> None:
-    """Register all command handlers — mirrors app.py."""
-    router.register("show", handle_show)
-    router.register("show table", handle_show_table)
-    router.register("matchruns", handle_matchruns)
-    router.register("reclass", handle_reclass)
-    router.register("refresh catalog", handle_refresh_catalog)
-    router.register("refresh", handle_refresh_catalog)
-    router.register("set", handle_set)
-    router.register("set config", handle_set_config)
-    router.register("show config", handle_show_config)
-    router.register("list configs", handle_list_configs)
-    router.register("show presets", handle_show_presets)
-    router.register("show preset", handle_show_preset)
-    router.register("apply preset", handle_apply_preset)
-    router.register("compare", handle_compare)
-    router.register("assign", handle_assign)
-    router.register("reduce", handle_reduce)
-    router.register("remove", handle_remove)
-    router.register("export script", handle_export_script)
-    router.register("zipnsend", handle_zipnsend)
-    router.register("confirm", handle_confirm)
-    router.register("note", handle_note)
-    router.register("plot", handle_plot)
-    router.register("list iq", handle_list_iq)
-    router.register("list iqxqy", handle_list_iqxqy)
-    router.register("calibrate", handle_calibrate)
-    router.register("stitch", handle_stitch)
-    router.register("table", handle_table)
-    router.register("move", handle_move)
-    router.register("save", handle_save)
-    router.register("load", handle_load)
-    router.register("list tables", handle_list_tables)
-    router.register("continue", handle_continue)
-    router.register("session", handle_session)
-    router.register("list ipts", handle_list_ipts)
-    router.register("models", handle_models)
-    router.register("autopilot", handle_autopilot)
-    router.register("settings", handle_settings)
-    router.register("share", handle_share)
-    router.register("ls", handle_ls)
-    router.register("cd", handle_cd)
-    router.register("pwd", handle_pwd)
-    router.register("mkdir", handle_mkdir)
-    router.register("cat", handle_cat)
-    router.register("head", handle_head)
-    router.register("tail", handle_tail)
-    router.register("cp", handle_cp)
-    router.register("mv", handle_mv)
-    router.register("rm", handle_rm)
-    router.register("sh", handle_shell)
-    router.alias("quit", "exit")
-    router.alias("q", "exit")
-    router.alias("dir", "ls")
-    router.alias("shell", "sh")
+    """Register command handlers.
+
+    Shared commands come from commands/registry.py (the same list the TUI uses);
+    only the headless-specific stubs below are registered here.
+    """
+    register_all(router)
 
     async def _handle_version(args, state):
         from eqsanscli import __version__

@@ -197,7 +197,90 @@ SETTABLE_FIELDS = {
     "sample": "sample_name",
     "name": "sample_name",
     "sample_name": "sample_name",
+    # 'cfg' is canonical; 'config'/'configuration' kept as aliases.
+    # Canonical name avoids collision with the `/set config <id> <param> <val>`
+    # sub-command form (which routes via the compound "set config" handler).
+    "cfg": "configuration_override",
+    "config": "configuration_override",
+    "configuration": "configuration_override",
 }
+
+
+def _validate_config_target(value: str, state, rows: list | None = None) -> tuple[bool, str, str]:
+    """Validate that `value` names a config the given rows may reference.
+
+    Returns (ok, resolved_value, error_message). On success, resolved_value
+    is the stored key from state.configurations (preserving the user's
+    casing/format). Accepts "none"/"null"/"" as a clear → returns ("").
+    Also accepts any physical config currently in the table (no override
+    needed — but storing the explicit name is harmless and makes the
+    intent visible in /show table).
+
+    When `rows` is given, the target's physics must match every row's own
+    physical configuration: pointing a 4m10a row at 8m parameters (or at a
+    clone of them) would reduce it with the wrong distance/wavelength setup,
+    which is a mistake rather than a valid override.
+    """
+    from eqsanscli.models.config_id import base_config_id, normalize_config_id
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+
+    v = value.strip()
+    if v.lower() in ("none", "null", ""):
+        return True, "", ""
+
+    norm = normalize_config_id(v)
+    if not norm:
+        return False, "", f"Invalid config name: '{value}'"
+
+    resolved: str | None = None
+
+    # 1) Stored override in state.configurations
+    for k in state.configurations:
+        if k == ALL_CONFIGS_KEY:
+            continue
+        if normalize_config_id(k) == norm:
+            resolved = k
+            break
+
+    # 2) A physical config already present in the table (no clone needed)
+    table = state.current_table
+    if resolved is None:
+        for cfg in table.configurations:
+            if normalize_config_id(cfg) == norm:
+                resolved = cfg
+                break
+
+    if resolved is None:
+        from eqsanscli.commands.config import _dedup_config_names
+        available = _dedup_config_names(state, table)
+        return (
+            False,
+            "",
+            f"Unknown config '{value}'. Use /config clone <src> {value} first, or pick from: "
+            f"{', '.join(available) or '(none)'}",
+        )
+
+    # 3) Physics must match the rows being reassigned
+    target_base = base_config_id(resolved)
+    if rows and target_base:
+        mismatched = [
+            r for r in rows
+            if normalize_config_id(r.physical_configuration) != normalize_config_id(target_base)
+        ]
+        if mismatched:
+            sample = mismatched[0]
+            return (
+                False,
+                "",
+                f"Config '{resolved}' is a {target_base} configuration, but "
+                f"{len(mismatched)} of the selected row(s) are not — e.g. row {sample.index} "
+                f"({sample.sample_name}) is {sample.physical_configuration}.\n"
+                f"  A config override changes reduction parameters, not the measured geometry.\n"
+                f"  Clone the row's own config instead: /config clone "
+                f"{sample.physical_configuration} {sample.physical_configuration}_v2",
+            )
+
+    return True, resolved, ""
 
 
 async def handle_set(args: list[str], state: SessionState) -> CommandResult:
@@ -215,6 +298,9 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         /set 167942 thickness 0.1
         /set 167942 sample MyNewName    ← rename the sample on this row
         /set 3 name S3                  ← 'name' is an alias for 'sample'
+        /set 4 cfg 4m10a_mask2          ← reassign row 4 to a (cloned) config
+        /set 4 cfg none                 ← clear override → use physics-derived config
+                                         ('cfg' is canonical; 'config'/'configuration' also work)
     """
     if not args:
         return CommandResult(
@@ -301,6 +387,12 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
                 return CommandResult(success=False, message="Cannot clear sample_name — provide a non-empty name.")
             for row in matching_rows:
                 row.set_field(attr_name, "")
+            if attr_name == "configuration_override":
+                return CommandResult(
+                    success=True,
+                    message=f"Cleared config override for {len(matching_rows)} row(s) matching '{args[1]}' "
+                    f"— rows now use their physics-derived config.",
+                )
             return CommandResult(
                 success=True,
                 message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching '{args[1]}'.",
@@ -311,6 +403,11 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
                 parsed_value: str | float = float(value_str)
             except ValueError:
                 return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
+        elif attr_name == "configuration_override":
+            ok, resolved, err = _validate_config_target(value_str, state, matching_rows)
+            if not ok:
+                return CommandResult(success=False, message=err)
+            parsed_value = resolved
         else:
             parsed_value = value_str
 
@@ -320,7 +417,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         sample_list = ", ".join(sorted(set(r.sample_name for r in matching_rows)))
         return CommandResult(
             success=True,
-            message=f"Set {field_name}={value_str} for {len(matching_rows)} row(s) matching '{args[1]}'.\n"
+            message=f"Set {field_name}={parsed_value} for {len(matching_rows)} row(s) matching '{args[1]}'.\n"
             f"  Samples: {sample_list}",
         )
 
@@ -363,6 +460,11 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         for r in target_rows:
             r.set_field(attr_name, "")
         label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
+        if attr_name == "configuration_override":
+            return CommandResult(
+                success=True,
+                message=f"Cleared config override for {label} — now using physics-derived config.",
+            )
         return CommandResult(success=True, message=f"Cleared {field_name} for {label}.")
 
     if attr_name == "thickness":
@@ -370,6 +472,11 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             parsed_value: str | float = float(value_str)
         except ValueError:
             return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
+    elif attr_name == "configuration_override":
+        ok, resolved, err = _validate_config_target(value_str, state, target_rows)
+        if not ok:
+            return CommandResult(success=False, message=err)
+        parsed_value = resolved
     else:
         parsed_value = value_str
 
@@ -379,7 +486,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
     label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
     return CommandResult(
         success=True,
-        message=f"Set {field_name}={value_str} for {label}.",
+        message=f"Set {field_name}={parsed_value} for {label}.",
     )
 
 

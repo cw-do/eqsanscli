@@ -1,0 +1,120 @@
+{
+    "schemaStamp": "2026-06-17T18:27:48.911803",
+    "instrumentName": "EQSANS",
+    "iptsNumber": "37174",
+    "sample": {
+        "runNumber": "185344",
+        "thickness": 0.1,
+        "transmission": {
+            "runNumber": "185334",
+            "value": ""
+        }
+    },
+    "background": {
+        "runNumber": "185343",
+        "transmission": {
+            "runNumber": "185333",
+            "value": ""
+        }
+    },
+    "emptyTransmission": {
+        "runNumber": "185332",
+        "value": null
+    },
+    "beamCenter": {
+        "runNumber": "185332"
+    },
+    "outputFileName": "porsil_8m",
+    "configuration": {
+        "outputDir": "/SNS/EQSANS/IPTS-37174/shared/porsil/",
+        "instrumentConfigurationDir": "/SNS/EQSANS/shared/instrument_configuration",
+        "useTimeSlice": false,
+        "timeSliceInterval": 300,
+        "timeSliceOffset": 0.0,
+        "timeSlicePeriod": null,
+        "useLogSlice": false,
+        "logSliceName": null,
+        "logSliceInterval": 10,
+        "cutTOFmin": 1000,
+        "cutTOFmax": 3000,
+        "wavelengthStep": 0.1,
+        "wavelengthStepType": "constant Delta lambda",
+        "sampleOffset": 285.0,
+        "useDetectorOffset": true,
+        "detectorOffset": 77.244,
+        "sampleApertureSize": 10,
+        "sourceApertureDiameter": null,
+        "usePixelCalibration": null,
+        "maskFileName": "/SNS/EQSANS/IPTS-37174/shared/mask_8m.nxs",
+        "useDefaultMask": true,
+        "defaultMask": null,
+        "useMaskBackTubes": false,
+        "darkFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/EQSANS_176665.nxs.h5",
+        "normalization": "Total charge",
+        "blockedBeamRunNumber": null,
+        "fluxMonitorRatioFile": null,
+        "beamFluxFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/bl6_flux_2026a_mar_rebinned.txt",
+        "sensitivityFileName": "/SNS/EQSANS/shared/NeXusFiles/EQSANS/2026A_mp/Sensitivity_patched_thinPMMA_4m_176667.nxs",
+        "useSolidAngleCorrection": true,
+        "useThetaDepTransCorrection": true,
+        "mmRadiusForTransmission": 25,
+        "absoluteScaleMethod": "standard",
+        "StandardAbsoluteScale": 1,
+        "numQxQyBins": 80,
+        "1DQbinType": "scalar",
+        "QbinType": "linear",
+        "numQBins": 80,
+        "LogQBinsPerDecade": null,
+        "useLogQBinsDecadeCenter": false,
+        "useLogQBinsEvenDecade": false,
+        "WedgeMinAngles": "-30, 60",
+        "WedgeMaxAngles": "30, 120",
+        "autoWedgeQmin": null,
+        "autoWedgeQmax": null,
+        "autoWedgeQdelta": null,
+        "autoWedgeAzimuthalDelta": null,
+        "autoWedgePeakWidth": null,
+        "autoWedgeBackgroundWidth": null,
+        "autoWedgeSignalToNoiseMin": null,
+        "AnnularAngleBin": 5.0,
+        "Qmin": null,
+        "Qmax": null,
+        "useErrorWeighting": true,
+        "smearingPixelSizeX": null,
+        "smearingPixelSizeY": null,
+        "useSubpixels": null,
+        "subpixelsX": null,
+        "subpixelsY": null,
+        "useSliceIDxAsSuffix": null,
+        "fitInelasticIncoh": false,
+        "selectMinIncoh": true,
+        "incohfit_qmin": 0.2,
+        "incohfit_qmax": 0.3,
+        "incohfit_factor": null,
+        "outputWavelengthDependentProfile": false,
+        "incohfit_intensityweighted": false,
+        "elasticReference": {
+            "runNumber": "",
+            "thickness": "1.0",
+            "transmission": {
+                "runNumber": null,
+                "value": "0.9"
+            }
+        },
+        "elasticReferenceBkgd": {
+            "runNumber": "",
+            "transmission": {
+                "runNumber": null,
+                "value": "0.9"
+            }
+        },
+        "scaleComponents": {
+            "detector1": [
+                1.003571,
+                1.052902,
+                1
+            ]
+        }
+    },
+    "dataDirectories": "/SNS/EQSANS/IPTS-37174/shared/porsil/"
+}

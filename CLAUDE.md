@@ -22,8 +22,14 @@ preset_configs/       — Preset JSON configs for known instrument configuration
 
 ### Key patterns
 
-- Commands are registered in both `app.py` and `headless.py` — always update both when adding a new command.
+- Commands are registered ONCE in `commands/registry.py` (`register_all`), which both
+  `app.py` and `headless.py` call. Only front-end-specific commands (`/help`, `/exit`,
+  `/version`, `/list`, `/guide`) are registered in the entry points themselves.
 - Also update the LLM command reference in `services/llm_handler.py` for natural language routing.
+- Config identity is two-layered: `row.configuration` (may be a cloned config —
+  drives *parameters*) vs `row.physical_configuration` (drives *file naming* and
+  stitch grouping; see `row.output_stem`). Physics heuristics resolve clone names
+  via `config_id.base_config_id()`.
 - `app.py` has a `_render_data` method with hardcoded column lists per data type — update when adding columns.
 - Session state auto-saves after every command. `catalog_data` is stored as list-of-dicts.
 - `SKILL.md` and `AGENT_SKILL.md` document the tool for TUI and headless agent use respectively.
@@ -40,6 +46,142 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17: Config-override hardening + single command registry
+
+Follow-up to the 2026-06-24 `/config` work below. That feature let a row point at
+a cloned config, but the clone label then flowed into places that expect a
+*physics* config ID. Six fixes:
+
+**1. `models/config_id.py` — `base_config_id()` / `is_derived_config_id()`.**
+`base_config_id("4m10a_v2") → "4m10a"` (searches the normalized name, returns the
+canonical ID, `""` when absent). `is_derived_config_id()` distinguishes a clone
+label from a bare config ID. `parse_config_id()` now falls back to the base, so
+clone names no longer parse as `(0.0, 0.0, 60)`.
+
+**2. Overrides never affect file naming.** New
+`WorkingTableRow.output_stem` = `<sample>_<physical_configuration>`, used by
+`reduction_service.reduce_row`, `app.py`'s reduce worker, autopilot's
+calibration lookup, `merge_service.build_stitch_table` and
+`commands/stitch.py`. **This was a real bug:** with a clone-named file
+(`SampA_4m10a_v2_Iq.dat`), `merge_service._scan_output_dir` splits on the last
+underscore and would read sample=`SampA_4m10a`, config=`v2`. Stitch grouping
+tuples and `script_exporter`'s emitted `eq._filename` use the physical config for
+the same reason. **Rule: parameters follow `row.configuration`; filenames and
+stitch grouping follow `row.physical_configuration`.**
+
+**3. `/config clone` naming rule.** `<dst>` must contain `<src>`'s physics ID
+(`4m10a` → `4m10a_v2` / `4m10a-mask2` / `porsil_4m10a`); `mask2` is rejected with
+an explanation. This is what makes the base recoverable from the name alone — no
+extra session field to persist.
+
+**4. `/config clone` produces a faithful copy.** It previously kept only keys
+present in the source's JSON preset or `__all__`, so cloning a config with no
+matching preset produced a near-empty clone that silently fell back to drtsans
+defaults. It now copies every key whose effective value differs from the
+drtsans-template default — the minimal set guaranteeing
+`get_config(dst) == get_config(src)` at clone time.
+
+**5. Physics heuristics resolve clones.** `config_manager._load_matching_preset`,
+`autopilot._find_closest_preset`, `commands/preset.py`'s `/apply preset auto`,
+`llm_handler._parse_config_id` (hence `_llm_suggest_config` and
+`_discover_cycle_files`) and `merge_service._default_target_index` all resolve
+the base first, so a clone matches the same preset as its source instead of
+`find_closest_preset`'s loose "same distance" tier.
+
+**6. Autopilot no longer deletes clones.** Step 4b's orphan cleanup removed every
+`state.configurations` key absent from `table.configurations` — which silently
+discarded a clone awaiting `/set <row> cfg`, or one whose rows were filtered out
+by `--samples`/`--exclude`/`--config`. It now skips derived (clone) names and
+reports what it dropped.
+
+**Also:** `/set <row> cfg <name>` rejects a target whose physics differs from the
+row's own (`4m10a` row ✗ `8m10a` params) — `_validate_config_target` takes the
+rows and names the offending one. `/config list` annotates clones with
+`(clone of 4m10a)`. Remaining `/set <row> config` hints changed to the canonical
+`cfg`.
+
+**`commands/registry.py` (new) — one registration list.** `register_all(router)`
+registers all 50 shared commands + 4 aliases; `app.py` and `headless.py` call it
+and then add only their own front-end handlers (`/help`, `/exit`, `/version`,
+`/list`, and `/guide` in the TUI — see `ENTRY_POINT_COMMANDS`). Both files' long
+handler-import blocks are gone. **Adding a command is now two steps, not three:
+`registry.py`, then the `llm_handler.py` reference.**
+
+**`tests/test_config_clone.py` (new)** — 20 checks over the clone/override flow,
+naming, preset resolution, session round-trip and entry-point registration
+parity. Runs standalone (`python tests/test_config_clone.py`) since pytest isn't
+installed in `.venv`; pytest-compatible if it is.
+
+**Files changed:** `models/config_id.py`, `models/working_table.py`,
+`commands/config.py`, `commands/matching.py`, `commands/preset.py`,
+`commands/stitch.py`, `commands/registry.py` (new), `services/config_manager.py`,
+`services/autopilot.py`, `services/merge_service.py`,
+`services/reduction_service.py`, `services/script_exporter.py`,
+`services/llm_handler.py`, `app.py`, `headless.py`, `tests/test_config_clone.py`
+(new), README.md, SKILL.md, AGENT_SKILL.md.
+
+### 2026-06-24: `/config` namespace + per-row config override
+
+**Problem:** No way to give two rows at the same physical config different reduction
+params (e.g. a different mask for one sample). `state.configurations` was keyed by
+the physics-derived ID (`4m10a`), so any per-config setting hit ALL rows at that config.
+Cloning a config wasn't possible, and rows had no way to point at an alternative.
+
+**Solution:** Two changes that work together.
+
+1. **`WorkingTableRow.configuration_override: str = ""`** — new stored field.
+   The `configuration` property returns the override when set, else the
+   physics-derived ID. New `physical_configuration` property always returns
+   the derived ID. The override is in `_REDUCTION_FIELDS` so changing it on
+   a done row flips status to `modified`. `from_dict` filters unknown keys
+   so older session files (no `configuration_override`) still load.
+
+2. **`/config` sub-router**:
+   - `/config list` — configs in the table + stored extras (clones not yet assigned)
+   - `/config clone <src> <dst>` — copy params from `<src>` to a new `<dst>`.
+     Rejects names colliding with `__all__`, existing stored configs, or
+     physical configs already in the table. If `<src>` is a physical config
+     (not in `state.configurations`), the clone snapshots preset + `__all__`
+     defaults so it's self-contained.
+   - `/config rows <id>` — list rows referencing `<id>`
+   - Bare `/config` falls through to `/config list`.
+
+3. **`/set <row> cfg <name>` + `/set --sample <name> cfg <name>`** —
+   assigns `configuration_override`. Validates the target exists as a stored
+   config or a physical config in the table; rejects unknown names with the
+   available list. `/set <row> cfg none` clears the override.
+   `cfg` is the canonical row-field name (chosen over `config` to avoid
+   visual collision with the `/set config <id> <param> <val>` sub-command);
+   `config` and `configuration` remain accepted as aliases.
+
+**Typical workflow:**
+```
+/config clone 4m10a 4m10a_v2                  # create the variant
+/set --sample MySample cfg 4m10a_v2           # point a subset of rows at it
+/set config 4m10a_v2 maskfilename mask_v2.nxs # diverge from 4m10a
+```
+
+**Backwards compat preserved:**
+- All ~30 call sites that read `row.configuration` (autopilot, reduction,
+  stitch, merge, config_manager lookups) pick up the override transparently
+  via the property — no other code changes needed.
+- `match_runs`/`merge_new_runs` produce rows with blank overrides, so
+  `/matchruns` still works exactly as before unless the user opts in.
+- Old session files without the new field deserialize cleanly.
+
+**Files changed:**
+- `models/working_table.py` — `configuration_override` field, `configuration`
+  property, `physical_configuration` helper, `_REDUCTION_FIELDS`,
+  filtered `from_dict`
+- `commands/config.py` — `handle_config` dispatcher, `handle_config_clone`,
+  `handle_config_rows`, `_dedup_config_names`, extended `handle_list_configs`
+  to show stored extras
+- `commands/matching.py` — `config`/`configuration` in `SETTABLE_FIELDS`,
+  `_validate_config_target`, clear/set handling in both per-row and
+  `--sample` branches
+- `app.py`, `headless.py` — register `/config`
+- `services/llm_handler.py` — document new commands + intent examples
 
 ### 2026-06-17: Remove CONFIG_PRESETS Python dict — JSON presets are the single source of truth
 

@@ -21,7 +21,7 @@ def reduce_row(
 ) -> ReductionResult:
     config_params = get_config(row.configuration, user_configs)
 
-    output_name = f"{row.sample_name}_{row.configuration}"
+    output_name = row.output_stem
     if filename_suffix:
         output_name += f"_{filename_suffix}"
 

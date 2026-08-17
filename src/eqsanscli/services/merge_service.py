@@ -210,31 +210,34 @@ def build_stitch_table(table: WorkingTable, output_dir: str) -> list[StitchGroup
     sample_files: dict[str, list[tuple[str, str, float, float]]] = {}
 
     for row in table.rows:
+        # File naming and stitch grouping always use the PHYSICS config, never a
+        # per-row config override — see WorkingTableRow.output_stem.
+        cfg = row.physical_configuration
         if _is_frame_skipping(row):
-            f0, f1 = _find_frame_files(output_dir, row.sample_name, row.configuration)
+            f0, f1 = _find_frame_files(output_dir, row.sample_name, cfg)
             if f0 and f1:
                 row.output_file = f0
                 row.status = "done"
                 # 30Hz entries get their own group key to prevent mixing with 60Hz
-                group_key = f"{row.sample_name}__30hz__{row.configuration}"
+                group_key = f"{row.sample_name}__30hz__{cfg}"
                 # frame_0 = low-Q (long wavelength) → larger virtual distance → listed first
                 # frame_1 = high-Q (short wavelength) → smaller virtual distance → listed second
                 sample_files.setdefault(group_key, []).append(
-                    (f0, f"{row.configuration}_frame0", row.detector_distance + 0.01, row.wavelength + 0.01)
+                    (f0, f"{cfg}_frame0", row.detector_distance + 0.01, row.wavelength + 0.01)
                 )
                 sample_files.setdefault(group_key, []).append(
-                    (f1, f"{row.configuration}_frame1", row.detector_distance, row.wavelength)
+                    (f1, f"{cfg}_frame1", row.detector_distance, row.wavelength)
                 )
                 continue
 
         fpath = row.output_file if row.output_file and os.path.exists(row.output_file) else ""
         if not fpath:
-            fpath = os.path.join(output_dir, f"{row.sample_name}_{row.configuration}_Iq.dat")
+            fpath = os.path.join(output_dir, f"{row.output_stem}_Iq.dat")
         if os.path.exists(fpath):
             row.output_file = fpath
             row.status = "done"
             sample_files.setdefault(row.sample_name, []).append(
-                (fpath, row.configuration, row.detector_distance, row.wavelength)
+                (fpath, cfg, row.detector_distance, row.wavelength)
             )
 
     if not sample_files:
@@ -327,10 +330,14 @@ def _default_target_index(configs: list[str]) -> int:
       4. 2.5m2.5a
       5. 0 (first config — which is already the lowest-Q by sort order)
     """
-    from eqsanscli.models.config_id import normalize_config_id
+    from eqsanscli.models.config_id import base_config_id, normalize_config_id
 
     priorities = ["4m10a", "8m12a", "4m2.5a", "2.5m2.5a"]
-    norm_configs = [normalize_config_id(c) for c in configs]
+    # Resolve clone/variant labels ("4m10a_v2") down to their physics ID so the
+    # priority list still matches; falls back to the raw name when there is none.
+    norm_configs = [
+        normalize_config_id(base_config_id(c) or c) for c in configs
+    ]
 
     # Exact priority match first
     for pref in priorities:

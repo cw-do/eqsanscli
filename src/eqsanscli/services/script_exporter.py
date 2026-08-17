@@ -104,15 +104,21 @@ def export_reduction_script(
     lines: list[str] = []
     _emit_header(lines, table, ipts, output_dir)
 
-    groups: dict[str, list] = {}
+    # Group by (parameter config, physics config): the first picks the reduction
+    # parameters (so a per-row override / cloned config is honoured), the second
+    # names the output files. Filenames follow the physics config for the same
+    # reason WorkingTableRow.output_stem does — a clone label like "4m10a_v2"
+    # must never reach a filename. (The emitted script keeps the legacy
+    # eqsanstools "." → "o" spelling, e.g. 2.5m2.5a → 2o5m2o5a.)
+    groups: dict[tuple[str, str], list] = {}
     for row in table.rows:
-        groups.setdefault(row.configuration, []).append(row)
+        groups.setdefault((row.configuration, row.physical_configuration), []).append(row)
 
     all_paths: list[str] = []
-    all_configs: list[tuple[str, list, dict]] = []
-    for config_label, rows in sorted(groups.items()):
+    all_configs: list[tuple[str, str, list, dict]] = []
+    for (config_label, file_label), rows in sorted(groups.items()):
         config_params = get_config(config_label, user_configs)
-        all_configs.append((config_label, rows, config_params))
+        all_configs.append((config_label, file_label, rows, config_params))
         for key in _PATH_PARAMS:
             val = config_params.get(key)
             if val and isinstance(val, str) and os.path.isabs(val):
@@ -126,9 +132,9 @@ def export_reduction_script(
             lines.append(f"{var_name} = '{dirpath}'")
         lines.append("")
 
-    for config_label, rows, config_params in all_configs:
+    for config_label, file_label, rows, config_params in all_configs:
         _emit_config_block(lines, config_label, rows, config_params, ipts,
-                           path_replacements)
+                           path_replacements, file_label=file_label)
 
     lines.append(f"\nreduction_confirm({ipts})")
     lines.append("")
@@ -163,9 +169,19 @@ def _emit_config_block(
     config_params: dict,
     ipts: int,
     path_replacements: dict[str, str] | None = None,
+    file_label: str = "",
 ) -> None:
+    """Emit one reduction loop for a config group.
+
+    `config_label` identifies the reduction parameters (may be a cloned config
+    like "4m10a_v2"); `file_label` is the physics config used in output
+    filenames. Defaults to `config_label` when not given.
+    """
+    file_label = file_label or config_label
     lines.append(f"# {'='*60}")
     lines.append(f"# Configuration: {config_label}")
+    if file_label != config_label:
+        lines.append(f"# Output files named for physical config: {file_label}")
     lines.append(f"# {'='*60}")
 
     samscatt = [r.scattering_run for r in rows]
@@ -241,7 +257,7 @@ def _emit_config_block(
     lines.append("    eq._samscatt = str(samscatt[i])")
     lines.append("    eq._samtrans = str(samtrans[i])")
 
-    safe_label = config_label.replace(".", "o")
+    safe_label = file_label.replace(".", "o")
     lines.append(f"    eq._filename = str(sample_names[i]) + '_{safe_label}'")
     lines.append("    reduceNow(eq)")
     lines.append("")

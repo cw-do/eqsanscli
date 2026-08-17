@@ -44,22 +44,22 @@ def _load_knowledge() -> str:
 def _parse_config_id(config_id: str) -> dict[str, float | int]:
     """Extract distance, wavelength, frequency from a config ID string.
 
+    Cloned/variant names resolve to their embedded physics ID (see
+    `config_id.base_config_id`), so "4m10a_v2" is treated as 4m10a. Returns {}
+    when the name carries no config ID at all.
+
     Examples:
         '4m10a'      → {'distance': 4.0, 'wavelength': 10.0, 'frequency': 60}
         '2.5m2.5a'   → {'distance': 2.5, 'wavelength': 2.5, 'frequency': 60}
         '8m12a30hz'  → {'distance': 8.0, 'wavelength': 12.0, 'frequency': 30}
+        '4m10a_v2'   → {'distance': 4.0, 'wavelength': 10.0, 'frequency': 60}
     """
-    m = re.match(
-        r"(\d+\.?\d*)m(\d+\.?\d*)a(?:(\d+)hz)?$",
-        config_id.strip().lower(),
-    )
-    if not m:
+    from eqsanscli.models.config_id import parse_config_id
+
+    distance, wavelength, frequency = parse_config_id(config_id)
+    if distance == 0.0:
         return {}
-    return {
-        "distance": float(m.group(1)),
-        "wavelength": float(m.group(2)),
-        "frequency": int(m.group(3)) if m.group(3) else 60,
-    }
+    return {"distance": distance, "wavelength": wavelength, "frequency": frequency}
 
 _SYSTEM_PROMPT = """You are an AI assistant for the EQSANS data reduction CLI at SNS/ORNL.
 
@@ -170,10 +170,32 @@ MULTI-TABLE (one session can hold multiple named working tables; switching table
     "rename samples to main" → /table rename samples main
 
 CONFIGURATION:
-/list configs                   - List configurations
+/list configs                   - List configurations (alias for /config list)
+/config list                    - List configs in the working table + any stored extras (cloned but unassigned)
+/config clone <src> <dst>       - Copy config <src> to a new name <dst>. The clone can be edited independently.
+                                  Use when the user wants to apply different params (e.g. mask file) to a subset of rows
+                                  with the same physical config. Then assign rows: /set <row> cfg <dst>.
+  NAMING RULE: <dst> MUST contain <src>'s config ID — "4m10a" → "4m10a_v2", "4m10a-mask2", "porsil_4m10a".
+  A name like "mask2" or "variant1" is REJECTED, because preset matching and stitch ordering read the
+  physics back out of the config name. Always build the clone name from the source ID plus a suffix.
+    "make a copy of 4m10a called 4m10a_mask2" → /config clone 4m10a 4m10a_mask2
+    "clone the 8m config for the porsil row" → /config clone 8m10a 8m10a_porsil
+    "clone 4m10a and call it mask2" → /config clone 4m10a 4m10a_mask2   (repair the name, don't pass "mask2")
+/config rows <id>               - List which working-table rows reference <id>
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a)
 /set config <id> <param> <val>  - Set config parameter for a SPECIFIC config (id like 4m10a, 2.5m2.5a). REQUIRES knowing which configs exist.
 /set config all <param> <val>   - Set parameter on EVERY config in the current table, AND save as a sticky default for any future configs.
+/set <row> cfg <name>           - Reassign a row to a different config (e.g. a cloned one). The target must exist (see /config list).
+                                  'cfg' is canonical; 'config'/'configuration' also accepted but prefer 'cfg' to avoid confusion with the /set config sub-command.
+/set <row> cfg none             - Clear the override → row uses its physics-derived config again.
+/set --sample <name> cfg <new>  - Bulk-reassign all rows matching <name> to a different config.
+  Typical workflow when only SOME rows need different params at the same physical config:
+    1. /config clone 4m10a 4m10a_v2
+    2. /set --sample MySample cfg 4m10a_v2
+    3. /set config 4m10a_v2 maskfilename mask_v2.nxs   ← only MySample's rows see this mask
+  A row can only be assigned a config with the SAME physics: a 4m10a row cannot take 8m10a params
+  (rejected). Overrides change reduction parameters, never the measured geometry.
+  Output filenames stay <sample>_<physical config>_Iq.dat — a clone does NOT change file naming.
   CRITICAL: Use `all` when the user says "for all configs", "for every configuration", "all configurations". Use `all` whenever you don't actually KNOW which config IDs exist — e.g. before /load ipts or /matchruns has run. DO NOT guess config IDs like "4m10a", "2.5m2.5a" from context — they may not match the user's actual catalog.
     "use numqbins 33 for all configs" → /set config all numqbins 33
     "qmin should be 0.005 for all configurations" → /set config all qmin 0.005

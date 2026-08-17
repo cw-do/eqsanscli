@@ -15,28 +15,8 @@ from eqsanscli.tui.widgets.completable_input import CommandSubmitted, Completabl
 from eqsanscli.tui.widgets.status_bar import FooterBar, HeaderBar
 
 from eqsanscli import __version__
-from eqsanscli.commands.catalog import handle_show, handle_show_table, handle_list_ipts, handle_reclass, handle_refresh_catalog
-from eqsanscli.commands.autopilot import handle_autopilot
-from eqsanscli.commands.config import handle_list_configs, handle_set_config, handle_show_config
-from eqsanscli.commands.calibrate import handle_calibrate
-from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
-from eqsanscli.commands.export import handle_export_script, handle_zipnsend, handle_confirm
-from eqsanscli.commands.note import handle_note
-from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
-from eqsanscli.commands.models import handle_models
-from eqsanscli.commands.preset import handle_apply_preset, handle_compare, handle_show_preset, handle_show_presets
-from eqsanscli.commands.reduction import handle_reduce
+from eqsanscli.commands.registry import register_all
 from eqsanscli.commands.router import CommandResult, CommandRouter
-from eqsanscli.commands.shell import (
-    handle_ls, handle_cd, handle_pwd, handle_mkdir,
-    handle_cat, handle_head, handle_tail,
-    handle_cp, handle_mv, handle_rm, handle_shell,
-)
-from eqsanscli.commands.stitch import handle_stitch
-from eqsanscli.commands.tables import handle_move, handle_table
-from eqsanscli.commands.session import handle_save, handle_load, handle_list_tables, handle_continue, handle_session
-from eqsanscli.commands.share import handle_share
-from eqsanscli.commands.settings import handle_settings
 from eqsanscli.models.session_state import SessionState
 
 
@@ -126,66 +106,18 @@ class EQSANSApp(App):
         footer.set_job_running(running)
 
     def _register_commands(self) -> None:
-        """Register all command handlers with the router."""
-        self.router.register("show", handle_show)
-        self.router.register("show table", handle_show_table)
-        self.router.register("matchruns", handle_matchruns)
-        self.router.register("reclass", handle_reclass)
-        self.router.register("refresh catalog", handle_refresh_catalog)
-        self.router.register("refresh", handle_refresh_catalog)  # bare /refresh = catalog
-        self.router.register("set", handle_set)
-        self.router.register("set config", handle_set_config)
-        self.router.register("show config", handle_show_config)
-        self.router.register("list configs", handle_list_configs)
-        self.router.register("show presets", handle_show_presets)
-        self.router.register("show preset", handle_show_preset)
-        self.router.register("apply preset", handle_apply_preset)
-        self.router.register("compare", handle_compare)
-        self.router.register("assign", handle_assign)
-        self.router.register("reduce", handle_reduce)
-        self.router.register("remove", handle_remove)
-        self.router.register("export script", handle_export_script)
-        self.router.register("zipnsend", handle_zipnsend)
-        self.router.register("confirm", handle_confirm)
-        self.router.register("note", handle_note)
-        self.router.register("plot", handle_plot)
-        self.router.register("list iq", handle_list_iq)
-        self.router.register("list iqxqy", handle_list_iqxqy)
-        self.router.register("calibrate", handle_calibrate)
-        self.router.register("stitch", handle_stitch)
-        self.router.register("table", handle_table)
-        self.router.register("move", handle_move)
-        self.router.register("save", handle_save)
-        self.router.register("load", handle_load)
-        self.router.register("list tables", handle_list_tables)
-        self.router.register("continue", handle_continue)
-        self.router.register("session", handle_session)
-        self.router.register("list ipts", handle_list_ipts)
+        """Register command handlers with the router.
+
+        Shared commands live in commands/registry.py (one place for both the TUI
+        and headless mode). Only the TUI-specific ones are registered here.
+        """
+        register_all(self.router)
+
         self.router.register("list", self._handle_list)
-        self.router.register("models", handle_models)
-        self.router.register("autopilot", handle_autopilot)
-        self.router.register("settings", handle_settings)
-        self.router.register("share", handle_share)
         self.router.register("help", self._handle_help)
         self.router.register("guide", self._handle_guide)
         self.router.register("version", self._handle_version)
-        self.router.alias("quit", "exit")
-        self.router.alias("q", "exit")
         self.router.register("exit", self._handle_exit)
-        
-        self.router.register("ls", handle_ls)
-        self.router.register("cd", handle_cd)
-        self.router.register("pwd", handle_pwd)
-        self.router.register("mkdir", handle_mkdir)
-        self.router.register("cat", handle_cat)
-        self.router.register("head", handle_head)
-        self.router.register("tail", handle_tail)
-        self.router.register("cp", handle_cp)
-        self.router.register("mv", handle_mv)
-        self.router.register("rm", handle_rm)
-        self.router.register("sh", handle_shell)
-        self.router.alias("dir", "ls")
-        self.router.alias("shell", "sh")
 
     def compose(self) -> ComposeResult:
         yield HeaderBar(id="header-bar")
@@ -359,7 +291,7 @@ class EQSANSApp(App):
                     avg = sum(elapsed_times) / len(elapsed_times)
                     eta_str = f"  ETA ~{_format_time(avg * remaining)}"
 
-                output_name = f"{row.sample_name}_{row.configuration}"
+                output_name = row.output_stem
                 row.status = "reducing"
                 if row.background_scatt:
                     bkg_title = state.run_title(row.background_scatt)
@@ -844,9 +776,15 @@ class EQSANSApp(App):
             "  /move <row> <table>           — Move rows to another table\n"
             "\n"
             "[bold cyan]Configuration:[/]\n"
-            "  /list configs                 — List configurations in current table\n"
+            "  /config list                  — List configs (table + stored extras like clones)\n"
+            "  /config clone <src> <dst>     — Copy a config to a new name (then edit independently);\n"
+            "                                  <dst> must contain <src>'s config ID: 4m10a → 4m10a_v2\n"
+            "  /config rows <id>             — Show which rows reference <id>\n"
             "  /show config <id>             — Show reduction parameters for config\n"
             '  /set config <id> <param> <val> — Set config parameter\n'
+            '  /set config all <param> <val> — Apply to every config; sticky default for future ones\n'
+            "  /set <row> cfg <name>         — Reassign row to a (cloned) config; 'none' clears override (aliases: config, configuration)\n"
+            "  /set --sample <name> cfg <new> — Bulk-reassign rows matching <name>\n"
             "  /show outputdir               — Show output directory\n"
             "  /set outputdir <path>         — Set output directory\n"
             "  /set ipts <number>            — Set IPTS number\n"

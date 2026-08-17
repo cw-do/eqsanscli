@@ -920,11 +920,28 @@ def run_autopilot_sync(
         # Clean up orphan entries in state.configurations that match neither a
         # real config nor __all__. They came from /set config commands that hit
         # nonexistent config IDs — leaving them around is just noise.
+        #
+        # Cloned configs (`/config clone`, e.g. "4m10a_v2") are NOT orphans even
+        # when no row currently references them: the clone may be waiting for a
+        # /set <row> cfg assignment, or its rows may have been filtered out of
+        # this particular run by --samples/--exclude/--config. Deleting them
+        # would silently discard the user's parameter set.
+        from eqsanscli.models.config_id import is_derived_config_id
+        dropped: list[str] = []
         for orphan in [
             k for k in list(state.configurations.keys())
             if k != ALL_CONFIGS_KEY and k not in real_configs
         ]:
+            if is_derived_config_id(orphan):
+                continue
             del state.configurations[orphan]
+            dropped.append(orphan)
+
+        if dropped:
+            warnings.append(
+                f"  [dim]Dropped {len(dropped)} config entr(y/ies) not present in the table: "
+                f"{', '.join(sorted(dropped))}[/dim]"
+            )
 
         if restored_total or warnings:
             write(f"[bold]Step 4b/13:[/bold] Re-applying user-set params (your settings win over presets)...")
@@ -1047,7 +1064,7 @@ def run_autopilot_sync(
         for row in porsil_rows:
             if row.status != "done":
                 continue
-            output_path = row.output_file or os.path.join(output_dir, f"{row.sample_name}_{row.configuration}_Iq.dat")
+            output_path = row.output_file or os.path.join(output_dir, f"{row.output_stem}_Iq.dat")
             if not os.path.exists(output_path):
                 write(f"  [yellow]⚠[/yellow] {row.configuration}: output file not found")
                 continue
@@ -1162,9 +1179,11 @@ def run_autopilot_sync(
             # Look up (distance, wavelength) from working table rows by config ID
             from eqsanscli.models.config_id import config_ids_match, parse_config_id
 
+            # Stitch groups are labelled by the PHYSICS config (see
+            # WorkingTableRow.output_stem), so key the metadata the same way.
             _config_meta: dict[str, tuple[float, float]] = {}
             for row in state.current_table.rows:
-                _config_meta[row.configuration] = (row.detector_distance, row.wavelength)
+                _config_meta[row.physical_configuration] = (row.detector_distance, row.wavelength)
 
             sample_files: dict[str, list[tuple[str, str, float, float]]] = {}
             for g in stitchable:
@@ -1378,6 +1397,11 @@ def run_autopilot_sync(
 
 
 def _find_closest_preset(config_id: str, preset_names: list[str]) -> tuple[str | None, str]:
-    """Thin wrapper — delegates to preset_service.find_closest_preset."""
+    """Find the preset for a config, resolving clone names to their physics ID.
+
+    "4m10a_v2" must match the 4m10a preset exactly rather than falling through
+    to find_closest_preset's loose "same distance" tier.
+    """
+    from eqsanscli.models.config_id import base_config_id
     from eqsanscli.services.preset_service import find_closest_preset
-    return find_closest_preset(config_id, preset_names)
+    return find_closest_preset(base_config_id(config_id) or config_id, preset_names)

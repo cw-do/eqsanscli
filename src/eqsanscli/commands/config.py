@@ -4,7 +4,9 @@ import os
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
-from eqsanscli.models.config_id import find_matching_config, normalize_config_id
+from eqsanscli.models.config_id import (
+    base_config_id, find_matching_config, is_derived_config_id, normalize_config_id,
+)
 from eqsanscli.services.config_manager import get_config, list_config_params, set_config_param
 
 if TYPE_CHECKING:
@@ -178,10 +180,14 @@ async def handle_list_configs(args: list[str], state: SessionState) -> CommandRe
     table = state.current_table
     lines: list[str] = []
 
-    if table.rows:
-        configs = table.configurations
-        lines.append(f"Configurations in table '{table.name}' ({len(configs)}):")
-        for cfg in configs:
+    # Configs actually in use by working-table rows (may include cloned/override IDs
+    # whose row.configuration_override is set).
+    in_use_configs: list[str] = table.configurations if table.rows else []
+    in_use_norms = {normalize_config_id(c) for c in in_use_configs}
+
+    if in_use_configs:
+        lines.append(f"Configurations in table '{table.name}' ({len(in_use_configs)}):")
+        for cfg in in_use_configs:
             n_rows = len(table.rows_by_config(cfg))
             norm = normalize_config_id(cfg)
             has_overrides = any(
@@ -189,9 +195,29 @@ async def handle_list_configs(args: list[str], state: SessionState) -> CommandRe
                 if k != ALL_CONFIGS_KEY
             )
             override_mark = " [cyan]*[/cyan]" if has_overrides else ""
-            lines.append(f"  {cfg:<24} {n_rows} rows{override_mark}")
+            clone_mark = (
+                f" [dim](clone of {base_config_id(cfg)})[/dim]"
+                if is_derived_config_id(cfg) and base_config_id(cfg) else ""
+            )
+            lines.append(f"  {cfg:<24} {n_rows} rows{override_mark}{clone_mark}")
     else:
         lines.append("No configurations — working table is empty.")
+
+    # Stored configs not currently used by any row (e.g. clones awaiting /set <row> cfg).
+    stored_extras = sorted(
+        k for k in state.configurations
+        if k != ALL_CONFIGS_KEY and normalize_config_id(k) not in in_use_norms
+    )
+    if stored_extras:
+        lines.append("")
+        lines.append(f"[bold]Stored configs not assigned to any row ({len(stored_extras)}):[/bold]")
+        for cfg in stored_extras:
+            clone_mark = (
+                f" [dim](clone of {base_config_id(cfg)})[/dim]"
+                if is_derived_config_id(cfg) and base_config_id(cfg) else ""
+            )
+            lines.append(f"  {cfg:<24} 0 rows [cyan]*[/cyan]{clone_mark}")
+        lines.append("  [dim]Assign with: /set <row> cfg <name>[/dim]")
 
     # Show pending "all" defaults (from /set config all <p> <v> before any matchruns)
     all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
@@ -201,7 +227,201 @@ async def handle_list_configs(args: list[str], state: SessionState) -> CommandRe
         for k, v in sorted(all_defaults.items()):
             lines.append(f"  {k} = {v}")
 
-    if table.rows:
+    if in_use_configs or stored_extras:
         lines.append("\n[dim]Use /show config <config_id> to see parameters.[/dim]")
 
+    return CommandResult(success=True, message="\n".join(lines))
+
+
+_CONFIG_USAGE = (
+    "Usage: /config <subcommand> [args]\n"
+    "  /config list                       — list configs in the working table and stored extras\n"
+    "  /config clone <src> <dst>          — copy params from <src> to a new config <dst>\n"
+    "                                       <dst> must contain <src>'s config ID (4m10a → 4m10a_v2)\n"
+    "                                       (use /set <row> cfg <dst> to assign rows)\n"
+    "  /config rows <id>                  — show rows assigned to <id>\n"
+)
+
+
+def _dedup_config_names(state, table) -> list[str]:
+    """All known config names (stored + in-table), dedup'd by normalized form."""
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in list(state.configurations) + list(table.configurations):
+        if k == ALL_CONFIGS_KEY:
+            continue
+        n = normalize_config_id(k)
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(k)
+    out.sort()
+    return out
+
+
+async def handle_config(args: list[str], state: SessionState) -> CommandResult:
+    """Dispatch /config <subcommand>. Currently: list, clone, rows."""
+    if not args:
+        return await handle_list_configs([], state)
+    sub = args[0].lower()
+    rest = args[1:]
+    if sub == "list":
+        return await handle_list_configs(rest, state)
+    if sub == "clone":
+        return await handle_config_clone(rest, state)
+    if sub == "rows":
+        return await handle_config_rows(rest, state)
+    return CommandResult(success=False, message=f"Unknown /config subcommand: {sub}\n\n{_CONFIG_USAGE}")
+
+
+async def handle_config_clone(args: list[str], state: SessionState) -> CommandResult:
+    """/config clone <src> <dst> — copy stored params from one config to a new name.
+
+    The clone gets its own entry in state.configurations and can be edited
+    independently (e.g. different maskfilename). To use it, assign rows with
+    /set <row> cfg <dst>. Existing rows continue to reference <src>.
+
+    <src> may be any config the user can see in /config list (a config in the
+    table, a stored-only clone, or a normalized variant — e.g. "4m10a" matches
+    a stored "4.0m_2.5a_60hz" if normalized forms agree).
+
+    NAMING RULE: <dst> must contain <src>'s physics ID (e.g. 4m10a → 4m10a_v2,
+    4m10a-mask2, porsil_4m10a). Everything downstream that reasons about
+    physics — preset matching, cycle-file discovery, low-Q-first stitch
+    ordering — recovers the physics from the name via
+    config_id.base_config_id(), so a name like "mask2" would silently lose it.
+    """
+    from eqsanscli.services.config_manager import (
+        ALL_CONFIGS_KEY, _load_json_defaults, get_config,
+    )
+
+    if len(args) < 2:
+        return CommandResult(
+            success=False,
+            message="Usage: /config clone <src> <dst>\n"
+            "  <dst> must contain <src>'s config ID, e.g. 4m10a_v2 / 4m10a-mask2\n"
+            "  Example: /config clone 4m10a 4m10a_mask2\n"
+            "  Then assign rows: /set <row> cfg 4m10a_mask2",
+        )
+
+    src_raw = args[0]
+    dst_raw = args[1]
+    dst_norm = normalize_config_id(dst_raw)
+
+    if dst_norm == normalize_config_id(ALL_CONFIGS_KEY) or dst_raw.lower() == "all":
+        return CommandResult(success=False, message=f"Cannot clone to reserved name '{dst_raw}'.")
+    if not dst_norm:
+        return CommandResult(success=False, message="Destination name cannot be empty.")
+
+    # The clone name must keep the source's physics ID recoverable.
+    src_base = base_config_id(src_raw)
+    dst_base = base_config_id(dst_raw)
+    if not src_base:
+        return CommandResult(
+            success=False,
+            message=f"Cannot determine the physical configuration of '{src_raw}'. "
+            f"Clone from a real config ID (e.g. 4m10a) or an existing clone of one.",
+        )
+    if dst_base != src_base:
+        hint = f"'{src_base}_v2'" if not dst_base else f"'{src_base}_{dst_raw}'"
+        return CommandResult(
+            success=False,
+            message=(
+                f"Clone name '{dst_raw}' must contain the source's config ID '{src_base}' "
+                f"(found: {dst_base or 'none'}).\n"
+                f"  Try {hint} — e.g. /config clone {src_raw} {src_base}_v2\n"
+                f"  Why: preset matching, cycle-file discovery and stitch ordering read the\n"
+                f"  physics back out of the config name."
+            ),
+        )
+
+    # Reject if dst already exists (any normalized match — clone is create-only).
+    for existing_key in state.configurations:
+        if existing_key == ALL_CONFIGS_KEY:
+            continue
+        if normalize_config_id(existing_key) == dst_norm:
+            return CommandResult(
+                success=False,
+                message=f"Config '{dst_raw}' already exists (as '{existing_key}'). Pick a different name "
+                f"or /set config {existing_key} <param> <value> to edit it.",
+            )
+    # Also reject if dst matches a physical config currently in the table
+    # (would cause confusing aliasing — there's no point cloning to the same ID).
+    table = state.current_table
+    for row_cfg in table.configurations:
+        if normalize_config_id(row_cfg) == dst_norm and row_cfg not in state.configurations:
+            return CommandResult(
+                success=False,
+                message=f"'{dst_raw}' matches a physical config already in the working table "
+                f"('{row_cfg}'). Clones must use a distinct name (e.g. add a suffix).",
+            )
+
+    # Resolve <src>: prefer an exact stored key, fall back to any stored key
+    # whose normalized form matches, then to a row's physical config.
+    src_norm = normalize_config_id(src_raw)
+    src_key: str | None = None
+    for k in state.configurations:
+        if k == ALL_CONFIGS_KEY:
+            continue
+        if normalize_config_id(k) == src_norm:
+            src_key = k
+            break
+
+    # If src isn't a stored override but matches a physical config in the table,
+    # snapshot the effective params via get_config (defaults + any __all__).
+    src_params: dict[str, object]
+    if src_key is not None:
+        src_params = dict(state.configurations[src_key])
+        display_src = src_key
+    else:
+        in_table = any(normalize_config_id(c) == src_norm for c in table.configurations)
+        if not in_table:
+            available = _dedup_config_names(state, table)
+            return CommandResult(
+                success=False,
+                message=f"Source config '{src_raw}' not found. Available: {', '.join(available) or '(none)'}",
+            )
+        # Snapshot the full effective config so the clone is self-contained
+        # rather than implicitly tracking <src>'s preset. Keep every key whose
+        # effective value DIFFERS from the drtsans-template default: that is the
+        # minimal set which guarantees get_config(dst) == get_config(src) right
+        # after the clone, whatever the value's provenance (preset, __all__, or
+        # an earlier /set config). Keys equal to the default need no entry —
+        # they resolve to the same default through the template layer.
+        full = get_config(src_raw, state.configurations)
+        template_defaults = _load_json_defaults()
+        src_params = {
+            k: v for k, v in full.items()
+            if k not in template_defaults or template_defaults[k] != v
+        }
+        display_src = src_raw
+
+    state.configurations[dst_raw] = dict(src_params)
+
+    return CommandResult(
+        success=True,
+        message=(
+            f"Cloned config '{display_src}' → '{dst_raw}' ({len(src_params)} param(s) copied).\n"
+            f"  Physics: {src_base} [dim](used for presets/stitching; output files stay "
+            f"named for {src_base})[/dim]\n"
+            f"  Assign rows with: /set <row> cfg {dst_raw}\n"
+            f"  Edit independently with: /set config {dst_raw} <param> <value>"
+        ),
+    )
+
+
+async def handle_config_rows(args: list[str], state: SessionState) -> CommandResult:
+    """/config rows <id> — show which working-table rows reference <id>."""
+    if not args:
+        return CommandResult(success=False, message="Usage: /config rows <config_id>")
+    target = normalize_config_id(args[0])
+    table = state.current_table
+    matches = [r for r in table.rows if normalize_config_id(r.configuration) == target]
+    if not matches:
+        return CommandResult(success=True, message=f"No rows reference config '{args[0]}'.")
+    lines = [f"Rows referencing '{args[0]}' ({len(matches)}):"]
+    for r in matches:
+        override = " [cyan](override)[/cyan]" if r.configuration_override else ""
+        lines.append(f"  Row {r.index}: {r.sample_name} (run {r.scattering_run}){override}")
     return CommandResult(success=True, message="\n".join(lines))

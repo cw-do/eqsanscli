@@ -261,17 +261,41 @@ bkg/trans/emp, the assigned run MUST be from the SAME config as the target row.
 | `/remove <row>` | Count removed, remaining row count |
 | `/remove --sample <name>` | Same, filtered by sample name |
 
-Fields: `trans`, `bkg`, `bkgtrans`, `emp`, `thickness`
+Fields: `trans`, `bkg`, `bkgtrans`, `emp`, `thickness`, `sample`/`name`, `cfg`
+
+To reassign a row to a different (typically cloned) config:
+```
+/set <row> cfg <name>             # name must already exist (see /config list)
+/set <row> cfg none               # clear override → use physics-derived config
+/set --sample <name> cfg <new>    # bulk
+```
+`cfg` is canonical; `config` and `configuration` are accepted aliases. Prefer
+`cfg` to avoid visual collision with the `/set config <id> <param> <val>` form.
 
 ### Configuration
 | Command | Returns |
 |---------|---------|
-| `/list configs` | Config IDs in the table |
+| `/config list` (alias `/list configs`) | Configs in the table + stored extras (clones) |
+| `/config clone <src> <dst>` | Confirmation; copied param count (`<dst>` must contain `<src>`'s config ID) |
+| `/config rows <id>` | Rows referencing `<id>` |
 | `/show config <id>` | All ~75 parameters with values |
 | `/set config <id> <param> <value>` | Confirmation |
+| `/set config all <param> <value>` | Per-config apply summary + sticky default |
 | `/apply preset auto` | Per-config match result (exact/partial/distance/none) |
 | `/apply preset <name> <config_id>` | Parameter count applied |
 | `/set outputdir <path>` | Confirms path, propagation to N configs |
+
+**Per-row config variants** — use when only a subset of rows at the same physical
+config needs different params (e.g. a different mask):
+```
+/config clone 4m10a 4m10a_v2
+/set --sample MySample cfg 4m10a_v2
+/set config 4m10a_v2 maskfilename mask_v2.nxs
+```
+- Clone names must contain the source config ID (`4m10a_v2` ✓, `mask2` ✗).
+- A row only accepts a config with the same physics (`4m10a` row ✗ `8m10a` params).
+- Output filenames stay `<sample>_<physical config>_Iq.dat` — clones change
+  parameters, not file naming.
 
 ### Reduction
 | Command | Returns |

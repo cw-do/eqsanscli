@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
-from eqsanscli.models.config_id import normalize_config_id
+from eqsanscli.models.config_id import base_config_id, normalize_config_id
 from eqsanscli.services.config_manager import get_config, list_config_params
 from eqsanscli.services.preset_service import (
     compare_configs,
@@ -135,7 +135,11 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
 
         total_preserved = 0
         for cfg in configs:
-            best, match_type = find_closest_preset(cfg, preset_names)
+            # Resolve clone names ("4m10a_v2") to their physics ID so they match
+            # the same preset as the config they were cloned from.
+            best, match_type = find_closest_preset(
+                base_config_id(cfg) or cfg, preset_names
+            )
             if best:
                 resolved = get_preset_name_from_path(best)
                 if resolved:

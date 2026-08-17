@@ -169,14 +169,20 @@ def _load_matching_preset(config_id: str) -> dict[str, object]:
     Used for source attribution in list_config_params — lets us tell whether
     a value in user_configs came from preset auto-apply or an explicit /set.
     Returns {} if no preset matches or none is available.
+
+    A cloned config ("4m10a_v2") is resolved to its physics ID first, so it
+    matches the same preset as the config it was cloned from instead of falling
+    through to preset_service's loose "same distance" tier.
     """
+    from eqsanscli.models.config_id import base_config_id
     from eqsanscli.services.preset_service import (
         find_closest_preset, list_presets, load_preset,
     )
     presets = list_presets()
     if not presets:
         return {}
-    best, _ = find_closest_preset(config_id, [p["name"] for p in presets])
+    lookup_id = base_config_id(config_id) or config_id
+    best, _ = find_closest_preset(lookup_id, [p["name"] for p in presets])
     if not best:
         return {}
     loaded = load_preset(best)

@@ -112,26 +112,29 @@ async def _handle_smart(args: list[str], state: SessionState) -> CommandResult:
     # Strategy 1: Build sample_files dict from working table
     sample_files: dict[str, list[tuple[str, str, float, float]]] = {}
     for row in table.rows:
+        # File naming and stitch grouping always use the PHYSICS config, never a
+        # per-row config override — see WorkingTableRow.output_stem.
+        cfg = row.physical_configuration
         # Frame-skipping (30Hz): split into frame_0 (low-Q) and frame_1 (high-Q)
         if _is_frame_skipping(row):
-            f0, f1 = _find_frame_files(output_dir, row.sample_name, row.configuration)
+            f0, f1 = _find_frame_files(output_dir, row.sample_name, cfg)
             if f0 and f1:
-                group_key = f"{row.sample_name}__30hz__{row.configuration}"
+                group_key = f"{row.sample_name}__30hz__{cfg}"
                 # frame_0 = low-Q → larger virtual distance (sorts first)
                 # frame_1 = high-Q → smaller virtual distance (sorts second)
                 sample_files.setdefault(group_key, []).append(
-                    (f0, f"{row.configuration}_frame0", row.detector_distance + 0.01, row.wavelength + 0.01)
+                    (f0, f"{cfg}_frame0", row.detector_distance + 0.01, row.wavelength + 0.01)
                 )
                 sample_files.setdefault(group_key, []).append(
-                    (f1, f"{row.configuration}_frame1", row.detector_distance, row.wavelength)
+                    (f1, f"{cfg}_frame1", row.detector_distance, row.wavelength)
                 )
                 continue
 
         if not row.output_file or not os.path.exists(row.output_file):
-            row.output_file = os.path.join(output_dir, f"{row.sample_name}_{row.configuration}_Iq.dat")
+            row.output_file = os.path.join(output_dir, f"{row.output_stem}_Iq.dat")
         if os.path.exists(row.output_file):
             sample_files.setdefault(row.sample_name, []).append(
-                (row.output_file, row.configuration, row.detector_distance, row.wavelength)
+                (row.output_file, cfg, row.detector_distance, row.wavelength)
             )
 
     # Strategy 2: If no table matches, scan output directory directly

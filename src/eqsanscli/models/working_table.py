@@ -31,12 +31,16 @@ class WorkingTableRow:
     thickness: float = 0.1  # cm
     status: str = "ready"  # ready | reducing | done | error | modified
     output_file: Optional[str] = None
+    # Optional override that decouples this row from its physics-derived config
+    # ID. Used after /config clone to point a row at a cloned config (e.g.
+    # "4m10a_mask2"). Empty string means "use the derived ID" (default).
+    configuration_override: str = ""
 
     # Fields that affect reduction output — changing any of these on a "done"
     # row means the previous output is stale and needs re-reduction.
     _REDUCTION_FIELDS = frozenset({
         "transmission_run", "background_scatt", "background_trans",
-        "empty_beam", "thickness", "sample_name",
+        "empty_beam", "thickness", "sample_name", "configuration_override",
     })
 
     def set_field(self, attr_name: str, value) -> None:
@@ -49,7 +53,28 @@ class WorkingTableRow:
 
     @property
     def configuration(self) -> str:
+        if self.configuration_override:
+            return self.configuration_override
         return make_config_id(self.detector_distance, self.wavelength, self.frequency)
+
+    @property
+    def physical_configuration(self) -> str:
+        """The physics-derived config ID, ignoring any override."""
+        return make_config_id(self.detector_distance, self.wavelength, self.frequency)
+
+    @property
+    def output_stem(self) -> str:
+        """Filename stem for this row's reduction outputs: `<sample>_<config>`.
+
+        Deliberately uses the PHYSICS config, not `configuration` — a config
+        override (see `/config clone`) changes reduction *parameters*, never
+        file naming. Everything downstream parses `<sample>_<config>_Iq.dat`
+        by splitting on the last underscore (`merge_service._scan_output_dir`),
+        globs `merged_*_Iq.txt`, or was written by an earlier run, so letting a
+        clone label like `4m10a_v2` into the name would silently break stitch
+        grouping and `--continue` file discovery.
+        """
+        return f"{self.sample_name}_{self.physical_configuration}"
 
     @property
     def config_key(self) -> tuple[float, float, int]:
@@ -72,12 +97,18 @@ class WorkingTableRow:
             "thickness": self.thickness,
             "status": self.status,
             "output_file": self.output_file,
+            "configuration_override": self.configuration_override,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> WorkingTableRow:
-        """Deserialize from saved state."""
-        return cls(**data)
+        """Deserialize from saved state. Tolerates older session files that
+        lack newer fields (e.g. configuration_override) by dropping unknowns
+        and relying on dataclass defaults."""
+        import dataclasses
+        valid = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid}
+        return cls(**filtered)
 
 
 @dataclass
