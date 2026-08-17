@@ -30,6 +30,12 @@ preset_configs/       — Preset JSON configs for known instrument configuration
   drives *parameters*) vs `row.physical_configuration` (drives *file naming* and
   stitch grouping; see `row.output_stem`). Physics heuristics resolve clone names
   via `config_id.base_config_id()`.
+- Config parameters resolve in four tiers: drtsans template defaults < JSON preset
+  < machine-physics instrument files (run-aware, `services/instrument_files.py`)
+  < explicit `/set config`. The six cycle-specific calibration params
+  (`sensitivityfilename`, `darkfilename`, `beamfluxfilename`, `detectoroffset`,
+  `scalecomponents.detector1`, `sampleoffset`) belong to the third tier — don't
+  hand-edit them in presets.
 - `app.py` has a `_render_data` method with hardcoded column lists per data type — update when adding columns.
 - Session state auto-saves after every command. `catalog_data` is stored as list-of-dicts.
 - `SKILL.md` and `AGENT_SKILL.md` document the tool for TUI and headless agent use respectively.
@@ -46,6 +52,103 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17: Run-aware instrument calibration files from machine physics
+
+**Problem:** dark current, sensitivity (flood), beam flux and the AgBe-derived
+`detectoroffset` / `scalecomponents.detector1` / `sampleoffset` are **cycle**
+properties, but they were stored in `preset_configs/*.json`, which are keyed by
+**instrument configuration**. Every cycle the paths went stale by hand-editing.
+At the time of this change all presets pinned `2026A_mp` files and 2026A's
+`detoffset = 77.244` / `scalecomp = [1.003571, 1.052902, 1]` while 2026B had
+been published with `66.763` / `[1.004251, 1.057915, 1]`; one preset
+(`conf_2.5m_2.5a_60hz_inc.json`) pointed at the **4 m** flood from **2025B** —
+wrong distance *and* two cycles stale. Autopilot's `_discover_cycle_files` only
+ran when *no* preset matched, always took the newest cycle folder, and ignored
+run numbers entirely.
+
+**Where the data lives.** `/SNS/EQSANS/shared/NeXusFiles/EQSANS/<year><A|B>_mp/`
+per cycle: `EQSANS_<run>.nxs.h5` (dark), `Sensitivity_patched_<variant>_<tag>_<run>.nxs`
+(flood, tag ∈ `1o3m`/`2o5m`/`4m`), `bl6_flux_<cycle>_<month>_rebinned.txt`, and
+`agbe_calibration/**/checkpoint.json` + `calibration_report.txt` (AgBe).
+
+**Folder, not web page.** The machine-physics summary page
+(https://cw-do.github.io/eqsans_mp/) is *generated from* these folders by
+`<mp_root>/doc/generate.py` → `doc/data.js` → GitHub Pages. It is a derived view
+that only refreshes when someone republishes, so reading it would add a network
+dependency and a publish lag to something already on the mounted share — and
+reduction needs filesystem paths anyway. `services/instrument_files.py`
+deliberately mirrors `doc/generate.py`'s naming rules; **if that generator's
+rules change, change these too.**
+
+**New `services/instrument_files.py`** (stdlib only, no drtsans/mantid):
+
+- `scan_cycles()` — every `<year><A|B>_mp` folder → `Cycle` records (darks,
+  sensitivities with distance/run/variant, flux, lazily-parsed AgBe). Cached on
+  the mtimes of the root and each cycle folder, so a newly dropped file
+  invalidates it by itself. 28 cycles scan in ~30 ms cold, ~0.5 ms warm.
+- `resolve_for_run(run, distance)` — **cycle-coherent** selection: newest cycle
+  whose *anchor run* (lowest dark/flood run in the folder) ≤ the data run, then
+  the whole set from that cycle. Anchor runs are strictly increasing across all
+  28 cycles (2011B:5702 → 2026B:186198, verified), so run order and cycle order
+  agree. A data run can land between a cycle's dark and its floods (e.g. 186199
+  with floods 186200-186202); taking the cycle as a unit avoids pairing this
+  cycle's dark with last cycle's floods, and the case is recorded as a note.
+- `flood_distance_for()` — clamp into the available range then nearest, ties to
+  the larger: 1.3 m → `1o3m`, 2.0 m → `2o5m`, 4 m *and anything longer* → `4m`.
+- Within a cycle: prefer `thinPMMA`, then an undecorated tag (`4m` over
+  `4mSM`), then the highest run. 2025B holds both thinPMMA and 5mmPMMA with
+  5mmPMMA *higher-numbered*, so a purely run-driven pick would silently switch
+  variants; 2022A holds four flood generations, so intra-cycle run order matters.
+- Fallbacks are bounded on purpose: flux never reaches back more than one cycle
+  (otherwise a 2024 run picks up `flux_spectrum_2013B.txt`), and AgBe values are
+  never invented for runs before 2026A. In both cases the existing value stays
+  and the reason lands in `Resolution.missing`.
+- `classify_param()` — the single decision function (`write` / `unchanged` /
+  `keep_user`) shared by `apply_resolution()` and `/instrument show`, so the
+  preview cannot disagree with what apply does.
+
+**Layering** — now four tiers:
+
+```
+drtsans template defaults  <  JSON preset  <  resolved machine-physics files  <  explicit /set config
+```
+
+`SessionState.instrument_provenance[cfg][param]` records what the resolver
+wrote. A param is (re)written when absent, equal to the resolved value, equal to
+what the resolver wrote last time, or still equal to the JSON preset's value —
+anything else is a user edit and is kept and reported. New session fields
+`auto_instrument_files` (default True) and `instrument_cycle_pin` persist too.
+
+**Where it runs:** `commands/matching.py` after the preset auto-apply (both
+`/matchruns` and `--update`), keyed on each config's **lowest** run with a
+warning when a config's runs straddle a cycle boundary; autopilot **Step 4c**
+(after 4b, so user snapshots still win) — its "Effective configuration" summary
+now also lists flux and the three calibration values. `/show config` marks
+resolver-owned values `mp:<cycle>`.
+
+**New `/instrument` command** (`commands/instrument.py`): `show`, `list [run]`,
+`apply [--force] [--rescan]`, `pin <cycle>`, `unpin`, `off`/`on`, `check`.
+
+**Removed:** `autopilot._discover_cycle_files` and `_MP_BASE` (superseded —
+Step 4c covers every config, not just preset-less ones).
+
+**Presets keep these six params** as the offline fallback for `/instrument off`;
+they are no longer authoritative. `conf_2.5m_2.5a_60hz_inc.json`'s wrong-distance
+flood was corrected to the 2.5 m file.
+
+**Files changed:** `services/instrument_files.py` (new), `commands/instrument.py`
+(new), `tests/test_instrument_files.py` (new, 31 checks over a synthetic tree +
+the live share), `models/session_state.py`, `commands/matching.py`,
+`commands/config.py`, `commands/registry.py`, `services/autopilot.py`,
+`services/llm_handler.py`, `app.py`, `preset_configs/conf_2.5m_2.5a_60hz_inc.json`,
+README.md, SKILL.md, AGENT_SKILL.md.
+
+**Open item:** 2026B's own README notes its files were deliberately *not*
+published to `/SNS/EQSANS/shared/instrument_configuration/` ("publishing is a
+separate, deliberate step"). Reading the cycle folder directly means eqsanscli
+picks up new calibration the moment it lands. If a publish gate is wanted, the
+cleanest signal is a per-cycle marker file the resolver requires.
 
 ### 2026-08-17: Config-override hardening + single command registry
 

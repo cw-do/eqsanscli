@@ -17,14 +17,11 @@ import time
 
 from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WRAP_WIDTH = 100
-
-_MP_BASE = "/SNS/EQSANS/shared/NeXusFiles/EQSANS"
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -205,43 +202,6 @@ def _llm_explain_missing_empty(
         return text.strip() if text else ""
     except Exception:
         return ""
-
-
-def _discover_cycle_files(distance: float) -> dict[str, str]:
-    """Find the latest cycle *_mp/ folder and return flood/dark/flux paths for a given distance."""
-    base = Path(_MP_BASE)
-    if not base.is_dir():
-        return {}
-
-    mp_dirs = sorted(base.glob("*_mp/"), reverse=True)
-    if not mp_dirs:
-        return {}
-
-    mp = mp_dirs[0]
-    result: dict[str, str] = {}
-
-    # flood: pick by distance
-    if distance <= 1.5:
-        tag = "1o3m"
-    elif distance <= 3.0:
-        tag = "2o5m"
-    else:
-        tag = "4m"
-    floods = sorted(mp.glob(f"Sensitivity_*_{tag}_*.nxs"))
-    if floods:
-        result["sensitivityfilename"] = str(floods[-1])
-
-    # dark current
-    darks = sorted(mp.glob("EQSANS_*.nxs.h5"))
-    if darks:
-        result["darkfilename"] = str(darks[-1])
-
-    # beam flux
-    fluxes = sorted(mp.glob("bl6_flux_*.txt"))
-    if fluxes:
-        result["beamfluxfilename"] = str(fluxes[-1])
-
-    return result
 
 
 def _llm_suggest_config(
@@ -787,15 +747,8 @@ def run_autopilot_sync(
             else:
                 write(f"  [yellow]⚠[/yellow] {cfg} — no preset found, asking LLM...")
 
-                meta = _parse_config_id(cfg)
-                distance = meta.get("distance", 4.0) if meta else 4.0
-
-                cycle_files = _discover_cycle_files(distance)
-                for param, val in cycle_files.items():
-                    dispatch_sync(f"/set config {cfg} {param} {val}")
-                if cycle_files:
-                    write(f"    [green]✓[/green] Applied cycle files: {', '.join(cycle_files.keys())}")
-
+                # Dark/flood/flux are NOT set here — Step 4c resolves them for
+                # every config from the machine-physics folders by run number.
                 ipts_mask = f"/SNS/EQSANS/IPTS-{ipts}/shared/mask_4m.nxs"
                 cwd_mask = os.path.join(os.getcwd(), "mask_4m.nxs")
                 fallback_mask = "/SNS/EQSANS/shared/script/eqsanstools/mask_4m.nxs"
@@ -967,13 +920,46 @@ def run_autopilot_sync(
         else:
             write("  [dim]No user-set params for any config (presets applied as-is).[/dim]")
 
+        # === Step 4c: Instrument calibration files from machine physics ===
+        # Dark current, sensitivity (flood), beam flux and the AgBe detector
+        # offset / scale components / sample offset are cycle-specific, so the
+        # presets' hardcoded paths go stale. Resolve them from the run numbers
+        # actually in the table. Runs after 4b, and the applier never overwrites
+        # an explicit /set config value, so user intent still wins.
+        if state.auto_instrument_files:
+            from eqsanscli.commands.instrument import format_outcomes
+            from eqsanscli.services.instrument_files import sync_state_configs
+
+            pin = getattr(state, "instrument_cycle_pin", "")
+            write(
+                f"[bold]Step 4c/13:[/bold] Resolving instrument files from machine physics"
+                + (f" [dim](pinned to {pin})[/dim]" if pin else "")
+                + "..."
+            )
+            try:
+                inst_outcomes, inst_warnings = sync_state_configs(state)
+                for line in format_outcomes(inst_outcomes, inst_warnings).split("\n"):
+                    write(line)
+            except Exception as exc:  # never let this stop a reduction
+                write(f"  [yellow]⚠ Instrument-file resolution failed: {exc}[/yellow]")
+            write("")
+        else:
+            write("[bold]Step 4c/13:[/bold] Instrument files — "
+                  "[dim]Skipped (/instrument off)[/dim]\n")
+
         # Compact effective-config (key files) summary — keeps the file-path
         # audit at-a-glance even when files came from presets, not user.
         _KEY_FILE_PARAMS = [
             ("maskfilename",        "mask"),
             ("sensitivityfilename", "sens"),
             ("darkfilename",        "dark"),
+            ("beamfluxfilename",    "flux"),
             ("defaultmask",         "defmask"),
+        ]
+        _KEY_CALIB_PARAMS = [
+            ("detectoroffset",              "detoffset"),
+            ("scalecomponents.detector1",   "scalecomp"),
+            ("sampleoffset",                "samoffset"),
         ]
         write("  [dim]Effective configuration (key files, basename only):[/dim]")
         for cfg in sorted(c for c in state.configurations.keys() if c != ALL_CONFIGS_KEY):
@@ -987,6 +973,12 @@ def run_autopilot_sync(
                 write(f"    [dim]{cfg}:[/dim] {', '.join(parts)}")
             else:
                 write(f"    [dim]{cfg}:[/dim] [yellow](no mask/sens/dark assigned)[/yellow]")
+            calib = [
+                f"{label}={v}" for key, label in _KEY_CALIB_PARAMS
+                if (v := params.get(key)) is not None
+            ]
+            if calib:
+                write(f"      [dim]{', '.join(calib)}[/dim]")
         write("")
 
     # === Step 5: Set output directory ===

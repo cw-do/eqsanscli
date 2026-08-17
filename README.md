@@ -258,6 +258,51 @@ Three rules keep variants predictable:
   `<sample>_<physical config>_Iq.dat`, so stitching, `merged_*` files and
   `/autopilot --continue` behave the same whether or not a row uses a clone.
 
+### Instrument calibration files (machine physics)
+
+Dark current, sensitivity (flood), beam flux, and the AgBe-derived detector
+offset / scale components / sample offset are **cycle**-specific: they live in
+`/SNS/EQSANS/shared/NeXusFiles/EQSANS/<cycle>_mp/` and change every cycle.
+eqsanscli resolves them from each config's **run number** — automatically at
+`/matchruns` and in autopilot — so you never edit a preset path by hand again.
+
+| Command | Description |
+|---------|-------------|
+| `/instrument show` | What each config resolves to, which cycle it came from, and what `apply` would change |
+| `/instrument list [run]` | Cycle inventory (dark / floods / flux / AgBe per cycle) plus what a run resolves to |
+| `/instrument apply [--force]` | Re-resolve now. `--force` also replaces values you set with `/set config` |
+| `/instrument pin <cycle>` | Always use one cycle (e.g. `2026A`), ignoring run numbers — for reproducing earlier work |
+| `/instrument unpin` | Back to run-number selection |
+| `/instrument off` / `on` | Disable/enable the automatic resolution |
+| `/instrument check` | Verify every referenced calibration file still exists |
+
+**How a run maps to files.** The chosen cycle is the newest one whose
+calibration campaign started at or before the run (its lowest dark/flood run),
+and the whole set comes from that one cycle — this cycle's dark is never paired
+with last cycle's floods. Sensitivity is then picked for the detector distance:
+
+| Measured distance | Flood used |
+|---|---|
+| 1.3 m | `1o3m` |
+| 2.0 m | `2o5m` |
+| 2.5 m | `2o5m` |
+| 4 m | `4m` |
+| 8 m, or any distance beyond 4 m | `4m` |
+
+Within a cycle: `thinPMMA` is preferred over other flood variants, an
+undecorated tag beats a decorated one (`4m` over `4mSM`), then the highest run
+number — some cycles hold several flood generations.
+
+**What it will not do.** It never overwrites a value you set with
+`/set config` (those show as *kept*; use `--force` to override). It never
+invents AgBe calibration for runs before 2026A, and never reaches back more
+than one cycle for a flux file — in both cases the existing value stays and the
+reason is reported. Values it owns are marked `mp:<cycle>` in `/show config`.
+
+The `preset_configs/*.json` files still carry these six parameters as an
+offline fallback for `/instrument off`; when resolution is on, the
+machine-physics folder wins over the preset.
+
 ### Presets
 
 | Command | Description |

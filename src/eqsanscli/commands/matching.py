@@ -125,6 +125,23 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             f"use /set config to override."
         )
 
+    # Instrument calibration files (dark/flood/flux + AgBe offsets) come from the
+    # machine-physics cycle folders, chosen by run number — they are cycle-specific,
+    # so the JSON presets' hardcoded paths go stale every cycle. Runs after the
+    # preset apply, so preset values are the thing being refreshed; explicit
+    # /set config edits are preserved.
+    if state.auto_instrument_files:
+        from eqsanscli.commands.instrument import format_outcomes
+        from eqsanscli.services.instrument_files import sync_state_configs
+
+        outcomes, inst_warnings = sync_state_configs(state)
+        if outcomes:
+            summary += "\n  Instrument files (machine physics):\n"
+            summary += format_outcomes(outcomes, inst_warnings)
+            summary += "\n  [dim]/instrument show for detail; /instrument off to manage by hand[/dim]"
+    else:
+        summary += "\n  [dim]Instrument-file resolution is off (/instrument on to enable)[/dim]"
+
     missing_trans = [r for r in table.rows if not r.transmission_run]
     missing_bkg = [r for r in table.rows if not r.background_scatt]
     missing_empty = [r for r in table.rows if not r.empty_beam]

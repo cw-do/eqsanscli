@@ -182,7 +182,28 @@ CONFIGURATION:
     "clone the 8m config for the porsil row" → /config clone 8m10a 8m10a_porsil
     "clone 4m10a and call it mask2" → /config clone 4m10a 4m10a_mask2   (repair the name, don't pass "mask2")
 /config rows <id>               - List which working-table rows reference <id>
-/show config <id>               - Show config params (id like 4m10a, 2.5m2.5a)
+/show config <id>               - Show config params (id like 4m10a, 2.5m2.5a). Src column: * = you set it,
+                                  blank = preset, d = drtsans default, mp:<cycle> = machine-physics calibration
+
+INSTRUMENT CALIBRATION FILES (dark current, sensitivity/flood, beam flux, detector offset, scale components, sample offset):
+These are CYCLE-specific and live in /SNS/EQSANS/shared/NeXusFiles/EQSANS/<cycle>_mp/. eqsanscli resolves them
+automatically at /matchruns and in autopilot, by run number: the newest cycle whose calibration started at or
+before the run. Sensitivity is chosen per detector distance (1.3 m → 1o3m, 2.5 m → 2o5m, 4 m and anything longer
+→ 4m). The user does NOT need to set these by hand, and /set config with a hand-typed path still wins.
+/instrument show                - What each config resolves to now, and what apply would change
+/instrument list [run]          - Cycle inventory (dark/floods/flux/AgBe per cycle) + what a run would pick
+/instrument apply [--force]     - Resolve now; --force also replaces values the user set with /set config
+/instrument pin <cycle>         - Always use one cycle (e.g. 2026A), ignoring run numbers — for reproducing old work
+/instrument unpin               - Back to run-number selection
+/instrument off | on            - Disable/enable the automatic resolution
+/instrument check               - Verify every referenced calibration file still exists
+    "am I using the latest calibration files" / "which flood is this using" → /instrument show
+    "use the newest instrument files" / "update the calibration files" → /instrument apply
+    "what cycles are available" / "list the machine physics cycles" → /instrument list
+    "redo this with last cycle's calibration" / "use 2026A files" → /instrument pin 2026A then /instrument apply
+    "stop changing my sensitivity file" / "I'll set the files myself" → /instrument off
+    "my dark current file is missing" → /instrument check
+  CHAT MODE, not commands: "why did it pick the 4m flood for 8m data" → explain the distance mapping.
 /set config <id> <param> <val>  - Set config parameter for a SPECIFIC config (id like 4m10a, 2.5m2.5a). REQUIRES knowing which configs exist.
 /set config all <param> <val>   - Set parameter on EVERY config in the current table, AND save as a sticky default for any future configs.
 /set <row> cfg <name>           - Reassign a row to a different config (e.g. a cloned one). The target must exist (see /config list).

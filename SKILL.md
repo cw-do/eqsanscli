@@ -281,6 +281,12 @@ To reassign a row to a different (typically cloned) config:
 | `/show config <id>` | All ~75 parameters with values |
 | `/set config <id> <param> <value>` | Confirmation |
 | `/set config all <param> <value>` | Per-config apply summary + sticky default |
+| `/instrument show` | Per-config calibration set + source cycle + pending changes |
+| `/instrument list [run]` | Cycle inventory and what a run resolves to |
+| `/instrument apply [--force]` | Re-resolve; `--force` overrides your `/set config` values |
+| `/instrument pin <cycle>` / `unpin` | Freeze to one cycle / release |
+| `/instrument off` / `on` | Disable/enable auto resolution |
+| `/instrument check` | Verify referenced calibration files exist |
 | `/apply preset auto` | Per-config match result (exact/partial/distance/none) |
 | `/apply preset <name> <config_id>` | Parameter count applied |
 | `/set outputdir <path>` | Confirms path, propagation to N configs |
@@ -292,6 +298,14 @@ config needs different params (e.g. a different mask):
 /set --sample MySample cfg 4m10a_v2
 /set config 4m10a_v2 maskfilename mask_v2.nxs
 ```
+**Instrument calibration files** — dark, flood, flux, detoffset, scalecomp and
+samoffset resolve automatically from the machine-physics cycle folders by run
+number at `/matchruns` and in autopilot. Sensitivity follows the detector
+distance (1.3 m → `1o3m`, 2.5 m → `2o5m`, 4 m and longer → `4m`); the whole set
+comes from one cycle; `thinPMMA` is preferred. Your `/set config` values are
+never overwritten, and pre-2026A runs get no AgBe values rather than invented
+ones. Inspect with `/instrument show`, freeze with `/instrument pin <cycle>`.
+
 - Clone names must contain the source config ID (`4m10a_v2` ✓, `mask2` ✗).
 - A row only accepts a config with the same physics (`4m10a` row ✗ `8m10a` params).
 - Output filenames stay `<sample>_<physical config>_Iq.dat` — clones change

@@ -66,21 +66,70 @@ async def handle_show_config(args: list[str], state: SessionState) -> CommandRes
     config_id = normalize_config_id("_".join(args))
     params = list_config_params(config_id, state.configurations)
 
+    # Values the instrument-file resolver put here get their own marker, with the
+    # cycle they came from — otherwise a machine-physics path looks user-set.
+    resolved = _resolved_marker(state, config_id)
+
     rows = []
     for param_name, value, source in params:
         source_marker = {"user": "[bold cyan]*[/bold cyan]", "preset": "", "default": "[dim]d[/dim]"}.get(source, "")
+        if param_name in resolved:
+            source_marker = f"[green]{resolved[param_name]}[/green]"
         rows.append({
             "Parameter": param_name,
             "Value": value,
             "Src": source_marker,
         })
 
+    legend = "  [dim]Src: * = user override, d = default, (blank) = preset"
+    if resolved:
+        legend += ", mp:<cycle> = machine-physics calibration (/instrument show)"
+    legend += "[/dim]"
+
     return CommandResult(
         success=True,
-        message=f"Configuration: {config_id}\n"
-        f"  [dim]Src: * = user override, d = default, (blank) = preset[/dim]",
+        message=f"Configuration: {config_id}\n{legend}",
         data={"type": "config_table", "rows": rows, "config_id": config_id},
     )
+
+
+def _resolved_marker(state: SessionState, config_id: str) -> dict[str, str]:
+    """Map param -> "mp:<cycle>" for values currently owned by the resolver."""
+    provenance = getattr(state, "instrument_provenance", None) or {}
+    record = None
+    for key, value in provenance.items():
+        if normalize_config_id(key) == normalize_config_id(config_id):
+            record = value
+            break
+    if not record:
+        return {}
+
+    from eqsanscli.services.instrument_files import _same
+
+    stored = {}
+    for key, value in state.configurations.items():
+        if normalize_config_id(key) == normalize_config_id(config_id):
+            stored = value
+            break
+
+    cycle = _resolved_cycle(state, config_id)
+    tag = f"mp:{cycle}" if cycle else "mp"
+    return {
+        param: tag for param, written in record.items()
+        if param in stored and _same(stored[param], written)
+    }
+
+
+def _resolved_cycle(state: SessionState, config_id: str) -> str:
+    """Which machine-physics cycle this config's calibration came from."""
+    from eqsanscli.services.instrument_files import config_targets, resolve_for_run
+
+    if state.instrument_cycle_pin:
+        return state.instrument_cycle_pin
+    for target in config_targets(state):
+        if normalize_config_id(target.config_id) == normalize_config_id(config_id):
+            return resolve_for_run(target.run, target.distance).cycle_id or ""
+    return ""
 
 
 async def handle_set_config(args: list[str], state: SessionState) -> CommandResult:

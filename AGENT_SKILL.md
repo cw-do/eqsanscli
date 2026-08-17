@@ -344,12 +344,37 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/set config all <param> <value>` | Apply to every config + sticky default for future ones |
 | `/set <row> cfg <name>` | Reassign a row to a different (typically cloned) config; `none` clears (aliases: `config`, `configuration`) |
 | `/set --sample <name> cfg <new>` | Bulk-reassign rows matching `<name>` |
+| `/instrument show` | Calibration set per config: dark, flood, flux, detoffset, scalecomp, samoffset + source cycle |
+| `/instrument list [run]` | Cycle inventory and what a given run resolves to |
+| `/instrument apply [--force]` | Re-resolve now; `--force` overrides `/set config` values |
+| `/instrument pin <cycle>` / `/instrument unpin` | Freeze to one cycle (reproducing old work) / release |
+| `/instrument off` / `/instrument on` | Disable/enable automatic resolution |
+| `/instrument check` | Verify referenced calibration files still exist |
 | `/apply preset auto` | Auto-match closest preset to each config |
 | `/apply preset <name> <config_id>` | Apply specific preset |
 | `/set outputdir <path>` | Set output directory (propagates to all configs) |
 | `/set drtsans <version>` | Set drtsans version: default, dev, qa |
 
 Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + frequency)
+
+**Instrument calibration files are resolved automatically — do not hand-set them.**
+`sensitivityfilename`, `darkfilename`, `beamfluxfilename`, `detectoroffset`,
+`scalecomponents.detector1` and `sampleoffset` come from
+`/SNS/EQSANS/shared/NeXusFiles/EQSANS/<cycle>_mp/`, chosen by run number at
+`/matchruns` and in autopilot (Step 4c):
+
+- **Cycle** = newest whose calibration campaign started at or before the run;
+  the whole set comes from that one cycle.
+- **Sensitivity** follows the detector distance: 1.3 m → `1o3m`, 2.0/2.5 m →
+  `2o5m`, 4 m *and anything longer* → `4m`. Preference within a cycle:
+  `thinPMMA`, then undecorated tag, then highest run.
+- **Never invented**: no AgBe values for runs before 2026A, no flux from more
+  than one cycle back — the existing value stays and the reason is reported.
+- A `/set config` value is never overwritten (reported as *kept*); use
+  `/instrument apply --force` to override. Resolved values show as
+  `mp:<cycle>` in `/show config`.
+- `/instrument pin <cycle>` reproduces an earlier reduction; `/instrument off`
+  hands full control back to the presets.
 
 **Per-row variant workflow** (when only some rows at the same physical config need different params):
 

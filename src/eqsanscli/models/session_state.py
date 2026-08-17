@@ -69,6 +69,15 @@ class SessionState:
     plot_linestyle: str = "line+marker"
     max_workers: int = 1
     drtsans_version: str = "default"
+    # Instrument-file resolution (services/instrument_files.py):
+    #   auto_instrument_files — resolve at /matchruns and in autopilot
+    #   instrument_cycle_pin  — force a machine-physics cycle ("2026A"); "" = by run number
+    #   instrument_provenance — config_id -> {param: value the resolver wrote}, so a
+    #                           later re-resolve can update its own values without
+    #                           overwriting anything the user set with /set config
+    auto_instrument_files: bool = True
+    instrument_cycle_pin: str = ""
+    instrument_provenance: dict[str, dict] = field(default_factory=dict)
     llm_tokens_used: int = 0
     llm_calls: int = 0
 
@@ -157,6 +166,9 @@ class SessionState:
             "plot_linestyle": self.plot_linestyle,
             "max_workers": self.max_workers,
             "drtsans_version": self.drtsans_version,
+            "auto_instrument_files": self.auto_instrument_files,
+            "instrument_cycle_pin": self.instrument_cycle_pin,
+            "instrument_provenance": self.instrument_provenance,
             "command_history": self.command_history[-500:],  # keep last 500
         }
         with open(path, "w") as f:
@@ -204,6 +216,9 @@ class SessionState:
             plot_linestyle=data.get("plot_linestyle", "line+marker"),
             max_workers=data.get("max_workers", 1),
             drtsans_version=data.get("drtsans_version", "default"),
+            auto_instrument_files=data.get("auto_instrument_files", True),
+            instrument_cycle_pin=data.get("instrument_cycle_pin", ""),
+            instrument_provenance=data.get("instrument_provenance", {}) or {},
             command_history=data.get("command_history", []),
         )
         state.tables = {
