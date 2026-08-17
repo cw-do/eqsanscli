@@ -133,6 +133,22 @@ WORKING TABLE:
     "mark 11233 as not used" / "don't use 11233" → /reclass 11233 n   ('n' = 'not used', same as 'i')
   The "sample" class respects S-/T- prefix: S-BkgG→scatt, T-BkgG→trans
   The "ignore" class (aliases: i, n) excludes those runs from /matchruns entirely — they will NOT appear in the working table.
+
+  CLASSIFY (/reclass) vs ASSIGN (/set): "run 186517 is the empty beam for 4m10a" is ambiguous. Two readings:
+    (a) the run IS an empty-beam measurement        → /reclass 186517 empty   ← DEFAULT, prefer this
+    (b) USE that run as the empty beam for the rows → /set --config 4m10a emp 186517
+  Prefer (a) when the sentence states what a run IS: "X is the empty beam", "X and Y are empty beams",
+  "186520 is a background run", "these are transmissions". Classification is upstream of the table, so
+  /matchruns then wires each run to the configs it actually belongs to using its ONCat distance and
+  wavelength — you do NOT need to map run→config yourself, even when the user says "respectively".
+    "186517 and 186518 are the empty beam for 4m10a and 4m2.5a respectively"
+        → /reclass 186517 empty
+          /reclass 186518 empty
+          /matchruns
+  Choose (b) only when the user says to USE/APPLY/ASSIGN an already-classified run to rows, or when the
+  table has rows already reduced and a rebuild is unwanted ("just set the empty beam on the 4m rows").
+  Note /matchruns REBUILDS the table (row status resets); /matchruns --update adds new runs but does NOT
+  back-fill empty/bkg on existing rows — for that use /set --config <id> emp <run>.
 /matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog) — REBUILDS table (resets row status)
 /matchruns --update             - Add new scattering runs to the EXISTING working table without disrupting reduced rows. Use after /refresh catalog.
   IMPORTANT: Mid-experiment incremental flow when new runs arrive:
@@ -143,7 +159,22 @@ WORKING TABLE:
 /set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness, sample/name). <row> = index, run number, range (1-5, 1,3,5), or all
 /set <row> <field> none         - Clear a field (thickness and sample name can't be cleared)
 /set <row> sample <newname>     - Rename the sample on a row (alias: 'name'). Marks done rows as modified.
-/set --sample <name> <field> <value> - Set field for ALL rows matching sample name (case-insensitive substring)
+/set --sample <name> <field> <value> - Set field for all rows whose sample name matches <name>.
+  Matching is EXACT unless you use * — "3b" matches only a sample literally named 3b; use "*3b*" for
+  "contains 3b", and "*" alone for every row in the table.
+/set --config <id> <field> <value>   - Set field for every row in ONE configuration (id like 4m10a, 4m2.5a).
+  USE THIS whenever the user ties a run to a CONFIGURATION rather than to a sample or a row.
+  Emit one command per configuration mentioned — never collapse several configs into --sample *.
+    "186517 and 186518 are the empty beam for 4m10a and 4m2.5a respectively"
+        → /set --config 4m10a emp 186517
+          /set --config 4m2.5a emp 186518
+    "use 186517 as the empty beam for the 4m 10A config" → /set --config 4m10a emp 186517
+    "the background for all 8m rows is 186520" → /set --config 8m10a bkg 186520
+    "thickness is 0.2 for the 1.3m data" → /set --config 1.3m2.5a thickness 0.2
+  WRONG for the example above: /set --sample * emp 186517 — that would put 186517 on EVERY row,
+  including the 4m2.5a rows, and silently drop 186518.
+  If you are unsure which config IDs exist, run /show table (or /list configs) first and read them off;
+  do not guess. /set --config accepts the physics ID even when rows use a cloned config.
   IMPORTANT: When user wants to rename a sample, use the 'sample' field:
     "rename sample MisLabel to S3" → /set --sample MisLabel sample S3
     "change row 4's sample name to Banjo" → /set 4 sample Banjo

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.commands.catalog import build_working_table_display
-from eqsanscli.models.config_id import make_config_id
+from eqsanscli.models.config_id import config_ids_match, make_config_id
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.matching_service import (
     assign_background, match_runs, merge_new_runs, _classify_catalog,
@@ -300,6 +300,31 @@ def _validate_config_target(value: str, state, rows: list | None = None) -> tupl
     return True, resolved, ""
 
 
+def _no_match_message(table, pattern: str, *, by_config: bool) -> str:
+    """Explain a no-match, distinguishing an empty table from a bad pattern.
+
+    An empty working table used to report "no rows with sample name containing
+    '<pattern>'", which blamed the pattern for a missing /matchruns.
+    """
+    if not table.rows:
+        return (
+            f"Working table '{table.name}' is empty — nothing to set.\n"
+            f"  Run /matchruns first (or /table list if you expected rows in another table)."
+        )
+    if by_config:
+        return (
+            f"No rows in configuration '{pattern}' in table '{table.name}'.\n"
+            f"  Configs here: {', '.join(table.configurations)}"
+        )
+    names = sorted({r.sample_name for r in table.rows})
+    shown = ", ".join(names[:12]) + (f" … (+{len(names) - 12})" if len(names) > 12 else "")
+    return (
+        f"No rows with sample name matching '{pattern}' in table '{table.name}'.\n"
+        f"  Sample names are matched exactly unless you use *, e.g. '*{pattern}*'.\n"
+        f"  Samples here: {shown}"
+    )
+
+
 async def handle_set(args: list[str], state: SessionState) -> CommandResult:
     """Handle /set <run> <field> <value> — set a run association on a working table row.
 
@@ -318,6 +343,11 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         /set 4 cfg 4m10a_mask2          ← reassign row 4 to a (cloned) config
         /set 4 cfg none                 ← clear override → use physics-derived config
                                          ('cfg' is canonical; 'config'/'configuration' also work)
+
+    Bulk selectors:
+        /set --sample <name> <field> <value>   ← by sample name ('*' = all rows)
+        /set --config <id> <field> <value>     ← every row in one configuration,
+                                                 e.g. /set --config 4m10a emp 186517
     """
     if not args:
         return CommandResult(
@@ -365,17 +395,29 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         cmd = " ".join(DRTSANS_VERSIONS[version])
         return CommandResult(success=True, message=f"drtsans version set to: {version} ({cmd})")
 
-    # Bulk set: /set --sample <name> <field> <value>
-    # Matches all rows whose sample_name contains <name> (case-insensitive).
-    if first == "--sample":
+    # Bulk set by sample name or by configuration.
+    if first in ("--sample", "--config", "--cfg"):
+        by_config = first != "--sample"
+        selector = "--config" if by_config else "--sample"
         if len(args) < 4:
+            if by_config:
+                configs = state.current_table.configurations
+                return CommandResult(
+                    success=False,
+                    message="Usage: /set --config <config_id> <field> <value>\n"
+                    "  Example: /set --config 4m10a emp 186517\n"
+                    "  Sets the field on every row in that configuration.\n"
+                    f"  Configs in this table: {', '.join(configs) or '(none — run /matchruns first)'}",
+                )
             return CommandResult(
                 success=False,
                 message="Usage: /set --sample <name> <field> <value>\n"
                 "  Example: /set --sample 3b trans 172804\n"
-                "  Matches all rows whose sample name contains <name> (case-insensitive).",
+                "  <name> matches the sample name exactly, or use * as a wildcard\n"
+                "  ('*' = every row, '*3b*' = any name containing 3b).",
             )
-        sample_pattern = args[1]
+
+        pattern = args[1]
         field_name = args[2].lower()
         value_str = " ".join(args[3:])
 
@@ -388,13 +430,23 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         attr_name = SETTABLE_FIELDS[field_name]
         table = state.current_table
 
-        matching_rows = [
-            r for r in table.rows if sample_matches(sample_pattern, r.sample_name)
-        ]
+        if by_config:
+            # Match the row's parameter config OR its physics config, so
+            # "4m10a" still selects rows pointed at a clone like "4m10a_v2".
+            matching_rows = [
+                r for r in table.rows
+                if config_ids_match(r.configuration, pattern)
+                or config_ids_match(r.physical_configuration, pattern)
+            ]
+        else:
+            matching_rows = [
+                r for r in table.rows if sample_matches(pattern, r.sample_name)
+            ]
+
         if not matching_rows:
             return CommandResult(
                 success=False,
-                message=f"No rows with sample name containing '{args[1]}' in table '{table.name}'.",
+                message=_no_match_message(table, pattern, by_config=by_config),
             )
 
         if value_str.lower() in ("none", "null", '""', "''", ""):
@@ -407,12 +459,13 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             if attr_name == "configuration_override":
                 return CommandResult(
                     success=True,
-                    message=f"Cleared config override for {len(matching_rows)} row(s) matching '{args[1]}' "
-                    f"— rows now use their physics-derived config.",
+                    message=f"Cleared config override for {len(matching_rows)} row(s) matching "
+                    f"{selector} {pattern} — rows now use their physics-derived config.",
                 )
             return CommandResult(
                 success=True,
-                message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching '{args[1]}'.",
+                message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching "
+                f"{selector} {pattern}.",
             )
 
         if attr_name == "thickness":
@@ -431,11 +484,18 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         for row in matching_rows:
             row.set_field(attr_name, parsed_value)
 
-        sample_list = ", ".join(sorted(set(r.sample_name for r in matching_rows)))
+        if by_config:
+            detail = "  Samples: " + ", ".join(
+                sorted(set(r.sample_name for r in matching_rows))
+            )
+        else:
+            detail = "  Configs: " + ", ".join(
+                sorted(set(r.configuration for r in matching_rows))
+            )
         return CommandResult(
             success=True,
-            message=f"Set {field_name}={parsed_value} for {len(matching_rows)} row(s) matching '{args[1]}'.\n"
-            f"  Samples: {sample_list}",
+            message=f"Set {field_name}={parsed_value} for {len(matching_rows)} row(s) matching "
+            f"{selector} {pattern}.\n{detail}",
         )
 
     if len(args) < 3:

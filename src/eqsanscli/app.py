@@ -785,6 +785,8 @@ class EQSANSApp(App):
             '  /set config all <param> <val> — Apply to every config; sticky default for future ones\n'
             "  /set <row> cfg <name>         — Reassign row to a (cloned) config; 'none' clears override (aliases: config, configuration)\n"
             "  /set --sample <name> cfg <new> — Bulk-reassign rows matching <name>\n"
+            "  /set --config <id> <field> <val> — Set a field on every row in one configuration\n"
+            "                                  e.g. /set --config 4m10a emp 186517\n"
             "\n[bold cyan]Instrument calibration files (machine physics):[/]\n"
             "  /instrument show              — Dark/flood/flux + detoffset/scalecomp per config, and their cycle\n"
             "  /instrument list [run]        — Cycle inventory and what a run resolves to\n"
