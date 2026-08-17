@@ -49,10 +49,25 @@ TUI banner to tell which build is running.
   `pyproject.toml` reads it via `[tool.hatch.version] path`, so edit it in one
   place only. (They had drifted: `__init__` was `0.9.0` while `pyproject` said
   `0.1.0`.)
-- **Small change → +0.0.1** (`0.10.0` → `0.10.1`): bug fix, message wording,
-  doc-only edit, a flag on an existing command.
+**Bump whenever code changes**, in the same commit as the change:
+
+- **Small change → +0.0.1** (`0.10.0` → `0.10.1`): bug fix, message wording, a
+  flag added to an existing command.
 - **New command or behaviour change → +0.1.0** (`0.10.1` → `0.11.0`).
-- Never leave a revision unbumped, even a one-line fix.
+- Never leave a code revision unbumped, even a one-line fix.
+- Documentation that only records an already-released version (e.g. filling in
+  this Change Log after the fact) does **not** bump.
+
+#### Version history
+
+| Version | Date | Contents |
+|---|---|---|
+| 0.10.0 | 2026-08-17 | Three revisions, all shipped together (see the Change Log entries below, each tagged `v0.10.0`): **(1)** `/config` namespace + per-row `configuration_override`, clone naming rule, physics-based output naming, single command registry; **(2)** run-aware instrument calibration files from machine physics + `/instrument`; **(3)** `/set --config` selector + classify-vs-assign LLM routing. Also: `__init__.py` became the single version source. |
+| 0.9.0 | earlier | `/version` command added |
+| 0.1.0 | initial | first release |
+
+From 0.10.0 onward, one bump per revision — the collapsed 0.10.0 above is the
+last multi-revision version.
 - Tag the Change Log heading with the version it shipped in, so history and
   builds line up.
 
@@ -102,7 +117,7 @@ Also documented: `/matchruns` rebuilds (status resets) while `--update` does
 *not* back-fill empty/bkg on existing rows — that case is what `/set --config`
 is for.
 
-### 2026-08-17: Run-aware instrument calibration files from machine physics
+### 2026-08-17 (v0.10.0): Run-aware instrument calibration files from machine physics
 
 **Problem:** dark current, sensitivity (flood), beam flux and the AgBe-derived
 `detectoroffset` / `scalecomponents.detector1` / `sampleoffset` are **cycle**
@@ -199,7 +214,7 @@ separate, deliberate step"). Reading the cycle folder directly means eqsanscli
 picks up new calibration the moment it lands. If a publish gate is wanted, the
 cleanest signal is a per-cycle marker file the resolver requires.
 
-### 2026-08-17: Config-override hardening + single command registry
+### 2026-08-17 (v0.10.0): Config-override hardening + single command registry
 
 Follow-up to the 2026-06-24 `/config` work below. That feature let a row point at
 a cloned config, but the clone label then flowed into places that expect a
