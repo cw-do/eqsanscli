@@ -1,3 +1,5 @@
 """EQSANS Data Reduction CLI — Interactive terminal application for EQSANS at SNS."""
 
-__version__ = "0.9.0"
+#: Single source of truth for the version — pyproject.toml reads it from here
+#: (`[tool.hatch.version] path`). Bump it with each revision; see CLAUDE.md.
+__version__ = "0.10.0"

@@ -40,6 +40,22 @@ preset_configs/       — Preset JSON configs for known instrument configuration
 - Session state auto-saves after every command. `catalog_data` is stored as list-of-dicts.
 - `SKILL.md` and `AGENT_SKILL.md` document the tool for TUI and headless agent use respectively.
 
+### Versioning
+
+**Bump the version with every revision** — the user relies on `/version` and the
+TUI banner to tell which build is running.
+
+- `src/eqsanscli/__init__.py:__version__` is the single source of truth.
+  `pyproject.toml` reads it via `[tool.hatch.version] path`, so edit it in one
+  place only. (They had drifted: `__init__` was `0.9.0` while `pyproject` said
+  `0.1.0`.)
+- **Small change → +0.0.1** (`0.10.0` → `0.10.1`): bug fix, message wording,
+  doc-only edit, a flag on an existing command.
+- **New command or behaviour change → +0.1.0** (`0.10.1` → `0.11.0`).
+- Never leave a revision unbumped, even a one-line fix.
+- Tag the Change Log heading with the version it shipped in, so history and
+  builds line up.
+
 ### Testing
 
 No formal test suite. Quick verification via:
@@ -52,6 +68,39 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.10.0): `/set --config` + classify-vs-assign routing
+
+*(v0.10.0 ships this and the two entries below: per-row config overrides +
+command registry, and machine-physics instrument resolution.)*
+
+**Reported from a real session on IPTS-38773.** The user said "run 186517 and
+186518 are the empty beam for 4m10a and 4m2.5a configuration, respectively" and
+got `/set --sample * emp 186517` → *"No rows with sample name containing '*'"*.
+Three separate defects:
+
+1. **The message blamed the pattern.** `*` is a valid wildcard
+   (`sample_matches` → `fnmatch`, matches every row); the real cause was an
+   empty working table. New `_no_match_message()` separates "table is empty —
+   run /matchruns" from "pattern matched nothing", and lists the sample names or
+   configs that do exist.
+2. **No per-config selector existed**, so no correct command was available for
+   that sentence. Added **`/set --config <id> <field> <value>`** — sets the field
+   on every row in one configuration, matching either the row's parameter config
+   or its `physical_configuration`, so `4m10a` still selects rows pointed at a
+   clone like `4m10a_v2`. The `--sample` and `--config` branches now share one
+   implementation. (Even as an assignment the generated command was wrong:
+   `--sample *` would put 186517 on *every* row and drop 186518.)
+3. **The intent was classification, not assignment.** "run X *is* the empty
+   beam" → `/reclass X empty`; `/matchruns` then pairs each run to its configs
+   from the ONCat distance/wavelength, so "respectively" needs no run→config
+   mapping. `llm_handler.py` now documents the classify-vs-assign split,
+   defaults to `/reclass` when a sentence declares what a run *is*, and notes
+   that `--sample` matching is exact unless `*` is used.
+
+Also documented: `/matchruns` rebuilds (status resets) while `--update` does
+*not* back-fill empty/bkg on existing rows — that case is what `/set --config`
+is for.
 
 ### 2026-08-17: Run-aware instrument calibration files from machine physics
 
