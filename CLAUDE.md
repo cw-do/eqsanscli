@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.16.2 | 2026-08-18 | Document `--top`/`--bottom`: pixel counts not indices, the 11-pixel floor and how to bypass it, and that the machine-physics tool names the two ends the other way round. |
 | 0.16.1 | 2026-08-18 | Full `/mask` usage: in-CLI help with examples and troubleshooting, rewritten README section, corrected SKILL/AGENT_SKILL/knowledge/LLM entries. |
 | 0.16.0 | 2026-08-18 | Beam-stop detection rebuilt on local contrast: a dim run's Poisson noise no longer produces a huge off-centre circle. Refuses when no shadow is discernible; `--beam-center` / `--beam-radius` added. |
 | 0.15.1 | 2026-08-17 | `--beam-pad` back to y-pixels, the units the machine-physics mask tool uses; converted to mm internally. |
@@ -113,6 +114,26 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.16.2): `--top` / `--bottom` semantics documented
+
+Asked how to set the tube-end bands, and the help did not say enough:
+
+- they are **counts of pixels**, not indices — `--bottom 11` masks pixels 0-10,
+  `--top 11` masks 245-255, together reproducing the `MASKED_PIXELS =
+  '1-11,246-256'` convention from each cycle's `prepare_sensitivity.py`;
+- an explicit value **bypasses the 11-pixel floor**, so `--top 0 --bottom 0`
+  disables the bands, which nothing said;
+- `--bottom` is the low-pixel-index end (-y), the band at the bottom of the
+  preview image, since that is plotted with `origin="lower"`.
+
+**The machine-physics mask tool names these the other way round** — its
+`detect_bands` counts `top` from pixel index 0, and its 2026B `params.json`
+records `top: 12, bottom: 11` for the mask whose shapes are rows 0-11 and
+245-255. Ours is the physically-correct sense and matches our own preview, so the
+naming stays; the difference is now called out in the help, the README, the
+troubleshooting table and `params.json`, which records `band_convention` so a
+stored mask states which sense it used.
 
 ### 2026-08-18 (v0.16.1): `/mask` documentation
 

@@ -381,6 +381,19 @@ so you can judge both.
    along-tube profile falls below half the plateau, and never smaller than the
    11-pixel convention EQSANS has used for years.
 
+   `--top` and `--bottom` set **how many pixels** to mask at each end — counts,
+   not indices. `--bottom 11` masks pixels 0–10; `--top 11` masks 245–255,
+   reproducing the `MASKED_PIXELS = '1-11,246-256'` convention from each cycle's
+   `prepare_sensitivity.py`. An explicit value overrides the 11-pixel floor, so
+   `--top 0 --bottom 0` disables the bands entirely. `--band-drop` moves the
+   threshold that the automatic measurement uses: higher masks more.
+
+   `--bottom` is the low-pixel-index end, which is −y, and is the band at the
+   bottom of the preview image (plotted with `origin="lower"`). **The
+   machine-physics mask tool names these the other way round** — its `top` counts
+   from pixel index 0 — so when comparing its `params.json` with ours, expect the
+   two numbers to be swapped.
+
 3. **Deviant tubes**, compared *within their front/back group*. Tubes alternate
    in packs of four, so grouping that way gives a median absolute deviation of
    2.7 counts against 19.9 for odd/even — comparing odd-to-odd mixes two
@@ -440,6 +453,7 @@ and nothing else.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Bands at the wrong end | `top`/`bottom` are named opposite to the machine-physics tool | swap them; `--bottom` is the low-index, −y end |
 | Beam mask far too big, off-centre | dim run — noise dominates | use a brighter run, or `--beam-center` + `--beam-radius` |
 | Beam mask too small | long wavelength: halo fills the penumbra (you will have been warned) | `--beam-radius <mm>` |
 | "no beam stop is discernible" | run has no stop in view, or is far too dim | check the raw panel; `--no-beam` if genuinely absent |

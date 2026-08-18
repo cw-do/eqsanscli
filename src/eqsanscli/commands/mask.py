@@ -44,10 +44,16 @@ _USAGE = (
     "  --no-beam              do not mask the beam stop\n"
     "\n"
     "[bold]Tube ends[/bold]\n"
-    "  --top <n> / --bottom <n>  force band sizes in pixels (default: measured,\n"
-    "                            never below the 11-pixel convention)\n"
+    "  --top <n> / --bottom <n>  how MANY pixels to mask at each end (not indices).\n"
+    "                         --bottom 11 masks pixels 0-10, --top 11 masks 245-255.\n"
+    "                         Default: measured, never below 11 (the long-standing\n"
+    "                         EQSANS convention). An explicit value overrides that\n"
+    "                         floor, so --top 0 --bottom 0 disables the bands.\n"
+    "                         --bottom is the low-pixel-index end, i.e. the bottom\n"
+    "                         of the preview image. NOTE the machine-physics mask\n"
+    "                         tool names these the other way round.\n"
     "  --band-drop <f>        where a band edge is called, as a fraction of the\n"
-    "                         plateau (default 0.5)\n"
+    "                         plateau (default 0.5); raise it to mask more\n"
     "\n"
     "[bold]Bad tubes[/bold]\n"
     "  --tubes <a,b,c>        mask these tubes explicitly\n"
@@ -59,6 +65,7 @@ _USAGE = (
     "  /mask create 186104 --dry-run               look before writing\n"
     "  /mask create 186104 --beam-radius 30        state the stop yourself\n"
     "  /mask create 186104 --tubes 146             add a known-bad tube\n"
+    "  /mask create 186104 --top 12 --bottom 11    set the tube-end bands\n"
     "  /mask create 186104 --tube-sigma 3          flag tubes more readily\n"
     "\n"
     "[bold]If it looks wrong[/bold] — always open the _compare.png first:\n"
@@ -230,6 +237,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "beam_scale": opts["beam_scale"],
         "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],
+        "band_convention": ("pixel counts at each end; bottom = low pixel index (-y). "
+                            "The machine-physics tool names these the other way round."),
         "tubes": plan.tubes, "tube_source": plan.tube_source,
         "tube_sigma": None if plan.tube_source == "manual" else opts["tube_sigma"],
         "n_masked": n, "shapes": plan.shapes,
