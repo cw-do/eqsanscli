@@ -120,6 +120,68 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.22.0): the stop is measured from cross cuts
+
+The user's own procedure, and it is better than what 0.21.0 did:
+
+> 1) horizontal cross cut and find center -> x value  2) vertical cross cut and
+> find center (deep valley) -> that's center y value.  3) then use the valley
+> width (just focusing horizontal valley width in this case) as a diameter of the
+> center mask.
+
+**Why the circle fit was not good enough.** Fitting a circle to all the flare
+pixels averages over the whole ring, and on run 186636 the broad gravity lobe
+below the stop dragged the fitted centre 14 mm down: it reported (11.3, −4.2)
+where the cuts say (12.3, 10.1). The mask therefore sat low — "not fully
+satisfactory".
+
+**Now** `beam_from_cross_cuts()`: a vertical cut (mean per pixel row over tubes
+within 30 mm of the seed) gives the centre's y as the midpoint of the valley's two
+walls; a horizontal cut through that y gives the centre's x and, from the wall
+separation, the diameter. The wall *summit* is the rim — flare is brightest just
+clear of the stop — so peak-to-peak is the width. The width is taken from the
+horizontal cut only, exactly as asked: vertically the gravity-dropped beam lands
+inside the shadow and makes it read narrow (69 mm against 80 mm on 186636).
+
+Three details, each from a failure while building it:
+
+- **Anchor on the beam, not the darkest point.** Outside the flare the plateau is
+  *darker* than the filled-in shadow (1 count against 9 on 186636), so the
+  minimum of the cut is 77 mm from the stop. The shadow is a local dip between two
+  walls, not the darkest place around. This is what made the first attempt report
+  "no valley" on two of three runs.
+- **Sample per tube and per pixel row, do not bin by position.** Tubes are 5.49 mm
+  apart but their index order interleaves packs of four, so binning at the pitch
+  aliases — some bins take two tubes, some none — which moved the centre 5 mm.
+- **Read a wall's summit over at most two bins either side.** Unbounded, the
+  vertical cut's lower wall (the gravity lobe, merged with the rim flare and far
+  broader) pulled the centre 6 mm down.
+
+A side that rises onto the plateau and stays up is not a wall: that run has no
+flare and is sized from the shadow as before. `fit_flare_ring` and `_fit_circle`
+are removed — the cuts replace them.
+
+| run | config | measured valley | mask | ground truth |
+|---|---|---|---|---|
+| 186636 | 9 m 15 Å | 80 mm at (12.3, 10.1) | r 44.0 | stop 90 mm across, centre (10, 10) |
+| 186631 | 4 m 10 Å | 66 mm at (30.0, 13.4) | r 37.2 | 4 m mask made by hand is 68 mm across |
+| 186104 | 4 m 2.5 Å | no flare walls → shadow | r 34.2 | hand-made 2026B mask ≈ 34 mm |
+
+**`--leak` now masks only lobes BELOW the stop.** Neutrons fall, so the beam that
+misses the stop is the beam that fell past it. The bright patch above the stop is
+rim flare or the short-wavelength end of the band; it is an arc, not a blob, and
+the disc drawn round it reached y +112 for a feature ending at +75. It is still
+reported, with a `--disc` line to copy. On 186636 `--leak` adds 0.55% rather than
+1.7%, and takes the worst unmasked pixel below the stop from 370 counts to 34
+(plateau 1).
+
+**Files changed:** `services/mask_service.py` (`cut_along_x`, `cut_along_y`,
+`valley_walls`, `_summit_centre`, `beam_from_cross_cuts`; `fit_flare_ring` and
+`_fit_circle` removed; `BeamStop.valley_width` replaces `ring_radius`; leak
+masking restricted to below), `commands/mask.py` (report, help, `valley_width_mm`
+in params), `tests/test_mask.py` (8 cross-cut tests replace the 7 ring tests, 51
+total), `knowledge/instrument-files.md`, `README.md`, `SKILL.md`, `AGENT_SKILL.md`.
+
 ### 2026-08-18 (v0.21.0): the beam stop is found from the flare ring
 
 **Problem.** On the 9 m 15 Å banjo (run 186636) `/mask create` put the stop at

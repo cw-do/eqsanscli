@@ -36,23 +36,28 @@ _USAGE = (
     "  --dry-run              report + preview PNG only, write no mask file\n"
     "\n"
     "[bold]Beam stop[/bold]\n"
-    "  Found from the [bold]flare ring[/bold] — the stop is a dark disc ringed by brighter\n"
-    "  scattering, so the ring's centre is the stop's centre and the stop reaches to\n"
-    "  where the flare begins. That holds when the shadow itself has been filled in\n"
-    "  by halo or by gravity-dropped beam, which is where measuring the dark patch\n"
-    "  under-reads: on a 9 m 15 A banjo the shadow suggested r 10 mm and the ring\n"
-    "  gave 45 mm, against a stop measured at 90 mm across. Runs with no flare fall\n"
-    "  back to the shadow. The report says which was used.\n"
-    "  --beam-scale <f>       multiply the fitted radius. Default: 1.0 for a ring\n"
-    "                         fit (it already measures the stop edge), 1.2 when only\n"
-    "                         the shadow was visible (a threshold stops short).\n"
+    "  Measured from [bold]cross cuts[/bold], the way it is judged by eye: a vertical cut\n"
+    "  gives the centre of the deep valley (its y), a horizontal cut through that\n"
+    "  gives the centre's x, and the horizontal valley width — wall summit to wall\n"
+    "  summit, since flare is brightest just clear of the rim — is the diameter.\n"
+    "  The width comes from the horizontal cut only: vertically the gravity-dropped\n"
+    "  beam lands inside the shadow and makes it read narrow. On a 9 m 15 A banjo\n"
+    "  this gives an 80 mm valley against a stop measured at 90 mm across, and at\n"
+    "  4 m a 66 mm valley against a 68 mm mask made by hand. Runs whose cut has no\n"
+    "  flare walls — it rises onto the plateau and stays up — are sized from the\n"
+    "  shadow instead. The report says which was used.\n"
+    "  --beam-scale <f>       multiply the fitted radius. Default: 1.0 for a cross\n"
+    "                         cut (the width is measured), 1.2 when only the shadow\n"
+    "                         was visible (a threshold stops short of the rim).\n"
     "  --beam-pad <f>         margin beyond it, in pixels along a tube (default 1.0;\n"
     "                         1 px = 4.09 mm). Radius = fitted x scale + pad.\n"
     "  --beam-center <x>,<y>  state the centre in mm; skips detection\n"
     "  --beam-radius <mm>     state the radius in mm; used verbatim\n"
     "  --no-beam              do not mask the beam stop\n"
-    "  --leak                 also mask direct beam that fell under gravity and\n"
-    "                         missed the stop (reported either way; see below)\n"
+    "  --leak                 also mask direct beam that fell under gravity past\n"
+    "                         the stop — one disc per lobe BELOW it. A bright patch\n"
+    "                         above the stop is rim flare, not fallen beam, and is\n"
+    "                         reported with a --disc line rather than masked.\n"
     "\n"
     "[bold]Gravity-dropped direct beam[/bold]\n"
     "  Neutrons fall in flight and the drop goes as the square of the wavelength,\n"
@@ -109,8 +114,8 @@ _USAGE = (
     "[bold]If it looks wrong[/bold] — always open the _compare.png first:\n"
     "  too big / off-centre   the run is too dim; use a brighter one, or give\n"
     "                         --beam-center and --beam-radius\n"
-    "  too small              no flare ring was found and the shadow was filled in\n"
-    "                         (the report says which was used); set --beam-radius\n"
+    "  too small              no flare walls in the cut, so the filled-in shadow\n"
+    "                         was used (the report says which); set --beam-radius\n"
     "  bad tube not flagged   auto-detection is whole-tube, so a dead *segment*\n"
     "                         averages out; name it with --tubes\n"
     "\n"
@@ -249,16 +254,22 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     n = len(indices)
     lines.append(f"  Masking {n} pixels ({100 * n / mask.size:.2f}%): {plan.summary()}")
     for xc, yc, radius in plan.leaks:
-        side = "above" if yc > (plan.beam.yc if plan.beam else 0) else "below"
+        below = yc < (plan.beam.yc if plan.beam else 0.0)
+        what = ("direct beam that fell past the stop" if below
+                else "leak above the stop (rim flare / short-wavelength end)")
         # NB: not `state` -- that is this function's SessionState parameter.
-        status = "masked" if plan.leaks_masked else (
-            f"[dim]not masked — add --leak, or --disc {xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
-        lines.append(f"    [yellow]•[/yellow] direct-beam leak {side} the stop at "
-                     f"({xc:.0f}, {yc:.0f}) mm, r {radius:.0f} mm — {status}")
-    if plan.beam is not None and plan.beam.source == "flare ring":
-        lines.append(f"    [dim]beam stop from the flare ring around it: ring r "
-                     f"{plan.beam.ring_radius:.0f} mm, stop edge where the flare "
-                     f"begins[/dim]")
+        if plan.leaks_masked and below:
+            status = "masked"
+        else:
+            hint = "add --leak, or " if below else ""
+            status = (f"[dim]not masked — {hint}--disc "
+                      f"{xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
+        lines.append(f"    [yellow]•[/yellow] {what} at ({xc:.0f}, {yc:.0f}) mm, "
+                     f"r {radius:.0f} mm — {status}")
+    if plan.beam is not None and plan.beam.source == "cross cut":
+        lines.append(f"    [dim]centre and size from cross cuts: the valley between "
+                     f"the flare walls is {plan.beam.valley_width:.0f} mm wide "
+                     f"horizontally[/dim]")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
@@ -306,8 +317,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
             "npix": plan.beam.npix, "units": "mm",
             "core_contrast": round(plan.beam.core_contrast, 3),
             "found_from": plan.beam.source,
-            "flare_ring_radius": (round(plan.beam.ring_radius, 1)
-                                  if plan.beam.ring_radius else None)}),
+            "valley_width_mm": (round(plan.beam.valley_width, 1)
+                                if plan.beam.valley_width else None)}),
         "leaks_mm": [{"xc": round(d[0], 1), "yc": round(d[1], 1), "r": round(d[2], 1)}
                      for d in plan.leaks] or None,
         "leaks_masked": plan.leaks_masked,

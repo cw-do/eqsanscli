@@ -93,43 +93,62 @@ above finds it.
 
 At long wavelength and long flight path the direct beam **falls under gravity**,
 by an amount going as the square of the wavelength, so some of it misses the stop
-and lands above or below it: on a 9 m 15 Å banjo, lobes of 350 and 190 counts
-against a plateau of 5, either side of an 8-count shadow. `/mask create` finds and
-reports these but does not mask them unless asked (`--leak`), since covering them
-costs low-Q coverage — a decision for the instrument scientist, not the tool.
+and lands above or below it: on a 9 m 15 Å banjo a broad
+lobe of ~200 counts sits 60 mm below the stop against a plateau of 1. `/mask
+create` finds and reports it but does not mask it unless asked (`--leak`), since
+covering it costs low-Q coverage — a decision for the instrument scientist, not
+the tool. `--leak` masks lobes **below** the stop, one disc each: neutrons fall,
+so fallen beam is below. A bright patch above the stop is rim flare or the
+short-wavelength end of the band, is an arc rather than a blob, and gets a
+`--disc` line to copy rather than a disc drawn round it.
 
-The beam stop is found from the **flare ring** around it. A stop is a dark disc
-ringed by brighter scattering, so the ring's centre is the stop's centre and the
-stop reaches to where the flare begins — taken as the 5th percentile of the ring
-pixels' distance from the fitted centre. The ring is fitted as a circle through
-flare pixels (local contrast > 1.6) within 150 mm of the shadow; restricting it to
-that neighbourhood matters, since unrestricted least squares is dragged off the
-detector by bright scattering elsewhere, and the ring must appear in at least six
-of the eight octants around its centre, or two lobes on one side would pass as a
-ring.
+The beam stop is measured from **cross cuts**, the procedure used by hand:
 
-This works precisely where measuring the dark patch fails. On the 9 m 15 Å banjo
-(run 186636) the shadow is filled in by halo and by the gravity-dropped beam
-landing inside it, so it reads as ~10 mm; the ring gives 45 mm, against a stop the
-instrument scientist measures at 90 mm across. What fills a shadow in leaves the
-ring alone. The shadow is still needed as a seed, and is found by **local**
-contrast — the image smoothed over ~5 pixels against ~41 — so a region qualifies
-by being darker than its own surroundings. A global threshold cannot serve both a
-bright run (core 12× below plateau) and a dim one (core ~2× below plateau, while
-Poisson noise at a median of 4 counts puts ~9% of the detector under any cut).
-Among dark regions, one whose own centroid does not lie inside it is discarded: it
-is a *ring* of low contrast surrounding a bright complex, an artefact of the
-41-pixel surround window including that complex. On run 186636 such a ring
-covered 3804 px over 385 × 376 mm and was otherwise chosen over the real 110 px
-shadow, putting the "beam centre" at the middle of the detector.
+1. a vertical cut through the stop gives the centre of the deep valley — the
+   centre's y;
+2. a horizontal cut through that y gives the centre's x;
+3. the **horizontal** valley width is the stop's diameter.
 
-Runs with no flare fall back to the shadow's own size — its equal-area radius or
-half its longest extent — grown by 1.2 to compensate a threshold that stops short
-of the true edge. A ring fit is *not* grown that way, because it measures the edge
-directly. Run 186104 (4 m, 2.5 Å) has no discernible flare and this path gives
-34 mm, matching the mask made by hand for that cycle. `/mask create` reports which
-of the two was used. When neither is credible the beam is **not masked** and the
-reason is reported; `--beam-center` and `--beam-radius` state it explicitly.
+A cut through the stop shows a valley between two walls of flare, and the wall's
+summit is the rim: flare is brightest just clear of the stop's edge. The width is
+taken from the horizontal cut alone, because vertically the direct beam that fell
+under gravity lands inside the shadow and makes it read narrow. Measured this way,
+run 186636 (9 m, 15 Å) gives an 80 mm valley against a stop the instrument
+scientist measures at 90 mm across, and run 186631 gives 66 mm at 4 m, where the
+mask made by hand for that cycle is 68 mm across — two configurations, two
+independent checks.
+
+Three details are load-bearing, each from a real failure:
+
+- The cut is anchored **on the beam**, not on the profile's minimum. Outside the
+  flare the detector plateau is *darker* than the filled-in shadow — 1 count
+  against 9 on 186636 — so the darkest point of the cut is 77 mm away from the
+  stop. The shadow is a local dip between two walls, not the darkest place around.
+- Cuts are sampled **per tube and per pixel row**, not binned by position: tubes
+  sit 5.49 mm apart but their index order interleaves packs of four, so binning at
+  the pitch aliases and moved the measured centre by 5 mm.
+- A wall's summit is read as the intensity-weighted centre of its brightest bins,
+  bounded to two bins either side. Unbounded, the vertical cut's lower wall — the
+  gravity-dropped beam, merged with the rim flare and far broader — pulls the
+  centre 6 mm down the detector.
+
+A side that rises onto the plateau and stays up is not a wall, and a run with no
+flare (186104 at 2.5 Å) is sized from the shadow instead: its equal-area radius or
+half its longest extent, grown by 1.2 to compensate a threshold that stops short
+of the rim. That path gives 34 mm on 186104, matching the mask made by hand for
+that cycle. A measured valley width is not grown that way.
+
+The shadow is still needed to seed the cuts, and is found by **local** contrast —
+the image smoothed over ~5 pixels against ~41 — so a region qualifies by being
+darker than its own surroundings. A global threshold cannot serve both a bright
+run (core 12× below plateau) and a dim one (core ~2× below plateau, while Poisson
+noise at a median of 4 counts puts ~9% of the detector under any cut). Among dark
+regions, one whose own centroid does not lie inside it is discarded: it is a *ring*
+of low contrast surrounding a bright complex, an artefact of the wide surround
+window. On run 186636 such a ring covered 3804 px over 385 × 376 mm and was
+otherwise chosen over the real 110 px shadow. When nothing credible is found the
+beam is **not masked** and the reason is reported; `--beam-center` and
+`--beam-radius` state it explicitly.
 
 **Detector geometry, measured from the instrument definition.** 192 tubes ×
 256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across

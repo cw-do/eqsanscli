@@ -395,17 +395,21 @@ def test_leaks_are_found_and_reported_but_not_masked_by_default():
     assert len(circles) == 1, circles
 
 
-def test_leak_option_masks_one_disc_per_lobe():
+def test_leak_option_masks_one_disc_per_dropped_lobe():
+    """One disc per lobe below the stop — gravity only drops the beam, so a lobe
+    above it is not what --leak is for (see test_leak_masks_only_what_fell_below
+    _the_stop)."""
     x_mm, y_mm = synthetic_positions()
     counts = _counts_with_gravity_streak()
     plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0,
                          mask_leaks=True)
     assert plan.leaks_masked is True
     circles = [sh for sh in plan.shapes if sh["type"] == "circle_mm"]
-    assert len(circles) == 1 + len(plan.leaks)      # the stop plus one per lobe
+    below = [d for d in plan.leaks if d[1] < plan.beam.yc]
+    assert len(circles) == 1 + len(below)           # the stop plus one per lobe
     mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
-    bright = counts > 250.0
-    assert (bright & ~mask).sum() == 0, int((bright & ~mask).sum())
+    dropped = (counts > 250.0) & (y_mm < plan.beam.yc)
+    assert (dropped & ~mask).sum() == 0, int((dropped & ~mask).sum())
 
 
 def test_a_clean_stop_reports_no_leaks():
@@ -547,7 +551,7 @@ def test_create_writes_files_without_mantid(monkeypatch=None):
             assert params["config"] == "9m15a"
             assert params["leaks_masked"] is False
             assert params["leaks_mm"] and len(params["leaks_mm"]) == 2
-            assert "direct-beam leak" in result.message
+            assert "fell past the stop" in result.message
     finally:
         ms.read_run_image, ms.write_mask, ms.resolve_run_file = original
     assert written["indices"] > 0
@@ -578,94 +582,121 @@ if __name__ == "__main__":
     sys.exit(1 if failures else 0)
 
 
-# --- the flare ring ---------------------------------------------------------
-# A beam stop is a dark disc ringed by a flare of increased intensity. The ring
-# is the better handle on the stop: it survives the two things that destroy the
-# shadow at long wavelength -- a halo that fills the penumbra, and the
-# gravity-dropped beam landing inside it.
+# --- cross cuts: how the stop is actually measured ------------------------
+# Take a horizontal and a vertical cut through the stop; the shadow is the valley
+# between two walls of flare, the wall summit is the rim (flare is brightest just
+# clear of the edge), so the valley width is the stop diameter. The centre comes
+# from both cuts, the width from the horizontal one only -- vertically the
+# gravity-dropped beam lands inside the shadow and makes it read narrow.
 
-def _counts_with_flare_ring(centre=(30.0, -15.0), stop_r=45.0, flare_r=62.0,
-                            fill=9.0):
-    """A halo-filled shadow: the core is barely darker than the plateau, but the
-    flare ring around it is unmistakable. Run 186636 in miniature."""
-    counts = synthetic_counts(dead_tube=None)
+def _counts_with_flare_walls(centre=(30.0, -15.0), stop_r=45.0, flare_r=62.0,
+                             fill=9.0, plateau=1.0, flare=200.0, lobe=None):
+    """Run 186636 in miniature, including the property that broke the previous
+    estimators: the detector plateau (1 count) is DARKER than the filled-in
+    shadow (9 counts), so the darkest point of a cut is nowhere near the stop."""
     x_mm, y_mm = synthetic_positions()
+    counts = np.full((ms.N_TUBES, ms.N_PIXELS), plateau)
     distance = np.hypot(x_mm - centre[0], y_mm - centre[1])
-    counts[distance <= flare_r] = 260.0            # the flare
-    counts[distance <= stop_r] = fill              # shadow, filled in by halo
+    counts[distance <= flare_r] = flare
+    counts[distance <= stop_r] = fill
+    if lobe is not None:                       # gravity-dropped beam below
+        lx, ly, lr, level = lobe
+        counts[np.hypot(x_mm - lx, y_mm - ly) <= lr] = level
     return counts
 
 
-def test_flare_ring_gives_the_centre_and_the_stop_edge():
+def test_cross_cuts_give_the_centre_and_the_valley_width():
     x_mm, y_mm = synthetic_positions()
-    counts = _counts_with_flare_ring()
+    beam, why = ms.find_beam_stop(_counts_with_flare_walls(), x_mm, y_mm)
+    assert beam is not None, why
+    assert beam.source == "cross cut", beam.source
+    assert math.hypot(beam.xc - 30.0, beam.yc + 15.0) < 8.0, (beam.xc, beam.yc)
+    # The synthetic flare is a uniform annulus from r 45 to 62, so its measured
+    # summit sits inside it rather than on the rim as a real flare's does; the
+    # width must land between the two, and must not under-mask the stop.
+    assert 90.0 <= beam.valley_width <= 124.0, beam.valley_width
+    assert beam.radius >= 45.0, beam.radius
+
+
+def test_the_cut_is_anchored_on_the_seed_not_on_the_darkest_point():
+    """The regression that mattered: outside the flare the plateau is lower than
+    the shadow floor, so anchoring on the profile minimum put the beam 77 mm
+    off."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_walls()
+    positions, values = ms.cut_along_x(counts, x_mm, y_mm, -15.0, ms.CUT_BAND_MM)
+    assert values[int(np.argmin(values))] < 9.0        # the minimum IS out on the plateau
+    walls = ms.valley_walls(positions, values, 30.0, 45.0)
+    assert walls is not None
+    assert abs((walls[0] + walls[1]) / 2.0 - 30.0) < 8.0, walls
+
+
+def test_a_broad_lobe_below_does_not_drag_the_centre_down():
+    """Gravity-dropped beam merges with the rim flare below the stop and is much
+    broader than it; reading a wall to its crest centroid moved the centre 6 mm
+    down the detector on run 186636."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_walls(lobe=(30.0, -85.0, 40.0, 150.0))
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
     assert beam is not None, why
-    assert beam.source == "flare ring", beam.source
-    assert math.hypot(beam.xc - 30.0, beam.yc + 15.0) < 10.0, (beam.xc, beam.yc)
-    # Sized from where the flare begins, so it lands just outside the 45 mm stop
-    # rather than on the shrunken visible shadow.
-    assert 43.0 < beam.radius < 56.0, beam.radius
-    assert beam.ring_radius > beam.radius
+    assert abs(beam.yc + 15.0) < 10.0, beam.yc
 
 
-def test_a_filled_shadow_is_not_undersized_when_a_ring_is_present():
-    """Without the ring this image reads as a ~10 mm stop; the point of the ring
-    is that it does not."""
-    x_mm, y_mm = synthetic_positions()
-    counts = _counts_with_flare_ring()
-    beam, _ = ms.find_beam_stop(counts, x_mm, y_mm)
-    assert beam.radius > 35.0, beam.radius
-
-
-def test_ring_sized_stop_is_not_grown_again_by_the_default_scale():
+def test_a_measured_width_is_not_grown_again_by_the_default_scale():
     """DEFAULT_BEAM_SCALE compensates a threshold that stops short of the edge.
-    The ring measures the edge, so applying it too would over-mask."""
+    A measured valley width needs no such fudge."""
     x_mm, y_mm = synthetic_positions()
-    counts = _counts_with_flare_ring()
+    counts = _counts_with_flare_walls()
     auto, _ = ms.find_beam_stop(counts, x_mm, y_mm)
-    explicit, _ = ms.find_beam_stop(counts, x_mm, y_mm,
-                                    scale=ms.DEFAULT_BEAM_SCALE)
+    explicit, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=ms.DEFAULT_BEAM_SCALE)
     assert explicit.radius > auto.radius * 1.15
 
 
-def test_an_explicit_beam_scale_still_applies_to_a_ring_fit():
+def test_an_explicit_beam_scale_still_applies_to_a_cross_cut():
     x_mm, y_mm = synthetic_positions()
-    counts = _counts_with_flare_ring()
+    counts = _counts_with_flare_walls()
     one, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
     two, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
     assert abs(two.radius - 2.0 * one.radius) < 1e-6
 
 
-def test_flare_on_one_side_only_does_not_move_the_beam_centre():
-    """Two bright lobes off to one side are not a ring: between them they reach
-    five octants and a circle can be drawn through them, so the guard that
-    matters is that the fitted centre must stay near the shadow."""
+def test_a_rise_onto_the_plateau_is_not_a_wall():
+    """A bright short run at 2.5 A has no flare: the cut rises to the plateau and
+    stays up. That is not a valley wall, and the shadow is sized directly."""
     x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts(dead_tube=None)
-    for x_lobe in (-40.0, 40.0):
-        counts[(x_mm - x_lobe) ** 2 + (y_mm - 80.0) ** 2 <= 20.0 ** 2] = 400.0
-    assert ms.fit_flare_ring(counts, x_mm, y_mm, 0.0, 0.0, 25.0) is None
+    positions, values = ms.cut_along_x(counts, x_mm, y_mm, 0.0, ms.CUT_BAND_MM)
+    assert ms.valley_walls(positions, values, 0.0, 25.0) is None
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
-    assert beam is not None, why
-    assert abs(beam.yc) < 20.0, beam.yc      # not dragged up to the lobes
-
-
-def test_distant_bright_scattering_does_not_drag_the_ring_fit():
-    """Unrestricted least squares wandered off the detector; the fit only sees
-    flare within FLARE_SEARCH_MM of the shadow."""
-    x_mm, y_mm = synthetic_positions()
-    counts = _counts_with_flare_ring()
-    counts[(x_mm + 400.0) ** 2 + y_mm ** 2 <= 40.0 ** 2] = 500.0   # far-off flare
-    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
-    assert beam is not None, why
-    assert math.hypot(beam.xc - 30.0, beam.yc + 15.0) < 20.0, (beam.xc, beam.yc)
-
-
-def test_a_clean_shadow_needs_no_ring():
-    """A bright short run at 2.5 A can have no flare at all -- the shadow is
-    unambiguous there, and detection must still work."""
-    x_mm, y_mm = synthetic_positions()
-    beam, why = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm)
     assert beam is not None, why
     assert beam.source == "shadow"
+
+
+def test_cuts_are_sampled_per_tube_and_per_pixel_row():
+    """Binning x at the 5.49 mm tube pitch aliases, because tube index order
+    interleaves packs of four; one point per tube has no such problem."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_walls()
+    positions, values = ms.cut_along_x(counts, x_mm, y_mm, -15.0, ms.CUT_BAND_MM)
+    assert len(positions) == ms.N_TUBES == len(values)
+    assert np.all(np.diff(positions) > 0)                     # ordered by x
+    positions, values = ms.cut_along_y(counts, x_mm, y_mm, 30.0, ms.CUT_BAND_MM)
+    assert len(positions) == ms.N_PIXELS == len(values)
+
+
+def test_leak_masks_only_what_fell_below_the_stop():
+    """Neutrons fall, so the leak worth masking is below. A bright arc above the
+    stop is rim flare, is not a disc, and a disc drawn round it over-masks."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_walls(lobe=(30.0, -85.0, 40.0, 150.0))
+    plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0,
+                         mask_leaks=True)
+    assert plan.beam is not None
+    masked_discs = [sh for sh in plan.shapes if sh["type"] == "circle_mm"]
+    assert all(sh["yc"] <= plan.beam.yc for sh in masked_discs), masked_discs
+    lower = [d for d in plan.leaks if d[1] < plan.beam.yc]
+    assert lower, plan.leaks
+    # and the lobe really is covered
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
+    lobe = np.hypot(x_mm - 30.0, y_mm + 85.0) <= 35.0
+    assert mask[lobe].all()

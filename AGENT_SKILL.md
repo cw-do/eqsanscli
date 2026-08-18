@@ -425,14 +425,16 @@ review and a `.params.json` recording how it was made. It masks the beam stop
 (masked as a circle in millimetres against real pixel positions), the low-response
 bands at both tube ends, and tubes deviating within their front/back pack of four.
 
-The stop is located from the **flare ring** around it: its centre is the ring's
-centre and it reaches to where the flare begins. That survives a shadow filled in
-by halo or by gravity-dropped beam, which at 9 m and 15 Å made the shadow read
-~10 mm against a stop 90 mm across. Runs with no flare fall back to the shadow
+The stop is measured from **cross cuts**, as it would be by hand: a vertical cut
+gives the centre's y (the deep valley), a horizontal cut through it gives the x,
+and the horizontal valley width — wall summit to wall summit — is the diameter.
+That survives a shadow filled in by halo or by gravity-dropped beam: at 9 m and
+15 Å it gives 80 mm against a stop 90 mm across, and at 4 m 66 mm against a 68 mm
+hand-made mask. Runs whose cuts have no flare walls fall back to the shadow
 itself, grown slightly; the report says which was used. Counting statistics still
 matter — ~90 counts/pixel is comfortable, ~4 is marginal. When neither estimator
 is credible the beam is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
-`--beam-radius <mm>` state it explicitly. `--dry-run` previews without writing,
+`--beam-radius <mm>` state it explicitly. `--leak` also masks the gravity-dropped beam below the stop, one disc per lobe. `--dry-run` previews without writing,
 `--tubes a,b` adds known-bad tubes (auto-detection is whole-tube, so a dead
 *segment* averages out), `--tube-sigma` tunes sensitivity. `/mask list` shows what
 is discoverable. Needs drtsans for the Mantid read/write.

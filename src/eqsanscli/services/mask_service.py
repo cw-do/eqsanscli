@@ -8,8 +8,8 @@ drtsans consumes — are shelled out to the `drtsans` command, the same mechanis
 
 What gets masked, in the spirit of how EQSANS masks have always been made:
 
-1. the **beam stop** — located from the flare ring around it (the shadow itself
-   only seeds that fit), with a small margin;
+1. the **beam stop** — measured from a horizontal and a vertical cut through it
+   (the shadow itself only seeds them), with a small margin;
 2. the **top and bottom pixel bands**, where response falls away at the tube
    ends (the long-standing convention is pixels 1-11 and 246-256, 1-based);
 3. **deviant tubes** — tubes that differ from their neighbours *of the same
@@ -54,29 +54,37 @@ N_SPECTRA = N_TUBES * N_PIXELS
 #: Defaults, chosen to reproduce masks of the kind used in recent cycles.
 #: Applied when only the shadow itself could be measured — a contrast threshold
 #: stops short of the true edge, so the fitted disc is grown a little. It is NOT
-#: applied when the flare ring was fitted, because that measures the edge
-#: directly (see `fit_flare_ring`).
+#: applied when the cuts measured the valley width directly (see
+#: `beam_from_cross_cuts`).
 DEFAULT_BEAM_SCALE = 1.2
 DEFAULT_BEAM_PAD = 1.0
-#: Flare ring. The beam stop is ringed by scattering brighter than the plateau,
-#: and that ring is a far better handle on the stop than the filled-in shadow is:
-#: its centre is the stop's centre, and where the flare *begins* is the stop's
-#: edge. Pixels this much brighter than their surroundings count as flare.
-FLARE_CONTRAST = 1.6
-#: Flare is looked for within this distance of the shadow, so that bright
-#: scattering elsewhere on the detector cannot join the circle fit — unrestricted,
-#: least squares wandered to a centre 187 mm off the face with a 213 mm radius.
-FLARE_SEARCH_MM = 150.0
-FLARE_MIN_PIXELS = 30
-#: The ring must appear in at least this many of the eight octants around the
-#: fitted centre — it has to go round the stop. Two bright lobes side by side
-#: reach five octants between them and would otherwise pass. Real rings do
-#: better: 8/8 on run 186636, 7/8 on 186631.
-FLARE_MIN_OCTANTS = 6
-#: The stop edge is where the flare starts: this percentile of the ring pixels'
-#: distances from the fitted centre. On run 186636 it gives 45.2 mm for a stop
-#: measured at 90 mm across.
-FLARE_EDGE_PERCENTILE = 5.0
+#: Cross cuts. The beam stop is measured the way it is judged by eye: take a
+#: horizontal and a vertical cut through it, and the shadow is the valley between
+#: the two flanking walls of flare. The wall *summit* is the stop's rim — flare is
+#: brightest just clear of the edge — so the valley width, peak to peak, is the
+#: stop diameter. Measured this way run 186636 gives 83 mm against a stop the
+#: instrument scientist measures at 90 mm, and run 186631 gives 66 mm at 4 m,
+#: where the mask made by hand for that cycle is 68 mm across.
+#: Half-width of the band of pixels averaged into a cut.
+CUT_BAND_MM = 30.0
+#: A wall counts as a wall of the valley when the profile rises this much above
+#: the valley floor ...
+CUT_WALL_MIN_RATIO = 1.5
+#: ... and then falls back to this fraction of its summit further out, which is
+#: what separates a flare peak from a plain rise onto the detector plateau. A run
+#: with no flare (186104 at 2.5 A) rises and stays up, and is sized from the
+#: shadow instead.
+CUT_WALL_DECAY = 0.6
+#: How far out from the floor to look for a wall.
+CUT_SEARCH_MM = 160.0
+#: A wall's summit is taken as the intensity-weighted centre of the bins within
+#: this fraction of its brightest bin, so a broad crest is not read to the bin.
+CUT_SUMMIT_LEVEL = 0.8
+#: ... over no more than this many bins either side of the brightest one. Without
+#: the bound, the vertical cut's lower wall — the gravity-dropped beam, merged
+#: with the rim flare and much broader than it — pulls the measured centre 6 mm
+#: down the detector.
+CUT_SUMMIT_BINS = 2
 
 DEFAULT_BAND_DROP = 0.5
 DEFAULT_TUBE_SIGMA = 5.0
@@ -190,8 +198,8 @@ class BeamStop:
     radius: float      # mm
     npix: int
     core_contrast: float = 0.0   # how dark the core is vs its surroundings
-    source: str = "shadow"       # "flare ring" when the ring gave centre + size
-    ring_radius: float = 0.0     # fitted flare radius, mm (0 when none was found)
+    source: str = "shadow"       # "cross cut" when the cuts gave centre + size
+    valley_width: float = 0.0    # measured valley width, mm (0 when not measured)
 
     def as_shape(self) -> dict:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
@@ -242,15 +250,102 @@ def local_contrast(counts: np.ndarray, x_mm: np.ndarray) -> np.ndarray:
     return (local / np.clip(surround, 1e-9, None))[np.argsort(order)]
 
 
-def _fit_circle(px: np.ndarray, py: np.ndarray) -> tuple[float, float, float]:
-    """Least-squares circle through scattered points (the algebraic/Kasa fit)."""
-    design = np.column_stack([px, py, np.ones_like(px)])
-    solution, *_ = np.linalg.lstsq(design, px ** 2 + py ** 2, rcond=None)
-    xc, yc = float(solution[0]) / 2.0, float(solution[1]) / 2.0
-    return xc, yc, float(math.sqrt(max(solution[2] + xc ** 2 + yc ** 2, 0.0)))
+def cut_along_y(counts: np.ndarray, x_mm: np.ndarray, y_mm: np.ndarray,
+                centre_x: float, band: float) -> tuple[np.ndarray, np.ndarray]:
+    """Vertical cut: mean counts per pixel row, over tubes within `band` of x."""
+    tube_x, pixel_y = x_mm[:, 0], y_mm[0, :]
+    tubes = np.abs(tube_x - centre_x) <= band
+    if int(tubes.sum()) < 3:
+        return np.empty(0), np.empty(0)
+    return pixel_y, counts[tubes, :].mean(axis=0)
 
 
-def fit_flare_ring(
+def cut_along_x(counts: np.ndarray, x_mm: np.ndarray, y_mm: np.ndarray,
+                centre_y: float, band: float) -> tuple[np.ndarray, np.ndarray]:
+    """Horizontal cut: mean counts per tube, over pixel rows within `band` of y.
+
+    Sampled per tube rather than binned by position: tubes sit 5.49 mm apart in x
+    but their *index* order interleaves packs of four, so binning at the pitch
+    aliases — some bins take two tubes and some none, which moved the measured
+    centre by 5 mm. One point per tube, ordered by x, has neither problem.
+    """
+    tube_x, pixel_y = x_mm[:, 0], y_mm[0, :]
+    rows = np.abs(pixel_y - centre_y) <= band
+    if int(rows.sum()) < 3:
+        return np.empty(0), np.empty(0)
+    order = np.argsort(tube_x)
+    return tube_x[order], counts[:, rows].mean(axis=1)[order]
+
+
+def _smooth1d(values: np.ndarray, window: int = 3) -> np.ndarray:
+    kernel = np.ones(window) / window
+    padded = np.pad(values, (window // 2, window // 2), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")[:len(values)]
+
+
+def _summit_centre(positions: np.ndarray, values: np.ndarray, summit_at: int,
+                   summit: float) -> float:
+    """Where a wall's summit is, to better than one bin.
+
+    The brightest single bin jitters by a bin width (5.5 mm across tubes), which
+    moves both the centre and the width; the crest is broad, so its
+    intensity-weighted centre is steadier. On run 186636 this is what brings the
+    measured centre to (10, 10) rather than (16, 10).
+    """
+    low = high = summit_at
+    while (low - 1 >= 0 and summit_at - (low - 1) <= CUT_SUMMIT_BINS
+           and values[low - 1] >= CUT_SUMMIT_LEVEL * summit):
+        low -= 1
+    while (high + 1 < len(values) and (high + 1) - summit_at <= CUT_SUMMIT_BINS
+           and values[high + 1] >= CUT_SUMMIT_LEVEL * summit):
+        high += 1
+    crest = values[low:high + 1]
+    return float(np.average(positions[low:high + 1], weights=crest))
+
+
+def valley_walls(positions: np.ndarray, values: np.ndarray, seed: float,
+                 search: float) -> Optional[tuple[float, float]]:
+    """Positions of the two walls flanking the shadow, or None if it has none.
+
+    Anchored ON the seed rather than on the profile minimum, because outside the
+    flare the detector plateau is *lower* than the shadow floor — 1 count against
+    9 on run 186636 — so the darkest point of the cut is 77 mm away from the stop.
+    The shadow is a local dip between two walls, not the darkest place around.
+
+    A wall is taken at its summit, where the flare is brightest, since that is
+    where the stop's rim is. A side that rises and stays up is the plateau, not a
+    wall, and disqualifies the measurement (the caller then sizes the shadow
+    directly).
+    """
+    if len(positions) < 5:
+        return None
+    smoothed = _smooth1d(values)
+    near = np.abs(positions - seed) <= max(search, 15.0)
+    if not near.any():
+        return None
+    anchor = int(np.arange(len(positions))[near][np.argmin(smoothed[near])])
+    floor = float(smoothed[anchor])
+
+    walls = []
+    for direction in (-1, +1):
+        index, summit, summit_at, decayed = anchor, floor, anchor, False
+        while (0 <= index + direction < len(positions)
+               and abs(positions[index + direction] - positions[anchor]) < CUT_SEARCH_MM):
+            index += direction
+            if smoothed[index] > summit:
+                summit, summit_at = float(smoothed[index]), index
+            elif (smoothed[index] < CUT_WALL_DECAY * summit
+                  and abs(positions[index] - positions[anchor]) > 20.0):
+                decayed = True
+                break
+        if not decayed or summit < CUT_WALL_MIN_RATIO * max(floor, 0.5):
+            return None
+        walls.append(_summit_centre(positions, smoothed, summit_at, summit))
+    low, high = sorted(walls)
+    return low, high
+
+
+def beam_from_cross_cuts(
     counts: np.ndarray,
     x_mm: np.ndarray,
     y_mm: np.ndarray,
@@ -258,50 +353,35 @@ def fit_flare_ring(
     seed_y: float,
     seed_radius: float,
     *,
-    contrast: Optional[np.ndarray] = None,
-) -> Optional[tuple[float, float, float, float, int, int]]:
-    """Fit the bright ring around the beam stop; returns centre, edge and ring.
+    band: float = CUT_BAND_MM,
+) -> Optional[tuple[float, float, float]]:
+    """Centre and radius of the beam stop from a vertical and a horizontal cut.
 
-    This is how these masks are judged by eye: the stop is a dark disc ringed by
-    a flare of increased intensity, so the ring's centre is the stop's centre and
-    the stop is slightly smaller than the ring. It succeeds exactly where
-    measuring the shadow fails — at long wavelength the halo and the
-    gravity-dropped beam fill the shadow in, but they *are* the ring.
+    The procedure an instrument scientist uses by hand, in order:
 
-    Returns `(xc, yc, edge_radius, ring_radius, npix, octants)`, or None when no
-    credible ring is present (a bright short run at 2.5 A can have none, and then
-    the shadow is unambiguous anyway).
+    1. a **vertical** cut gives the centre of the deep valley -> the centre's y;
+    2. a **horizontal** cut through that y gives the centre's x, and
+    3. the **horizontal** valley width is the stop's diameter.
+
+    The width is taken from the horizontal cut only. Vertically the shadow is
+    encroached on by the direct beam that fell under gravity, which lands inside
+    it and makes it read narrow; horizontally nothing moves, so the width there is
+    the stop's own.
+
+    Returns (xc, yc, radius) in mm, or None when either cut has no flare walls.
     """
-    if contrast is None:
-        contrast = local_contrast(counts, x_mm)
-
-    seed_distance = np.hypot(x_mm - seed_x, y_mm - seed_y)
-    flare = ((contrast > FLARE_CONTRAST)
-             & (seed_distance < FLARE_SEARCH_MM)
-             & (seed_distance > 0.5 * seed_radius))
-    if int(flare.sum()) < FLARE_MIN_PIXELS:
+    vertical = cut_along_y(counts, x_mm, y_mm, seed_x, band)
+    walls = valley_walls(*vertical, seed_y, seed_radius)
+    if walls is None:
         return None
+    yc = (walls[0] + walls[1]) / 2.0
 
-    px, py = x_mm[flare], y_mm[flare]
-    xc, yc, ring = seed_x, seed_y, seed_radius
-    for _ in range(5):
-        xc, yc, ring = _fit_circle(px, py)
-        distance = np.hypot(px - xc, py - yc)
-        keep = np.abs(distance - ring) < max(0.30 * ring, 15.0)
-        if int(keep.sum()) < 20:
-            break
-        px, py = px[keep], py[keep]
-    if len(px) < FLARE_MIN_PIXELS or not np.isfinite([xc, yc, ring]).all():
+    horizontal = cut_along_x(counts, x_mm, y_mm, yc, band)
+    walls = valley_walls(*horizontal, seed_x, seed_radius)
+    if walls is None:
         return None
-
-    angle = np.degrees(np.arctan2(py - yc, px - xc)) % 360.0
-    octants = len(set((angle // 45).astype(int)))
-    if octants < FLARE_MIN_OCTANTS:
-        return None
-
-    distance = np.hypot(px - xc, py - yc)
-    edge = float(np.percentile(distance, FLARE_EDGE_PERCENTILE))
-    return xc, yc, edge, float(ring), int(len(px)), octants
+    xc = (walls[0] + walls[1]) / 2.0
+    return xc, yc, (walls[1] - walls[0]) / 2.0
 
 
 def find_beam_stop(
@@ -399,22 +479,24 @@ def find_beam_stop(
     radius = max(math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi),
                  max(extent_x, extent_y) / 2.0)
 
-    # Prefer the flare ring: the shadow above is only a seed for it. Where both
-    # work they agree; where they differ the ring is right, because what fills a
-    # shadow in (halo, gravity-dropped beam) leaves the ring alone.
-    source, ring_radius = "shadow", 0.0
-    ring_fit = fit_flare_ring(counts, x_mm, y_mm, xc, yc, radius, contrast=contrast)
-    if ring_fit is not None:
-        ring_x, ring_y, ring_edge, ring_radius, _ring_px, _octants = ring_fit
-        if (math.hypot(ring_x - xc, ring_y - yc) < 2.0 * max(radius, 20.0)
-                and ring_edge <= max_radius_mm):
-            xc, yc, radius, source = ring_x, ring_y, ring_edge, "flare ring"
+    # Prefer the cross cuts: the shadow above is only a seed for them. They put
+    # the centre where the valley actually is and take the size from the valley's
+    # own width, which is what survives a shadow filled in by halo or by the
+    # gravity-dropped beam. On run 186636 the fitted blob sat 14 mm low.
+    source, valley_width = "shadow", 0.0
+    cuts = beam_from_cross_cuts(counts, x_mm, y_mm, xc, yc, radius)
+    if cuts is not None:
+        cut_x, cut_y, cut_radius = cuts
+        if (math.hypot(cut_x - xc, cut_y - yc) < 2.0 * max(radius, 20.0)
+                and 6.0 < cut_radius <= max_radius_mm):
+            xc, yc, radius = cut_x, cut_y, cut_radius
+            source, valley_width = "cross cut", 2.0 * cut_radius
 
     # The 1.2 growth compensates a threshold that stops short of the true edge;
-    # the ring measures that edge, so it is not grown again. An explicit
-    # --beam-scale always wins.
+    # a measured valley width needs no such fudge. An explicit --beam-scale
+    # always wins.
     if scale is None:
-        scale = 1.0 if source == "flare ring" else DEFAULT_BEAM_SCALE
+        scale = 1.0 if source == "cross cut" else DEFAULT_BEAM_SCALE
 
     distance = np.hypot(x_mm - xc, y_mm - yc)
     core = distance < max(6.0, 1.5 * pitch)
@@ -428,14 +510,15 @@ def find_beam_stop(
         return None, (f"the darkest region is {off_centre:.0f} mm from the detector centre, "
                       f"too far out to be the beam stop")
 
-    if core_contrast > NO_SHADOW_CONTRAST and source != "flare ring":
+    if core_contrast > NO_SHADOW_CONTRAST and source != "cross cut":
         return None, (f"the darkest region is only {1 / max(core_contrast, 1e-9):.2f}x darker "
                       f"than its surroundings — no beam stop is discernible in this image")
 
     beam = BeamStop(xc=xc, yc=yc, radius=radius * scale + pad * pitch, npix=npix,
-                    core_contrast=core_contrast, source=source, ring_radius=ring_radius)
-    if source == "flare ring":
-        return beam, ""      # sized from the ring: the shallow-core caveat is moot
+                    core_contrast=core_contrast, source=source,
+                    valley_width=valley_width)
+    if source == "cross cut":
+        return beam, ""      # measured width: the shallow-core caveat is moot
     if core_contrast > SHALLOW_CORE_CONTRAST:
         return beam, (
             f"the shadow is shallow (core only {1 / max(core_contrast, 1e-9):.1f}x darker "
@@ -623,8 +706,9 @@ class MaskPlan:
                 f"beam stop at ({self.beam.xc:.1f}, {self.beam.yc:.1f}) mm, "
                 f"r {self.beam.radius:.1f} mm"
             )
-            if self.leaks and self.leaks_masked:
-                bits.append(f"{len(self.leaks)} direct-beam leak disc(s)")
+            below = [d for d in self.leaks if d[1] < self.beam.yc]
+            if below and self.leaks_masked:
+                bits.append(f"{len(below)} gravity-dropped beam disc(s)")
         if self.bottom or self.top:
             bits.append(f"edge bands {self.bottom} bottom / {self.top} top")
         if self.tubes:
@@ -682,9 +766,16 @@ def build_plan(
             plan.leaks = find_direct_beam_leaks(counts, x_mm, y_mm, plan.beam)
             plan.leaks_masked = bool(mask_leaks and plan.leaks)
             if mask_leaks:
+                # Only lobes BELOW the stop. Neutrons fall in flight, so the beam
+                # that misses the stop is the beam that fell past it; a bright
+                # patch above the stop is rim flare or the short-wavelength end of
+                # the band, is an arc rather than a blob, and a disc covering it
+                # over-masks badly (r 61 mm reaching y +112 on run 186636). It is
+                # reported with its own --disc line instead.
                 for xc, yc, radius in plan.leaks:
-                    plan.shapes.append({"type": "circle_mm", "xc": xc, "yc": yc,
-                                        "r": radius})
+                    if yc < plan.beam.yc:
+                        plan.shapes.append({"type": "circle_mm", "xc": xc,
+                                            "yc": yc, "r": radius})
 
     auto_bottom, auto_top = find_edge_bands(counts, drop=band_drop)
     plan.bottom = max(auto_bottom, min_band) if bottom is None else int(bottom)
