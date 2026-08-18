@@ -93,7 +93,7 @@ but the result is not what most experiments intend.
 Every sample row has a background scattering run, except the background sample
 itself (EMP-03) and experiments that deliberately measure no background.
 
-**TBL-04** · warning · unenforced
+**TBL-04** · warning · enforced (`services/protocol.py`)
 `bkgtrans` is present whenever `bkg` is. A background subtracted without its own
 transmission correction is inconsistent with how the sample was treated.
 
@@ -101,7 +101,7 @@ transmission correction is inconsistent with how the sample was treated.
 Thickness is a positive number. Typical range 0.01–1 cm; outside that, suspect a
 unit error. Default when unstated: 0.1 cm.
 
-**TBL-06** · blocking · unenforced
+**TBL-06** · blocking · enforced (`services/protocol.py`)
 A run appears in only one role per configuration. The same run used as both
 sample and background, or as both transmission and empty beam, is an error.
 
@@ -116,11 +116,11 @@ while belonging to another.
 
 See `background-selection.md` for how to choose one.
 
-**BKG-01** · blocking · unenforced
+**BKG-01** · blocking · enforced (`services/protocol.py`)
 The background run is from the same configuration as the row it serves.
 `/assign bkg` guarantees this by construction; a manual per-row `/set` can break it.
 
-**BKG-02** · blocking · unenforced
+**BKG-02** · blocking · enforced (`services/protocol.py`)
 A row's background is not the row's own scattering run.
 
 **BKG-03** · warning · unenforced
@@ -237,7 +237,7 @@ experiment. Nothing compares a stored mask against the run it is about to serve.
 
 See `configurations.md` for values and rationale.
 
-**CFG-01** · blocking · unenforced
+**CFG-01** · blocking · enforced (`services/protocol.py`)
 `qmin < qmax`, and both lie inside the Q range the configuration can actually
 measure.
 
@@ -309,6 +309,12 @@ absolute scale rather than a stitching problem. Threshold: **TBD**.
 
 Rules marked **TBD** need a number: CAT-07 (durations), SCL-03 (scale-factor
 range), STC-05 (stitch scale-factor tolerance). Rules marked `unenforced` are the
-backlog for the `/review` validators — MSK-10 and MSK-11 among them, both of which
-need a decision from the instrument scientist about what "reviewed" and "changed"
-should mean mechanically.
+backlog, and `services/protocol.py:unenforced_rules()` lists them from code so the
+backlog cannot rot unnoticed. MSK-10 and MSK-11 are among them: both need a
+decision from the instrument scientist about what "reviewed" and "changed" should
+mean mechanically.
+
+The rules `services/protocol.py` checks are decidable from session state alone.
+The rest need a run's metadata, the reduced output, or a judgement — `check()`
+running clean does **not** mean the protocol is satisfied, only that the
+mechanical part is.

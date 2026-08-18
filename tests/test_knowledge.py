@@ -178,9 +178,10 @@ def test_knowledge_agrees_with_the_code_on_the_band_floor():
     """MSK-05: measured, then floored at the 11-pixel convention."""
     import numpy as np
 
+    from eqsanscli.services import detector as det
     from eqsanscli.services import mask_service as ms
 
-    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts = np.ones((det.N_TUBES, det.N_PIXELS)) * 100.0
     counts[:, :3] = 0.0                      # a run whose ends fall off early
     plan = ms.build_plan(counts)
     assert plan.bottom == ms.DEFAULT_MIN_BAND == 11
@@ -193,7 +194,9 @@ def test_knowledge_agrees_with_the_code_that_a_bad_beam_stop_is_refused():
 
     from eqsanscli.services import mask_service as ms
 
-    noise = np.random.default_rng(0).poisson(4.0, size=(ms.N_TUBES, ms.N_PIXELS))
+    from eqsanscli.services import detector as det
+
+    noise = np.random.default_rng(0).poisson(4.0, size=(det.N_TUBES, det.N_PIXELS))
     beam, why = ms.find_beam_stop(noise.astype(float), *_synthetic_positions())
     assert beam is None and why
     assert "MSK-02" in _text(KNOWLEDGE_DIR / "protocol.md")
@@ -212,21 +215,21 @@ def _synthetic_positions():
     """Real layout: y linear in pixel index, x interleaved in packs of four."""
     import numpy as np
 
-    from eqsanscli.services import mask_service as ms
+    from eqsanscli.services import detector as det
 
-    order = np.empty(ms.N_TUBES, dtype=int)
+    order = np.empty(det.N_TUBES, dtype=int)
     slot = 0
-    for block in range(0, ms.N_TUBES, 8):
-        for offset in range(ms.TUBE_PACK):
+    for block in range(0, det.N_TUBES, 8):
+        for offset in range(det.TUBE_PACK):
             for pack in (0, 1):
-                tube = block + pack * ms.TUBE_PACK + offset
-                if tube < ms.N_TUBES:
+                tube = block + pack * det.TUBE_PACK + offset
+                if tube < det.N_TUBES:
                     order[tube] = slot
                     slot += 1
-    x = (order - (ms.N_TUBES - 1) / 2.0) * 5.49
-    y = (np.arange(ms.N_PIXELS) - (ms.N_PIXELS - 1) / 2.0) * 4.09
-    return (np.repeat(x[:, None], ms.N_PIXELS, axis=1),
-            np.repeat(y[None, :], ms.N_TUBES, axis=0))
+    x = (order - (det.N_TUBES - 1) / 2.0) * 5.49
+    y = (np.arange(det.N_PIXELS) - (det.N_PIXELS - 1) / 2.0) * 4.09
+    return (np.repeat(x[:, None], det.N_PIXELS, axis=1),
+            np.repeat(y[None, :], det.N_TUBES, axis=0))
 
 
 # --- migration ------------------------------------------------------------

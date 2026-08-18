@@ -21,7 +21,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from eqsanscli.services import detector as det
 from eqsanscli.services import mask_service as ms
+from eqsanscli.services import run_files as rf
 
 TRUE_BEAM_X, TRUE_BEAM_Y, TRUE_BEAM_R = 91.0, 131.0, 6.0
 # Real geometry, measured from the EQ-SANS instrument definition.
@@ -38,32 +40,32 @@ def synthetic_positions() -> tuple[np.ndarray, np.ndarray]:
     NOT a spatial coordinate — the property that makes an index-space circle
     wrong.
     """
-    order = np.empty(ms.N_TUBES, dtype=int)
+    order = np.empty(det.N_TUBES, dtype=int)
     slot = 0
-    for block in range(0, ms.N_TUBES, 8):
-        for offset in range(ms.TUBE_PACK):
+    for block in range(0, det.N_TUBES, 8):
+        for offset in range(det.TUBE_PACK):
             for pack in (0, 1):
-                tube = block + pack * ms.TUBE_PACK + offset
-                if tube < ms.N_TUBES:
+                tube = block + pack * det.TUBE_PACK + offset
+                if tube < det.N_TUBES:
                     order[tube] = slot
                     slot += 1
-    x = (order - (ms.N_TUBES - 1) / 2.0) * TUBE_PITCH_MM
-    y = (np.arange(ms.N_PIXELS) - (ms.N_PIXELS - 1) / 2.0) * PIXEL_PITCH_MM
-    return (np.repeat(x[:, None], ms.N_PIXELS, axis=1),
-            np.repeat(y[None, :], ms.N_TUBES, axis=0))
+    x = (order - (det.N_TUBES - 1) / 2.0) * TUBE_PITCH_MM
+    y = (np.arange(det.N_PIXELS) - (det.N_PIXELS - 1) / 2.0) * PIXEL_PITCH_MM
+    return (np.repeat(x[:, None], det.N_PIXELS, axis=1),
+            np.repeat(y[None, :], det.N_TUBES, axis=0))
 
 
 def synthetic_counts(dead_tube: int | None = DEAD_TUBE) -> np.ndarray:
     """A believable EQSANS image: 4-tube front/back packs, dead ends, beam stop."""
     rng = np.random.default_rng(0)
-    counts = rng.normal(100.0, 3.0, size=(ms.N_TUBES, ms.N_PIXELS))
+    counts = rng.normal(100.0, 3.0, size=(det.N_TUBES, det.N_PIXELS))
 
     # Front/back packs of four differ in level, as the real detector does.
-    packs = (np.arange(ms.N_TUBES) // ms.TUBE_PACK) % 2
+    packs = (np.arange(det.N_TUBES) // det.TUBE_PACK) % 2
     counts[packs == 1] *= 0.65
 
     # Response falls away over the last few pixels at each end.
-    ramp = np.ones(ms.N_PIXELS)
+    ramp = np.ones(det.N_PIXELS)
     ramp[:TRUE_BAND] = np.linspace(0.0, 0.35, TRUE_BAND)
     ramp[-TRUE_BAND:] = np.linspace(0.35, 0.0, TRUE_BAND)
     counts *= ramp[None, :]
@@ -81,13 +83,13 @@ def synthetic_counts(dead_tube: int | None = DEAD_TUBE) -> np.ndarray:
 # --- counts ---------------------------------------------------------------
 
 def test_reshape_accepts_a_detector_image():
-    counts = ms.reshape_counts(synthetic_counts().reshape(-1))
-    assert counts.shape == (ms.N_TUBES, ms.N_PIXELS)
+    counts = det.reshape_counts(synthetic_counts().reshape(-1))
+    assert counts.shape == (det.N_TUBES, det.N_PIXELS)
 
 
 def test_reshape_rejects_the_wrong_size():
     try:
-        ms.reshape_counts(np.zeros(1000))
+        det.reshape_counts(np.zeros(1000))
     except ValueError as exc:
         assert "49152" in str(exc)
     else:
@@ -97,8 +99,8 @@ def test_reshape_rejects_the_wrong_size():
 def test_reshape_recovers_pixel_major_ordering():
     """If a future Mantid version hands back the transpose, say so and cope."""
     truth = synthetic_counts()
-    recovered = ms.reshape_counts(truth.T.reshape(-1))
-    assert recovered.shape == (ms.N_TUBES, ms.N_PIXELS)
+    recovered = det.reshape_counts(truth.T.reshape(-1))
+    assert recovered.shape == (det.N_TUBES, det.N_PIXELS)
     assert np.allclose(recovered, truth)
 
 
@@ -129,7 +131,7 @@ def test_noise_alone_never_yields_a_beam_stop():
     below any global threshold, and a single-pass centroid returned a 70 mm
     circle nowhere near the beam."""
     rng = np.random.default_rng(1)
-    counts = rng.poisson(4.0, size=(ms.N_TUBES, ms.N_PIXELS)).astype(float)
+    counts = rng.poisson(4.0, size=(det.N_TUBES, det.N_PIXELS)).astype(float)
     x_mm, y_mm = synthetic_positions()
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
     assert beam is None, (beam, why)
@@ -137,7 +139,7 @@ def test_noise_alone_never_yields_a_beam_stop():
 
 
 def test_an_implausibly_large_detection_is_refused():
-    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts = np.ones((det.N_TUBES, det.N_PIXELS)) * 100.0
     counts[40:150, 40:210] = 1.0          # a quarter of the detector "dark"
     x_mm, y_mm = synthetic_positions()
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
@@ -156,7 +158,7 @@ def test_explicit_beam_center_and_radius_are_used_verbatim():
 
 
 def test_pixel_pitch_matches_the_real_detector():
-    assert abs(ms.pixel_pitch_y_mm(synthetic_positions()[1]) - PIXEL_PITCH_MM) < 0.01
+    assert abs(det.pixel_pitch_y_mm(synthetic_positions()[1]) - PIXEL_PITCH_MM) < 0.01
 
 
 def test_masked_beam_region_is_a_disc_on_the_detector():
@@ -168,7 +170,7 @@ def test_masked_beam_region_is_a_disc_on_the_detector():
     plan = ms.build_plan(counts, x_mm, y_mm)
     beam_only = ms.shapes_to_mask([plan.beam.as_shape()], x_mm, y_mm)
 
-    area = beam_only.sum() * ms.pixel_area_mm2(x_mm, y_mm)
+    area = beam_only.sum() * det.pixel_area_mm2(x_mm, y_mm)
     expected = math.pi * plan.beam.radius ** 2
     assert abs(area - expected) / expected < 0.15, (area, expected)
 
@@ -197,7 +199,7 @@ def test_beam_needs_positions():
 
 def test_pixel_area_matches_the_real_detector():
     x_mm, y_mm = synthetic_positions()
-    area = ms.pixel_area_mm2(x_mm, y_mm)
+    area = det.pixel_area_mm2(x_mm, y_mm)
     assert abs(area - TUBE_PITCH_MM * PIXEL_PITCH_MM) < 0.5, area
 
 
@@ -231,8 +233,8 @@ def test_a_halo_across_the_centre_does_not_condemn_whole_tubes():
     x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts(dead_tube=None)
     # a broad bright halo across the middle of every tube
-    pixels = np.arange(ms.N_PIXELS)[None, :]
-    halo = np.abs(pixels - ms.N_PIXELS // 2) < 25
+    pixels = np.arange(det.N_PIXELS)[None, :]
+    halo = np.abs(pixels - det.N_PIXELS // 2) < 25
     counts = counts + halo * 400.0
 
     by_mean = np.mean(counts[:, 11:245], axis=1)
@@ -244,7 +246,7 @@ def test_a_halo_across_the_centre_does_not_condemn_whole_tubes():
 def test_tubes_are_not_judged_when_counts_are_too_low():
     """At ~1 count per pixel a dead tube and an unlucky one look identical."""
     rng = np.random.default_rng(3)
-    counts = rng.poisson(1.0, size=(ms.N_TUBES, ms.N_PIXELS)).astype(float)
+    counts = rng.poisson(1.0, size=(det.N_TUBES, det.N_PIXELS)).astype(float)
     tubes, note = ms.find_deviant_tubes(counts, bottom=11, top=11)
     assert tubes == []
     assert "too low to judge" in note, note
@@ -272,12 +274,12 @@ def test_tube_grouping_is_by_packs_not_parity():
     """
     counts = synthetic_counts()
     totals = counts[:, TRUE_BAND:-TRUE_BAND].mean(axis=1)
-    by_pack = (np.arange(ms.N_TUBES) // ms.TUBE_PACK) % 2
+    by_pack = (np.arange(det.N_TUBES) // det.TUBE_PACK) % 2
     spread_pack = np.mean([
         np.median(np.abs(totals[by_pack == g] - np.median(totals[by_pack == g])))
         for g in (0, 1)
     ])
-    by_parity = np.arange(ms.N_TUBES) % 2
+    by_parity = np.arange(det.N_TUBES) % 2
     spread_parity = np.mean([
         np.median(np.abs(totals[by_parity == g] - np.median(totals[by_parity == g])))
         for g in (0, 1)
@@ -301,8 +303,8 @@ def test_shapes_render_and_index_as_tube_major():
     assert mask[3].all() and not mask[4].any()
     indices = ms.mask_to_indices(mask)
     # index = tube * N_PIXELS + pixel, verified against run 186104
-    assert indices[0] == 3 * ms.N_PIXELS
-    assert len(indices) == ms.N_PIXELS
+    assert indices[0] == 3 * det.N_PIXELS
+    assert len(indices) == det.N_PIXELS
 
 
 def test_full_plan_masks_a_plausible_fraction():
@@ -323,7 +325,7 @@ def test_disc_masks_where_asked_and_is_round():
     mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
     assert abs(float(x_mm[mask].mean()) - 100.0) < 3.0
     assert abs(float(y_mm[mask].mean()) + 50.0) < 3.0
-    area = mask.sum() * ms.pixel_area_mm2(x_mm, y_mm)
+    area = mask.sum() * det.pixel_area_mm2(x_mm, y_mm)
     assert abs(area - math.pi * 400) / (math.pi * 400) < 0.1, area
 
 
@@ -342,8 +344,8 @@ def test_several_discs_compose():
 
 def test_disc_off_the_detector_is_detected():
     x_mm, y_mm = synthetic_positions()
-    assert ms.disc_is_on_detector(100.0, -50.0, 20.0, x_mm, y_mm)
-    assert not ms.disc_is_on_detector(900.0, 900.0, 20.0, x_mm, y_mm)
+    assert det.disc_is_on_detector(100.0, -50.0, 20.0, x_mm, y_mm)
+    assert not det.disc_is_on_detector(900.0, 900.0, 20.0, x_mm, y_mm)
 
 
 def test_disc_option_parsing():
@@ -359,7 +361,7 @@ def test_disc_option_parsing():
 def test_preview_axes_run_left_to_right():
     """Tubes are ordered by ascending x so the plotted mm axis reads normally."""
     x_mm, _ = synthetic_positions()
-    order = ms.physical_tube_order(x_mm)
+    order = det.physical_tube_order(x_mm)
     ordered = x_mm[order][:, 0]
     assert np.all(np.diff(ordered) > 0)
 
@@ -474,7 +476,7 @@ def test_filename_starts_with_mask_so_the_resolver_globs_it():
 
 
 def test_resolve_run_file_reports_where_it_looked():
-    path, searched = ms.resolve_run_file("999999", 12345)
+    path, searched = rf.resolve_run_file("999999", 12345)
     assert path is None
     assert any("IPTS-12345" in s for s in searched)
 
@@ -533,9 +535,9 @@ def test_create_writes_files_without_mantid(monkeypatch=None):
         return {"mask_file": mask_path, "n_requested": len(indices),
                 "n_masked_readback": len(indices)}, ""
 
-    original = (ms.read_run_image, ms.write_mask, ms.resolve_run_file)
+    original = (ms.read_run_image, ms.write_mask, rf.resolve_run_file)
     ms.read_run_image, ms.write_mask = fake_read, fake_write
-    ms.resolve_run_file = lambda run, ipts=None: ("/fake/EQSANS_186636.nxs.h5", [])
+    rf.resolve_run_file = lambda run, ipts=None: ("/fake/EQSANS_186636.nxs.h5", [])
     try:
         with tempfile.TemporaryDirectory() as outdir:
             state = SessionState()
@@ -554,7 +556,7 @@ def test_create_writes_files_without_mantid(monkeypatch=None):
             assert params["leaks_mm"] and len(params["leaks_mm"]) == 2
             assert "fell past the stop" in result.message
     finally:
-        ms.read_run_image, ms.write_mask, ms.resolve_run_file = original
+        ms.read_run_image, ms.write_mask, rf.resolve_run_file = original
     assert written["indices"] > 0
 
 
@@ -596,7 +598,7 @@ def _counts_with_flare_walls(centre=(30.0, -15.0), stop_r=45.0, flare_r=62.0,
     estimators: the detector plateau (1 count) is DARKER than the filled-in
     shadow (9 counts), so the darkest point of a cut is nowhere near the stop."""
     x_mm, y_mm = synthetic_positions()
-    counts = np.full((ms.N_TUBES, ms.N_PIXELS), plateau)
+    counts = np.full((det.N_TUBES, det.N_PIXELS), plateau)
     distance = np.hypot(x_mm - centre[0], y_mm - centre[1])
     counts[distance <= flare_r] = flare
     counts[distance <= stop_r] = fill
@@ -625,9 +627,9 @@ def test_the_cut_is_anchored_on_the_seed_not_on_the_darkest_point():
     off."""
     x_mm, y_mm = synthetic_positions()
     counts = _counts_with_flare_walls()
-    positions, values = ms.cut_along_x(counts, x_mm, y_mm, -15.0, ms.CUT_BAND_MM)
+    positions, values = det.cut_along_x(counts, x_mm, y_mm, -15.0, det.CUT_BAND_MM)
     assert values[int(np.argmin(values))] < 9.0        # the minimum IS out on the plateau
-    walls = ms.valley_walls(positions, values, 30.0, 45.0)
+    walls = det.valley_walls(positions, values, 30.0, 45.0)
     assert walls is not None
     assert abs((walls[0] + walls[1]) / 2.0 - 30.0) < 8.0, walls
 
@@ -666,8 +668,8 @@ def test_a_rise_onto_the_plateau_is_not_a_wall():
     stays up. That is not a valley wall, and the shadow is sized directly."""
     x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts(dead_tube=None)
-    positions, values = ms.cut_along_x(counts, x_mm, y_mm, 0.0, ms.CUT_BAND_MM)
-    assert ms.valley_walls(positions, values, 0.0, 25.0) is None
+    positions, values = det.cut_along_x(counts, x_mm, y_mm, 0.0, det.CUT_BAND_MM)
+    assert det.valley_walls(positions, values, 0.0, 25.0) is None
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
     assert beam is not None, why
     assert beam.source == "shadow"
@@ -678,11 +680,11 @@ def test_cuts_are_sampled_per_tube_and_per_pixel_row():
     interleaves packs of four; one point per tube has no such problem."""
     x_mm, y_mm = synthetic_positions()
     counts = _counts_with_flare_walls()
-    positions, values = ms.cut_along_x(counts, x_mm, y_mm, -15.0, ms.CUT_BAND_MM)
-    assert len(positions) == ms.N_TUBES == len(values)
+    positions, values = det.cut_along_x(counts, x_mm, y_mm, -15.0, det.CUT_BAND_MM)
+    assert len(positions) == det.N_TUBES == len(values)
     assert np.all(np.diff(positions) > 0)                     # ordered by x
-    positions, values = ms.cut_along_y(counts, x_mm, y_mm, 30.0, ms.CUT_BAND_MM)
-    assert len(positions) == ms.N_PIXELS == len(values)
+    positions, values = det.cut_along_y(counts, x_mm, y_mm, 30.0, det.CUT_BAND_MM)
+    assert len(positions) == det.N_PIXELS == len(values)
 
 
 def test_leak_masks_only_what_fell_below_the_stop():
@@ -735,8 +737,8 @@ def test_index_ticks_come_from_the_real_geometry():
     Positions are looked up, never computed, because tube index is not linear in
     x — and on the real detector it runs the other way, 191 at the -x edge."""
     x_mm, y_mm = synthetic_positions()
-    order = ms.physical_tube_order(x_mm)
-    tube_pos, tube_labels, pixel_pos, pixel_labels = ms.index_ticks(x_mm, y_mm, order)
+    order = det.physical_tube_order(x_mm)
+    tube_pos, tube_labels, pixel_pos, pixel_labels = det.index_ticks(x_mm, y_mm, order)
 
     for position, tube in zip(tube_pos, tube_labels):
         assert abs(position - x_mm[tube, 0]) < 1e-9      # tick sits on that tube
@@ -744,8 +746,8 @@ def test_index_ticks_come_from_the_real_geometry():
         assert abs(position - y_mm[0, pixel]) < 1e-9
 
     assert tube_labels[0] == int(order[0])              # both ends included
-    assert tube_labels[-1] == int(order[ms.N_TUBES - 1])
-    assert pixel_labels[0] == 0 and pixel_labels[-1] == ms.N_PIXELS - 1
+    assert tube_labels[-1] == int(order[det.N_TUBES - 1])
+    assert pixel_labels[0] == 0 and pixel_labels[-1] == det.N_PIXELS - 1
     assert np.all(np.diff(tube_pos) > 0)                # ordered as plotted
 
 
@@ -790,37 +792,37 @@ def test_the_view_is_mirrored_so_tube_index_ascends_left_to_right():
 def test_run_is_found_from_the_number_alone():
     """Mantid resolves a run number against the archive; so does this, so
     /mask create <run> works before (or without) /load ipts."""
-    original = ms.find_run_in_archive
-    ms.find_run_in_archive = lambda run: [f"/SNS/EQSANS/IPTS-38681/nexus/EQSANS_{run}.nxs.h5"]
+    original = rf.find_run_in_archive
+    rf.find_run_in_archive = lambda run: [f"/SNS/EQSANS/IPTS-38681/nexus/EQSANS_{run}.nxs.h5"]
     try:
-        path, searched = ms.resolve_run_file("186636")
+        path, searched = rf.resolve_run_file("186636")
         assert path == "/SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5"
         assert any("IPTS-*" in entry for entry in searched), searched
     finally:
-        ms.find_run_in_archive = original
+        rf.find_run_in_archive = original
 
 
 def test_archive_patterns_name_the_run_exactly():
     """Both layouts are covered — nexus/*.nxs.h5 for recent experiments, data/
     *.nxs for pre-2013 ones — and the filename carries no wildcard, so the
     _ORIG.nxs.h5 copies some folders keep are never picked up."""
-    assert len(ms.ARCHIVE_PATTERNS) == 2
-    for pattern in ms.ARCHIVE_PATTERNS:
+    assert len(rf.ARCHIVE_PATTERNS) == 2
+    for pattern in rf.ARCHIVE_PATTERNS:
         path = pattern.format(run="186636")
         assert path.count("*") == 1 and "IPTS-*" in path, path
         assert os.path.basename(path).startswith("EQSANS_186636.")
 
 
 def test_ipts_is_read_back_from_the_path():
-    assert ms.ipts_from_path("/SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5") == "38681"
-    assert ms.ipts_from_path("/somewhere/else/EQSANS_186636.nxs.h5") == ""
+    assert rf.ipts_from_path("/SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5") == "38681"
+    assert rf.ipts_from_path("/somewhere/else/EQSANS_186636.nxs.h5") == ""
 
 
 def test_an_explicit_path_still_wins():
     with tempfile.TemporaryDirectory() as tmp:
         run_file = os.path.join(tmp, "EQSANS_1.nxs.h5")
         open(run_file, "w").close()
-        path, searched = ms.resolve_run_file(run_file)
+        path, searched = rf.resolve_run_file(run_file)
         assert path == run_file and searched == [run_file]
 
 
@@ -894,7 +896,7 @@ def test_how_banded_says_measured_or_convention():
 
 def test_bands_are_measured_at_half_the_plateau():
     """The threshold is the only number behind the measurement, so pin it."""
-    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts = np.ones((det.N_TUBES, det.N_PIXELS)) * 100.0
     counts[:, :7] = 10.0          # 7 dead-ish pixels: 0.1 of plateau
     counts[:, -5:] = 10.0
     assert ms.find_edge_bands(counts) == (7, 5)
@@ -909,9 +911,9 @@ def test_documented_thresholds():
     that drifts from the code is worse than none, and these are exactly the
     numbers people ask about."""
     assert ms.DEFAULT_BEAM_CONTRAST == 0.6
-    assert ms.CUT_WALL_MIN_RATIO == 1.5
-    assert ms.CUT_WALL_DECAY == 0.6
-    assert (ms.CUT_SUMMIT_LEVEL, ms.CUT_SUMMIT_BINS) == (0.8, 2)
+    assert det.CUT_WALL_MIN_RATIO == 1.5
+    assert det.CUT_WALL_DECAY == 0.6
+    assert (det.CUT_SUMMIT_LEVEL, det.CUT_SUMMIT_BINS) == (0.8, 2)
     assert (ms.DEFAULT_BEAM_SCALE, ms.DEFAULT_BEAM_PAD) == (1.2, 1.0)
     assert (ms.DEFAULT_BAND_DROP, ms.DEFAULT_MIN_BAND) == (0.5, 11)
     assert (ms.DEFAULT_DEAD_FRAC, ms.DEFAULT_HOT_FRAC) == (0.3, 3.0)
@@ -919,4 +921,4 @@ def test_documented_thresholds():
     assert (ms.MIN_BASE_FOR_SIGMA, ms.TUBE_MIN_DEVIATION) == (20.0, 0.25)
     assert (ms.LEAK_CONTRAST, ms.LEAK_EDGE_PIXELS) == (3.0, 2.0)
     assert ms.MAX_BEAM_RADIUS_MM == 60.0
-    assert (ms.TUBE_BASELINE_WINDOW, ms.TUBE_PACK) == (16, 4)
+    assert (ms.TUBE_BASELINE_WINDOW, det.TUBE_PACK) == (16, 4)

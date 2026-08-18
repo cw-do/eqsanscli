@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.session_state import SessionState
+from eqsanscli.services import detector as det
 from eqsanscli.services import mask_service as ms
+from eqsanscli.services import run_files as rf
 
 _USAGE = (
     "[bold]/mask create <run> \\[options][/bold]   build a mask from a run's own detector image\n"
@@ -176,7 +178,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(success=False, message=f"{error}\n\n{_USAGE}")
 
     ipts = opts["ipts"] or state.ipts
-    run_file, searched = ms.resolve_run_file(run, ipts)
+    run_file, searched = rf.resolve_run_file(run, ipts)
     if run_file is None:
         return CommandResult(
             success=False,
@@ -184,7 +186,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
             + "".join(f"    {p}\n" for p in searched)
             + "  Check the run number, or pass a full path.",
         )
-    found_ipts = ms.ipts_from_path(run_file)
+    found_ipts = rf.ipts_from_path(run_file)
 
     outdir = os.path.abspath(opts["outdir"] or os.getcwd())
     os.makedirs(outdir, exist_ok=True)
@@ -218,7 +220,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         use_beam=opts["use_beam"], use_tubes=opts["use_tubes"],
     )
     for disc in opts["discs"]:
-        if not ms.disc_is_on_detector(*disc, image.x_mm, image.y_mm):
+        if not det.disc_is_on_detector(*disc, image.x_mm, image.y_mm):
             lines.append(f"  [yellow]⚠[/yellow] --disc {disc[0]:g},{disc[1]:g},{disc[2]:g} lies off "
                          f"the detector (x {image.x_mm.min():.0f}..{image.x_mm.max():.0f}, "
                          f"y {image.y_mm.min():.0f}..{image.y_mm.max():.0f} mm) — masks nothing")

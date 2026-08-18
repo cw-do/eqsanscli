@@ -13,6 +13,10 @@ src/eqsanscli/
   headless.py         — JSON-over-stdin/stdout entry point (agent integration)
   commands/           — Slash-command handlers (dispatched by router.py)
   services/           — Business logic (matching, reduction, calibration, stitch, etc.)
+    detector.py       — detector geometry and image primitives (no policy)
+    run_files.py      — locating a run's file from its number alone
+    protocol.py       — parses knowledge/protocol.md; validators for the rules
+                        decidable from session state
   models/             — Data models (session_state, working_table, run_metadata, config_id)
   integrations/       — External interfaces (oncat, drtsans_runner, json_builder)
   config/             — App settings (preset content lives in preset_configs/ at repo root)
@@ -168,9 +172,16 @@ When you add one:
 3. **Measure against real runs before believing it**, and put the numbers and the
    ground truth in the change-log entry. Every mask estimator that looked right in
    the abstract failed on a real run.
-4. `services/<thing>_service.py` stays one algorithm's home. When a second
-   algorithm needs the same primitives (detector geometry, local contrast, cross
-   cuts), lift those into their own module rather than importing across services.
+4. `services/<thing>_service.py` stays one algorithm's home, and builds on the
+   shared layers rather than growing its own copy:
+   - `detector.py` — reshaping, real pixel positions, local contrast, cross cuts
+     and valley finding. Geometry and image primitives, no policy.
+   - `run_files.py` — locating a run by number across the archive.
+   - `protocol.py` — the rules, parsed; add a validator here when your rule is
+     decidable from session state, and flip it to `enforced` in the document.
+
+   `mask_service.py` is the worked example of the split: 1304 lines became 1041
+   of mask policy over 243 of detector primitives and 70 of run lookup.
 
 ---
 
@@ -182,6 +193,48 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
+
+Items 5 and 6 of the structure review.
+
+**5 — `mask_service.py` split three ways**, by AST line spans so nothing was
+retyped: `detector.py` (243 lines) holds geometry and image primitives — reshaping
+with its ordering self-check, real pixel positions, local contrast, the cross cuts
+and valley finding; `run_files.py` (70) holds archive lookup, which was never
+mask-specific; `mask_service.py` (1041, from 1304) keeps mask **policy** plus the
+Mantid read/write and the preview.
+
+No facade and no re-exports: names have one home, and the ~40 call sites in
+`commands/mask.py` and the tests were retargeted. The seam is where a second
+algorithm will need it — anything that reads a detector image now builds on
+`detector.py` rather than importing from a mask module.
+
+**6 — `services/protocol.py`.** `knowledge/protocol.md` was prose to the code:
+nothing parsed it, so "13 unenforced" was a number no build could act on. The
+module parses all 48 rules into `Rule` objects and holds validators for the ones
+decidable from session state alone — **TBL-04** (background needs its own
+transmission), **TBL-06** (one run, one role per configuration), **BKG-01**
+(background from the row's own configuration), **BKG-02** (a row is not its own
+background), **CFG-01** (qmin < qmax). Those five moved from `unenforced` to
+`enforced (services/protocol.py)` in the document. Backlog: 15 → 10, and
+`unenforced_rules()` now lists it from code.
+
+`tests/test_protocol.py` (13 checks) keeps the two sides honest in both
+directions: a rule with a validator must be marked enforced by this file, and a
+rule the document says this file enforces must have a validator. Plus one test per
+validator on the violation it describes, and one asserting a raising validator
+never breaks its caller.
+
+**Deliberately not wired to a command.** `/review` stays deferred, as asked — this
+is the library it will use. Note that `check()` running clean does not mean the
+protocol is satisfied, only the mechanical part of it; the remaining ten rules
+need a run's metadata, the reduced output, or a judgement.
+
+**Files changed:** `services/detector.py`, `services/run_files.py`,
+`services/protocol.py` (all new), `services/mask_service.py`,
+`commands/mask.py`, `knowledge/protocol.md`, `tests/test_protocol.py` (new),
+`tests/test_mask.py`, `tests/test_knowledge.py`, CLAUDE.md. 194 tests.
 
 ### 2026-08-18: one agent document, not two (no version bump — docs and tests)
 
@@ -312,42 +365,4 @@ pixel 9 / 8, raised to the 11-pixel EQSANS convention"*.
 **Files changed:** `services/mask_service.py` (`how_banded`, `measured_bottom`,
 `measured_top`, `band_source`), `commands/mask.py` (report line, params, help),
 `tests/test_mask.py` (+2, 66 total), README, `knowledge/instrument-files.md`.
-
-### 2026-08-18 (v0.24.0): `/mask` flag review, and a shorter help
-
-Asked once the command settled: review the flags, trim what is not needed, and
-rewrite the help — useful but not long.
-
-**Trimmed one: `--band-drop`.** It moved the threshold the band-edge measurement
-uses, which is never the right tool — `--top` / `--bottom` set the bands directly,
-in the units the convention is written in, and the 11-pixel floor is what the rest
-of the pipeline assumes. `DEFAULT_BAND_DROP` stays as the internal constant and is
-still recorded in `.params.json`.
-
-**Kept, with the reasoning, since two came close:**
-
-- `--beam-scale` and `--beam-pad` overlap — both add margin, one proportional and
-  one in y-pixels. Kept both: the pad is in the units the machine-physics mask
-  tool uses (v0.15.1), and the scale is the mechanism behind the 1.2 default on
-  the shadow path, so removing either would make the printed derivation
-  unexplainable.
-- `--tube-sigma` has a narrow effect since v0.17.0 (the statistical test only
-  applies where counts support it), but the tool itself prints "lower
-  --tube-sigma to look harder" when it finds nothing, so it stays.
-- `--ipts` is rarely needed since v0.23.0 finds the run by number, but still skips
-  the search and disambiguates.
-
-**Help: 110 lines to 65**, reorganised by what people actually reach for —
-`--dry-run`, `--leak`, `--tubes`, `--disc` first under *Common*, then the beam
-stop, then tube ends, then the two path options. The long physics passages (why
-gravity drops the beam, why tube index is not a coordinate, the full worked
-comparison of estimators) live in the README and `knowledge/`; the help keeps one
-line of each where it changes what you would type.
-
-`test_every_documented_flag_parses` walks every `--flag` in the help text through
-the parser, so the two cannot drift apart — it would have caught the `--band-drop`
-line left in the README.
-
-**Files changed:** `commands/mask.py` (help rewritten, flag removed),
-`tests/test_mask.py` (+2, 64 total), README.
 
