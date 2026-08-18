@@ -105,6 +105,13 @@ real stop.
 256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across
 a tube and 4.09 mm along one — not square. Two consequences:
 
+- Tube health is judged from the **median** along each tube against a **local**
+  baseline of same-group neighbours: a mean is moved by the broad bright halo
+  around the beam stop at long wavelength, which once flagged 29 tubes across the
+  centre of a 15 Å run. Dead (<30% of baseline) and hot (>3×) are caught at any
+  count level; the statistical test applies only where counts support it and the
+  deviation exceeds 25%, since 10-20% gain variation is normal and is what the
+  sensitivity map corrects.
 - Front and back tubes alternate in **packs of four**. Physical order by x runs
   0, 4, 1, 5, 2, 6, 3, 7, 8, 12, …, consecutive *indices* are 10.94 mm apart
   while physical neighbours are 5.49 mm apart, and **x is not monotonic in tube

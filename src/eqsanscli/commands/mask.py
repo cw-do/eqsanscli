@@ -57,7 +57,10 @@ _USAGE = (
     "\n"
     "[bold]Bad tubes[/bold]\n"
     "  --tubes <a,b,c>        mask these tubes explicitly\n"
-    "  --tube-sigma <f>       auto-flag threshold, higher is stricter (default 5)\n"
+    "  --tube-sigma <f>       auto-flag threshold, higher is stricter (default 5).\n"
+    "                         Applies only where counts support it and the tube is\n"
+    "                         off by >25%; dead (<30% of local baseline) and hot\n"
+    "                         (>3x) tubes are caught at any count level.\n"
     "  --no-tubes             skip tube detection\n"
     "\n"
     "[bold]Examples[/bold]\n"
@@ -195,7 +198,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
-    if plan.tube_source == "auto" and not plan.tubes:
+    if plan.tube_note:
+        lines.append(f"    [yellow]⚠[/yellow] {plan.tube_note}")
+    elif plan.tube_source == "auto" and not plan.tubes:
         lines.append("    [dim]no deviant tubes at this threshold — lower --tube-sigma "
                      "to look harder, or name them with --tubes[/dim]")
 
@@ -240,6 +245,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "band_convention": ("pixel counts at each end; bottom = low pixel index (-y). "
                             "The machine-physics tool names these the other way round."),
         "tubes": plan.tubes, "tube_source": plan.tube_source,
+        "tube_note": plan.tube_note or None,
         "tube_sigma": None if plan.tube_source == "manual" else opts["tube_sigma"],
         "n_masked": n, "shapes": plan.shapes,
         "mask_nxs": os.path.basename(mask_path),

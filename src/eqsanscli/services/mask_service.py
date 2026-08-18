@@ -90,6 +90,24 @@ NO_SHADOW_CONTRAST = 0.8
 #: under-state the real one, so say so rather than quietly under-masking.
 SHALLOW_CORE_CONTRAST = 0.35
 
+#: A tube reading below `dead_frac` of its local baseline is dead; above
+#: `hot_frac`, hot. Relative, so it works at any count level.
+DEFAULT_DEAD_FRAC = 0.3
+DEFAULT_HOT_FRAC = 3.0
+
+#: Tubes are compared with same-group neighbours within this many indices.
+TUBE_BASELINE_WINDOW = 16
+
+#: Below this baseline a tube cannot be judged at all: at ~1 count per pixel a
+#: dead tube and an unlucky one look identical.
+MIN_BASE_FOR_TUBES = 2.0
+
+#: The MAD-based test needs this much signal to be meaningful, and a deviation of
+#: at least `TUBE_MIN_DEVIATION`. Gain variation of 10-20% is normal and is what
+#: the sensitivity map corrects; masking is for faults.
+MIN_BASE_FOR_SIGMA = 20.0
+TUBE_MIN_DEVIATION = 0.25
+
 #: Front and back tubes alternate in packs of this many. See find_deviant_tubes
 #: for the measurement that establishes it.
 TUBE_PACK = 4
@@ -307,53 +325,71 @@ def find_deviant_tubes(
     sigma: float = DEFAULT_TUBE_SIGMA,
     bottom: int = 0,
     top: int = 0,
-    beam: Optional[BeamStop] = None,
-    x_mm: Optional[np.ndarray] = None,
-    y_mm: Optional[np.ndarray] = None,
-) -> list[int]:
-    """Tubes whose response differs from others in the same front/back group.
+    dead_frac: float = DEFAULT_DEAD_FRAC,
+    hot_frac: float = DEFAULT_HOT_FRAC,
+    window: int = TUBE_BASELINE_WINDOW,
+    min_deviation: float = TUBE_MIN_DEVIATION,
+) -> tuple[list[int], str]:
+    """Tubes that are dead, hot, or statistically out of line with their peers.
 
-    Front and back tubes alternate in **packs of four** on this detector, not
-    one by one. Measured on run 186104: grouping by ``(tube // 4) % 2`` gives a
-    median absolute deviation of 2.7 counts, against 19.9 for odd/even and 20.1
-    for no grouping, and the high/low pattern matches 4-on/4-off across all 192
-    tubes exactly. Comparing odd-to-odd leaves the two populations mixed, which
-    inflates the spread ~7x and hides every real outlier.
+    Returns (tubes, note); `note` explains when the run cannot support the test.
 
-    Deviation is measured in robust units (median absolute deviation). The edge
-    bands and the beam shadow are excluded so they cannot dominate the totals.
+    Three decisions matter here, each learned from a real run:
+
+    **Median, not mean.** A localised feature must not condemn a whole tube. At
+    15 Å the halo around the beam stop is broad and bright, and comparing means
+    flagged 29 tubes straight across the centre of run 186636 — 22% of the
+    detector — because every tube crossing the halo looked anomalous. The median
+    along a tube ignores a feature covering a minority of its pixels.
+
+    **A local baseline.** Each tube is compared with nearby tubes of its own
+    front/back group (packs of four, see the module docstring), so a gradient
+    across the detector is not mistaken for a fault.
+
+    **Relative first, statistical only when counts allow.** A dead tube reads
+    zero against a baseline of six and must be caught however dim the run; but a
+    MAD-based z-score on tube medians of 0, 1 and 2 counts is meaningless — it
+    flagged 34 tubes on a run whose median pixel had 1 count. So the ratio test
+    always applies, and the z-test only where the baseline is high enough to be
+    informative *and* the deviation is material. Gain variation of 10-20% is
+    normal and is what the sensitivity map is for; it is not a masking matter.
     """
     y_hi = N_PIXELS - top if top else N_PIXELS
-    usable = counts[:, bottom:y_hi].astype(float, copy=True)
-    if beam is not None and x_mm is not None and y_mm is not None:
-        # Blank a generous disc around the beam -- not whole tubes, or the tubes
-        # crossing the beam would have no data left to judge them by. The beam is
-        # a physical circle, so this has to be done in millimetres too.
-        wide = {"type": "circle_mm", "xc": beam.xc, "yc": beam.yc,
-                "r": beam.radius * 2.0}
-        blank = shapes_to_mask([wide], x_mm, y_mm)[:, bottom:y_hi]
-        usable[blank] = np.nan
-    with np.errstate(invalid="ignore"):
-        totals = np.nanmean(usable, axis=1)
+    usable = counts[:, bottom:y_hi]
+    if usable.size == 0:
+        return [], "no usable pixels between the edge bands"
 
-    flagged: list[int] = []
-    groups = (np.arange(N_TUBES) // TUBE_PACK) % 2
-    for side in (0, 1):
-        idx = np.nonzero(groups == side)[0]
-        vals = totals[idx]
-        good = np.isfinite(vals)
-        if good.sum() < 8:
-            continue
-        median = float(np.median(vals[good]))
-        mad = float(np.median(np.abs(vals[good] - median)))
-        if mad <= 0:
-            continue
-        # 1.4826 * MAD approximates a standard deviation for normal data.
-        limit = sigma * 1.4826 * mad
-        for tube, value in zip(idx, vals):
-            if np.isfinite(value) and abs(value - median) > limit:
-                flagged.append(int(tube))
-    return sorted(flagged)
+    tube = np.median(usable, axis=1).astype(float)
+    group = (np.arange(N_TUBES) // TUBE_PACK) % 2
+    base = np.empty(N_TUBES)
+    for i in range(N_TUBES):
+        peers = [tube[j] for j in range(max(0, i - window), min(N_TUBES, i + window + 1))
+                 if j != i and group[j] == group[i]]
+        base[i] = float(np.median(peers)) if peers else tube[i]
+
+    judgeable = base >= MIN_BASE_FOR_TUBES
+    if not judgeable.any():
+        return [], (f"tube response is too low to judge (median {np.median(base):.1f} counts "
+                    f"per pixel) — dead tubes cannot be told from noise on this run")
+
+    ratio = tube / np.clip(base, 1e-9, None)
+    bad = judgeable & ((ratio < dead_frac) | (ratio > hot_frac))
+
+    # Statistical test where the baseline is strong enough for a MAD to mean
+    # something, and only for deviations big enough to matter.
+    informative = base >= MIN_BASE_FOR_SIGMA
+    if int(informative.sum()) > 8:
+        residual = (tube - base)[informative]
+        mad = float(np.median(np.abs(residual - np.median(residual))))
+        if mad > 0:
+            z = np.zeros(N_TUBES)
+            z[informative] = np.abs((tube - base)[informative]) / (1.4826 * mad)
+            bad |= informative & (z > sigma) & (np.abs(ratio - 1.0) > min_deviation)
+
+    note = ""
+    if not judgeable.all():
+        note = (f"{int((~judgeable).sum())} tube(s) had too little signal to judge")
+    return sorted(int(t) for t in np.nonzero(bad)[0]), note
 
 
 # --------------------------------------------------------------------------
@@ -371,6 +407,7 @@ class MaskPlan:
     tubes: list[int] = field(default_factory=list)
     tube_source: str = "auto"
     beam_note: str = ""      # why no beam stop was masked, when there is none
+    tube_note: str = ""      # when the run cannot support judging tubes
 
     def summary(self) -> str:
         bits = []
@@ -443,9 +480,8 @@ def build_plan(
         plan.tubes = sorted({int(t) for t in tubes})
         plan.tube_source = "manual"
     elif use_tubes:
-        plan.tubes = find_deviant_tubes(
+        plan.tubes, plan.tube_note = find_deviant_tubes(
             counts, sigma=tube_sigma, bottom=plan.bottom, top=plan.top,
-            beam=plan.beam, x_mm=x_mm, y_mm=y_mm,
         )
         plan.tube_source = "auto"
     for tube in plan.tubes:

@@ -216,7 +216,45 @@ def test_edge_bands_never_go_below_the_convention():
 
 def test_dead_tube_is_flagged():
     plan = ms.build_plan(synthetic_counts(), *synthetic_positions())
+    assert plan.tube_note == "", plan.tube_note
     assert DEAD_TUBE in plan.tubes, plan.tubes
+
+
+def test_a_halo_across_the_centre_does_not_condemn_whole_tubes():
+    """Run 186636 (9 m, 15 A): comparing tube MEANS flagged 29 tubes straight
+    across the centre -- 22% of the detector -- because a broad bright halo
+    around the beam stop lifted every tube crossing it. The median ignores a
+    feature covering a minority of a tube's pixels."""
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts(dead_tube=None)
+    # a broad bright halo across the middle of every tube
+    pixels = np.arange(ms.N_PIXELS)[None, :]
+    halo = np.abs(pixels - ms.N_PIXELS // 2) < 25
+    counts = counts + halo * 400.0
+
+    by_mean = np.mean(counts[:, 11:245], axis=1)
+    assert by_mean.std() > 0, "halo should move the means"
+    tubes, _ = ms.find_deviant_tubes(counts, bottom=11, top=11)
+    assert tubes == [], tubes
+
+
+def test_tubes_are_not_judged_when_counts_are_too_low():
+    """At ~1 count per pixel a dead tube and an unlucky one look identical."""
+    rng = np.random.default_rng(3)
+    counts = rng.poisson(1.0, size=(ms.N_TUBES, ms.N_PIXELS)).astype(float)
+    tubes, note = ms.find_deviant_tubes(counts, bottom=11, top=11)
+    assert tubes == []
+    assert "too low to judge" in note, note
+
+
+def test_gain_variation_is_not_masked():
+    """10-20% tube-to-tube variation is normal and is what sensitivity corrects."""
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts(dead_tube=None)
+    counts[30] *= 0.85
+    counts[31] *= 1.15
+    tubes, _ = ms.find_deviant_tubes(counts, bottom=11, top=11)
+    assert 30 not in tubes and 31 not in tubes, tubes
 
 
 def test_healthy_detector_flags_nothing():

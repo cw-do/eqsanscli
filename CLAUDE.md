@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.17.0 | 2026-08-18 | Tube detection rebuilt: median against a local baseline, relative dead/hot tests, statistical test gated on counts. A beam halo no longer masks whole tubes. |
 | 0.16.2 | 2026-08-18 | Document `--top`/`--bottom`: pixel counts not indices, the 11-pixel floor and how to bypass it, and that the machine-physics tool names the two ends the other way round. |
 | 0.16.1 | 2026-08-18 | Full `/mask` usage: in-CLI help with examples and troubleshooting, rewritten README section, corrected SKILL/AGENT_SKILL/knowledge/LLM entries. |
 | 0.16.0 | 2026-08-18 | Beam-stop detection rebuilt on local contrast: a dim run's Poisson noise no longer produces a huge off-centre circle. Refuses when no shadow is discernible; `--beam-center` / `--beam-radius` added. |
@@ -114,6 +115,39 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.17.0): A beam halo was masking whole tubes
+
+Reported: a mask for run 186636 masked several entire tubes near the centre
+instead of a beam disc.
+
+**Cause.** That run is `S-banjo 9m 15A` — 112,148 counts, median **1** per pixel.
+Tube health was judged from the **mean** along each tube, and at 15 Å the halo
+scattered around the beam stop is broad and bright, so every tube crossing it sat
+well above its peers. 29 tubes were flagged, spanning x from -58 to +102 mm — a
+band straight across the centre — masking 22.4% of the detector. Blanking the
+beam circle did not help: the halo extends far beyond the stop.
+
+**Three fixes, each from a real run.**
+
+- **Median, not mean.** A feature covering a minority of a tube's pixels no
+  longer condemns it. (186636: 29 flagged → 0.)
+- **A local baseline** of same-pack neighbours within ±16 tubes, so a gradient
+  across the detector is not read as a fault.
+- **Relative first, statistical only when counts allow.** A MAD-based z-score on
+  tube medians of 0, 1 and 2 counts is meaningless — it flagged 34 tubes on
+  186636 and 49 on 186631. So dead (<30% of local baseline) and hot (>3x) are
+  tested by ratio at any count level, while the `--tube-sigma` test applies only
+  where the baseline exceeds 20 counts *and* the tube is off by more than 25%.
+  10-20% gain variation is normal and is what the sensitivity map corrects; the
+  earlier version flagged 8 such tubes on the healthy 186104.
+
+Where a run cannot support the test at all — 186636's baseline is ~1 count — no
+tubes are flagged and the reason is printed, rather than masking noise.
+
+Verified across three real runs: 186636 (9 m 15 Å, median 1) → no tubes, 8.6%
+masked, with the note; 186631 (4 m 10 Å, median 4) → exactly tube 145, which is
+100% dead; 186104 (4 m 2.5 Å, median 90, healthy) → none.
 
 ### 2026-08-18 (v0.16.2): `--top` / `--bottom` semantics documented
 

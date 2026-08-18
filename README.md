@@ -394,10 +394,26 @@ so you can judge both.
    from pixel index 0 — so when comparing its `params.json` with ours, expect the
    two numbers to be swapped.
 
-3. **Deviant tubes**, compared *within their front/back group*. Tubes alternate
-   in packs of four, so grouping that way gives a median absolute deviation of
-   2.7 counts against 19.9 for odd/even — comparing odd-to-odd mixes two
-   populations and hides real outliers.
+3. **Deviant tubes** — dead, hot, or statistically out of line. Three things
+   make this reliable:
+
+   - **Median, not mean, along the tube.** A localised feature must not condemn a
+     whole tube: at 15 Å the halo around the beam stop is broad and bright, and
+     comparing means flagged 29 tubes straight across the centre of one run —
+     22% of the detector.
+   - **A local baseline**, from nearby tubes of the same front/back group. Tubes
+     alternate in packs of four, and grouping that way gives a median absolute
+     deviation of 2.7 counts against 19.9 for odd/even, so comparing odd-to-odd
+     mixes two populations and hides real outliers.
+   - **Relative first.** A tube below 30% of its local baseline is dead and is
+     caught however dim the run; above 3× it is hot. The statistical (`--tube-sigma`)
+     test applies only where the baseline is strong enough for it to mean
+     something *and* the deviation exceeds 25% — 10–20% gain variation is normal,
+     and is what the sensitivity map corrects, not something to mask.
+
+   When the run is too dim to tell a dead tube from an unlucky one, no tubes are
+   flagged and it says so. Auto-detection is whole-tube: a dead *segment*
+   averages out, so name it with `--tubes`.
 
 ### When it refuses
 
@@ -458,6 +474,8 @@ and nothing else.
 | Beam mask too small | long wavelength: halo fills the penumbra (you will have been warned) | `--beam-radius <mm>` |
 | "no beam stop is discernible" | run has no stop in view, or is far too dim | check the raw panel; `--no-beam` if genuinely absent |
 | A known-bad tube is not flagged | auto-detection is whole-tube; a *segment* that is dead reads as normal on average | `--tubes 146` |
+| Whole tubes masked near the centre | fixed in 0.17.0 — was the beam halo moving tube means | rebuild; if it persists, `--no-tubes` and name them |
+| "too low to judge" and no tubes flagged | the run has too few counts to tell a dead tube from noise | use a longer run, or `--tubes` |
 | Too many tubes flagged | threshold too loose | raise `--tube-sigma` |
 | Bands look too narrow | plateau threshold | `--top 12 --bottom 12`, or `--band-drop 0.6` |
 
