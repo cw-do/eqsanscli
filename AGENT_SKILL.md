@@ -434,7 +434,7 @@ hand-made mask. Runs whose cuts have no flare walls fall back to the shadow
 itself, grown slightly; the report says which was used. Counting statistics still
 matter — ~90 counts/pixel is comfortable, ~4 is marginal. When neither estimator
 is credible the beam is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
-`--beam-radius <mm>` state it explicitly. `--leak` also masks the gravity-dropped beam below the stop, one disc per lobe. `--dry-run` previews without writing,
+`--beam-radius <mm>` state it explicitly. `--leak` also masks the gravity-dropped beam below the stop, one disc per lobe, and `--leak-scale <f>` grows those discs to catch the faint tail. `--dry-run` previews without writing,
 `--tubes a,b` adds known-bad tubes (auto-detection is whole-tube, so a dead
 *segment* averages out), `--tube-sigma` tunes sensitivity. `/mask list` shows what
 is discoverable. Needs drtsans for the Mantid read/write.

@@ -58,6 +58,9 @@ _USAGE = (
     "                         the stop — one disc per lobe BELOW it. A bright patch\n"
     "                         above the stop is rim flare, not fallen beam, and is\n"
     "                         reported with a --disc line rather than masked.\n"
+    "  --leak-scale <f>       multiply those discs\' radius (implies --leak). Use it\n"
+    "                         to take the faint tail as well: the disc is fitted to\n"
+    "                         the broad peak, so 1.3-1.5 reaches further down.\n"
     "\n"
     "[bold]Gravity-dropped direct beam[/bold]\n"
     "  Neutrons fall in flight and the drop goes as the square of the wavelength,\n"
@@ -108,6 +111,8 @@ _USAGE = (
     "  /mask create 186104 --tubes 146             add a known-bad tube\n"
     "  /mask create 186104 --top 12 --bottom 11    set the tube-end bands\n"
     "  /mask create 186104 --disc 120,-80,15       mask a blemish at (120,-80) mm\n"
+    "  /mask create 186636 --leak                  add the gravity-dropped beam\n"
+    "  /mask create 186636 --leak-scale 1.4        ... with a 40% larger disc\n"
     "  /mask create 186104 --disc 0,0,25 --disc 120,-80,15    several discs\n"
     "  /mask create 186104 --tube-sigma 3          flag tubes more readily\n"
     "\n"
@@ -135,8 +140,10 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         "tube_sigma": ms.DEFAULT_TUBE_SIGMA, "top": None, "bottom": None,
         "tubes": None, "use_beam": True, "use_tubes": True, "dry_run": False,
         "beam_center": None, "beam_radius": None, "discs": [], "mask_leaks": False,
+        "leak_scale": 1.0,
     }
-    floats = {"--beam-scale": "beam_scale", "--beam-pad": "beam_pad",
+    floats = {"--beam-scale": "beam_scale", "--leak-scale": "leak_scale",
+              "--beam-pad": "beam_pad",
               "--band-drop": "band_drop", "--tube-sigma": "tube_sigma",
               "--beam-radius": "beam_radius"}
     ints = {"--top": "top", "--bottom": "bottom"}
@@ -184,6 +191,10 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         else:
             return opts, f"unknown option: {args[i]}"
         i += 1
+    if opts["leak_scale"] <= 0:
+        return opts, f"--leak-scale must be positive, got {opts['leak_scale']:g}"
+    if opts["leak_scale"] != 1.0:
+        opts["mask_leaks"] = True      # sizing the disc means you want it masked
     return opts, ""
 
 
@@ -239,6 +250,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         image.counts, image.x_mm, image.y_mm,
         beam_center=opts["beam_center"], beam_radius=opts["beam_radius"],
         discs=opts["discs"], mask_leaks=opts["mask_leaks"],
+        leak_scale=opts["leak_scale"],
         beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
         band_drop=opts["band_drop"], tube_sigma=opts["tube_sigma"],
         bottom=opts["bottom"], top=opts["top"], tubes=opts["tubes"],
@@ -259,7 +271,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
                 else "leak above the stop (rim flare / short-wavelength end)")
         # NB: not `state` -- that is this function's SessionState parameter.
         if plan.leaks_masked and below:
-            status = "masked"
+            status = ("masked" if plan.leak_scale == 1.0 else
+                      f"masked at r {radius * plan.leak_scale:.0f} mm "
+                      f"(--leak-scale {plan.leak_scale:g})")
         else:
             hint = "add --leak, or " if below else ""
             status = (f"[dim]not masked — {hint}--disc "
@@ -322,6 +336,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "leaks_mm": [{"xc": round(d[0], 1), "yc": round(d[1], 1), "r": round(d[2], 1)}
                      for d in plan.leaks] or None,
         "leaks_masked": plan.leaks_masked,
+        "leak_scale": plan.leak_scale,
         "beam_scale": opts["beam_scale"] if opts["beam_scale"] is not None else "auto",
         "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],

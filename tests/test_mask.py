@@ -700,3 +700,30 @@ def test_leak_masks_only_what_fell_below_the_stop():
     mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
     lobe = np.hypot(x_mm - 30.0, y_mm + 85.0) <= 35.0
     assert mask[lobe].all()
+
+
+def test_leak_scale_grows_the_masked_disc():
+    """The disc is fitted to the broad peak, so its faint tail is left over;
+    --leak-scale takes that too without having to retype the position."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_walls(lobe=(30.0, -85.0, 40.0, 150.0))
+    plain = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0,
+                          mask_leaks=True)
+    grown = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0,
+                          mask_leaks=True, leak_scale=1.5)
+    lobe = [d for d in plain.leaks if d[1] < plain.beam.yc][0]
+    discs = [sh for sh in grown.shapes
+             if sh["type"] == "circle_mm" and sh["yc"] < grown.beam.yc]
+    assert discs and abs(discs[0]["r"] - 1.5 * lobe[2]) < 1e-6, discs
+    assert grown.leak_scale == 1.5
+    n_plain = ms.shapes_to_mask(plain.shapes, x_mm, y_mm).sum()
+    n_grown = ms.shapes_to_mask(grown.shapes, x_mm, y_mm).sum()
+    assert n_grown > n_plain
+
+
+def test_leak_scale_implies_leak_and_must_be_positive():
+    from eqsanscli.commands.mask import _parse_args
+    opts, err = _parse_args(["--leak-scale", "1.4"])
+    assert not err and opts["leak_scale"] == 1.4 and opts["mask_leaks"] is True
+    assert _parse_args(["--leak-scale", "0"])[1]
+    assert _parse_args(["--leak-scale", "-2"])[1]

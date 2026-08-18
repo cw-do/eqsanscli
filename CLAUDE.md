@@ -120,6 +120,31 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.22.1): `--leak-scale` — a bigger disc over the fallen beam
+
+Asked for directly: *"what if I want to cover the leak with larger disc?"* It was
+possible already, by copying the reported position into `--disc` with a radius of
+your choosing, but the position is detected — only the size is in question.
+
+`--leak-scale <f>` multiplies the radius of each masked leak disc about its own
+centre, and implies `--leak` (sizing the disc means you want it). The disc is
+fitted to the broad peak, so its faint tail is what a larger one buys. On 186636,
+against a plateau of 1 count:
+
+| | masked | disc | worst unmasked pixel below the stop |
+|---|---|---|---|
+| (none) | 9.14% | — | 370 |
+| `--leak` | 9.69% | r 48 mm | 34 |
+| `--leak-scale 1.4` | 10.20% | r 68 mm | 18 |
+| `--leak-scale 1.6` | 10.51% | r 78 mm | 8 |
+
+Recorded in `.params.json` as `leak_scale`, and the report names the radius it
+actually masked. `--disc` remains the way to state a disc outright.
+
+**Files changed:** `services/mask_service.py` (`leak_scale` on `build_plan` and
+`MaskPlan`), `commands/mask.py` (flag, validation, report, params, help),
+`tests/test_mask.py` (+2, 53 total), README/SKILL/AGENT_SKILL, knowledge.
+
 ### 2026-08-18 (v0.22.0): the stop is measured from cross cuts
 
 The user's own procedure, and it is better than what 0.21.0 did:

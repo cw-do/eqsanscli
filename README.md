@@ -408,19 +408,24 @@ so you can judge both.
    It is always **found and reported**, with position and radius, but not masked
    by default: masking it costs low-Q coverage, and that is a judgement for
    whoever is looking at the preview. `--leak` masks it, one disc per lobe below
-   the stop. A bright patch *above* the stop is rim flare or the short-wavelength
-   end of the band rather than fallen beam — it is an arc, not a blob, so a disc
-   round it over-masks badly — and it is reported with a `--disc` line to copy
-   instead:
+   the stop. The disc is fitted to the broad peak, so the faint tail below it is
+   left over; `--leak-scale <f>` grows the discs about their own centres to take
+   that too, without retyping the position. On run 186636:
 
-   ```
-   Masking 4494 pixels (9.14%): beam stop at (12.3, 10.1) mm, r 44.0 mm; ...
-     centre and size from cross cuts: the valley between the flare walls is 80 mm
-     wide horizontally
-     • direct beam that fell past the stop at (13, -55) mm, r 48 mm — not masked
-       — add --leak, or --disc 13,-55,48
-     • leak above the stop (rim flare / short-wavelength end) at (13, 51) mm,
-       r 61 mm — not masked — --disc 13,51,61
+   | | masked | disc | worst unmasked pixel below the stop |
+   |---|---|---|---|
+   | (none) | 9.14% | — | 370 counts |
+   | `--leak` | 9.69% | r 48 mm | 34 counts |
+   | `--leak-scale 1.4` | 10.20% | r 68 mm | 18 counts |
+   | `--leak-scale 1.6` | 10.51% | r 78 mm | 8 counts |
+
+   against a detector plateau of 1 count. For full control, copy the reported
+   numbers into `--disc` and set the radius outright.
+
+   A bright patch *above* the stop is rim flare or the short-wavelength end of the
+   band rather than fallen beam — it is an arc, not a blob, so a disc round it
+   over-masks badly — and it is reported with a `--disc` line to copy instead:
+
    ```
 
 2. **The low-response bands** at both ends of every tube, measured from where the
@@ -495,6 +500,7 @@ point of it.
 | `--beam-radius <r>` | mm | measured | state the beam radius; used verbatim, no scale or pad |
 | `--no-beam` | | off | do not mask the beam stop |
 | `--leak` | | off | also mask gravity-dropped direct beam, one disc per lobe below the stop |
+| `--leak-scale <f>` | multiplier | 1.0 | enlarge those discs (implies `--leak`) |
 | `--disc <x>,<y>,<r>` | mm | — | mask an extra disc anywhere on the face; repeatable |
 | `--top <n>` / `--bottom <n>` | pixels | measured, min 11 | force band sizes |
 | `--band-drop <f>` | fraction of plateau | 0.5 | where a band edge is called |

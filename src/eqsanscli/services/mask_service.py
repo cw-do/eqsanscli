@@ -698,6 +698,7 @@ class MaskPlan:
     discs: list = field(default_factory=list)   # extra (x_mm, y_mm, r_mm) discs
     leaks: list = field(default_factory=list)   # direct-beam leak discs found
     leaks_masked: bool = False
+    leak_scale: float = 1.0  # --leak-scale, applied to the masked leak discs
 
     def summary(self) -> str:
         bits = []
@@ -708,7 +709,8 @@ class MaskPlan:
             )
             below = [d for d in self.leaks if d[1] < self.beam.yc]
             if below and self.leaks_masked:
-                bits.append(f"{len(below)} gravity-dropped beam disc(s)")
+                grown = f" x{self.leak_scale:g}" if self.leak_scale != 1.0 else ""
+                bits.append(f"{len(below)} gravity-dropped beam disc(s){grown}")
         if self.bottom or self.top:
             bits.append(f"edge bands {self.bottom} bottom / {self.top} top")
         if self.tubes:
@@ -734,6 +736,7 @@ def build_plan(
     use_beam: bool = True,
     use_tubes: bool = True,
     mask_leaks: bool = False,
+    leak_scale: float = 1.0,
     beam_center: Optional[tuple[float, float]] = None,
     beam_radius: Optional[float] = None,
     discs: Optional[Sequence[tuple[float, float, float]]] = None,
@@ -775,7 +778,8 @@ def build_plan(
                 for xc, yc, radius in plan.leaks:
                     if yc < plan.beam.yc:
                         plan.shapes.append({"type": "circle_mm", "xc": xc,
-                                            "yc": yc, "r": radius})
+                                            "yc": yc, "r": radius * leak_scale})
+            plan.leak_scale = float(leak_scale)
 
     auto_bottom, auto_top = find_edge_bands(counts, drop=band_drop)
     plan.bottom = max(auto_bottom, min_band) if bottom is None else int(bottom)

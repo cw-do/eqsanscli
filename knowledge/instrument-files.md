@@ -98,7 +98,8 @@ lobe of ~200 counts sits 60 mm below the stop against a plateau of 1. `/mask
 create` finds and reports it but does not mask it unless asked (`--leak`), since
 covering it costs low-Q coverage — a decision for the instrument scientist, not
 the tool. `--leak` masks lobes **below** the stop, one disc each: neutrons fall,
-so fallen beam is below. A bright patch above the stop is rim flare or the
+so fallen beam is below, and `--leak-scale` enlarges those discs when the peak's
+faint tail matters. A bright patch above the stop is rim flare or the
 short-wavelength end of the band, is an arc rather than a blob, and gets a
 `--disc` line to copy rather than a disc drawn round it.
 
