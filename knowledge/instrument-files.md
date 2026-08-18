@@ -170,7 +170,10 @@ a tube and 4.09 mm along one — not square. Two consequences:
 - The preview carries both scales: millimetres on the bottom and left, tube and
   pixel index on the top and right, with tube ticks placed at the tubes' real
   positions. Tube labels are exact only at the ticks, since the interleave makes
-  index non-linear in x, and on this detector tube 191 sits at the −x edge.
+  index non-linear in x. It is drawn with tube index ascending left to right, so
+  the millimetre axis descends: tube 0 sits at +x on this detector. The view is
+  mirrored, not the coordinates — `--disc` and `--beam-center` stay in Mantid's
+  frame.
 - A circle drawn in index space is **not** a circle on the detector. For run
   186104's beam stop it agreed with the true disc only 87%, covering a region
   82.6 × 69.5 mm. The beam stop is masked in millimetres against the real pixel

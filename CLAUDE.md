@@ -120,6 +120,34 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.22.3): the preview was mirrored
+
+Reported: *"i realize that horizontal index is reversed. the correct image should
+switch left and right."* Correct — v0.15.0 ordered tubes by ascending x for
+display, which looked right until v0.22.2 put the tube index on the axis and
+showed it running 191 -> 0 across the picture. Tube 0 sits at **+x** on this
+detector, so ascending x left-to-right draws it back to front.
+
+`ax.invert_xaxis()` on both panels: tube index now ascends left to right, and the
+millimetre axis descends (+500 left, -500 right). `imshow` resets the limits it is
+given, so the overlay panel is inverted again after the overlay is drawn — worth
+knowing, it silently un-flipped the right-hand panel otherwise.
+
+**Only the view is mirrored, not the coordinates.** Millimetres are Mantid's, and
+they are what `--disc` and `--beam-center` are given and what `.params.json`
+records, so nothing written by earlier versions changes meaning. A feature the
+report puts at x = +13 mm is now drawn left of centre.
+
+If the instrument's own convention is that x increases the *other* way, the fix is
+a sign change on the coordinates rather than on the view, and would change what
+`--disc 13,-55,48` means — raised with the user rather than assumed.
+
+`render_comparison` split into `build_comparison_figure` (returns the figure) plus
+a thin writer, so the orientation is testable.
+
+**Files changed:** `services/mask_service.py`, `tests/test_mask.py` (+1, 56
+total), README, SKILL, AGENT_SKILL, `knowledge/instrument-files.md`.
+
 ### 2026-08-18 (v0.22.2): the preview carries both scales
 
 Asked for: *"when displaying (making comparison png file) display both tube

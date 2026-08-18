@@ -530,7 +530,8 @@ and y −521…521 mm, so `(0,0)` is the middle of the detector and `--disc 13,-
 means a 48 mm disc centred 13 mm to one side and **55 mm below** centre.
 `--beam-center` uses the same system, and the preview carries these millimetres
 on its bottom and left axes — so a position read off the picture can be typed
-straight in — with tube and pixel index on the opposite two.
+straight in — with tube and pixel index on the opposite two. Note the x axis
+descends left to right, because the view is mirrored to put tube 0 on the left.
 
 Not pixels: tube index is not a spatial coordinate (see *Detector geometry*), so a
 disc specified in index space would not be round on the detector. A disc falling
@@ -550,8 +551,13 @@ scales at once**:
 The red overlay should cover the beam shadow, both tube ends, and any bad tubes —
 and nothing else.
 
-Two things to know about the tube axis. It runs **191 at −x to 0 at +x** on this
-detector, and its labels are exact **only at the ticks**: index order interleaves
+The picture is drawn with **tube index ascending left to right**, which is how the
+detector is looked at. Tube 0 sits at +x on this instrument, so the millimetre
+axis descends across the picture: +500 mm on the left, −500 mm on the right. Only
+the view is mirrored — the coordinates are unchanged, so a feature the report puts
+at x = +13 mm is drawn left of centre and `--disc 13,…` still lands on it.
+
+The tube labels are exact **only at the ticks**: index order interleaves
 sub-banks in packs of four (see *Detector geometry*), so interpolating between two
 ticks can be up to four tubes out. To act on a tube you spotted by eye, take the
 approximate index from the axis and confirm it against the tube list printed in

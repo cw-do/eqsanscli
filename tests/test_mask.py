@@ -760,3 +760,26 @@ def test_preview_is_written_with_both_scales():
         if path is None:
             return                                       # no matplotlib here
         assert os.path.getsize(path) > 10_000
+
+
+def test_the_view_is_mirrored_so_tube_index_ascends_left_to_right():
+    """Tube 0 sits at +x on this detector, so drawing ascending x left-to-right
+    showed the detector back-to-front. The view is flipped; the coordinates are
+    not — they are Mantid's, and --disc / --beam-center are given in them."""
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts()
+    mask = ms.shapes_to_mask(ms.build_plan(counts, x_mm, y_mm).shapes, x_mm, y_mm)
+    fig, axes = ms.build_comparison_figure(counts, mask, "t", x_mm, y_mm)
+    if fig is None:
+        return                                            # no matplotlib here
+    try:
+        for ax in axes:
+            assert ax.xaxis_inverted(), ax.get_xlim()
+            left, right = ax.get_xlim()
+            assert left > right                           # +x on the left
+        # y is untouched: pixel index and +y both increase upward
+        for ax in axes:
+            assert not ax.yaxis_inverted()
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close(fig)

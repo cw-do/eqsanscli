@@ -332,7 +332,7 @@ skips unreducible rows at reduction time.
 (banjo, flood, empty cell) and writes `mask_<config>_<run>.nxs` into the current
 folder, named so the resolver finds it automatically, plus a `_compare.png` to review —
 millimetres on the bottom and left axes (what `--disc` takes), tube and pixel
-index on the top and right (what `--tubes` and `--top`/`--bottom` take) and a `.params.json` recording how it was made. It masks the beam stop
+index on the top and right (what `--tubes` and `--top`/`--bottom` take), drawn with tube index ascending left to right so the mm axis descends and a `.params.json` recording how it was made. It masks the beam stop
 (masked as a circle in millimetres against real pixel positions), the low-response
 bands at both tube ends, and tubes deviating within their front/back pack of four.
 

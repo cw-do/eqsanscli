@@ -1145,16 +1145,17 @@ def index_ticks(x_mm: np.ndarray, y_mm: np.ndarray, order: np.ndarray,
     return tube_pos, tube_labels, pixel_pos, [int(r) for r in rows]
 
 
-def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
-                      x_mm: Optional[np.ndarray] = None,
-                      y_mm: Optional[np.ndarray] = None) -> Optional[str]:
-    """Raw image beside the same image with the mask overlaid. Returns path or None."""
+def build_comparison_figure(counts: np.ndarray, mask: np.ndarray, title: str,
+                            x_mm: Optional[np.ndarray] = None,
+                            y_mm: Optional[np.ndarray] = None):
+    """Raw image beside the same image with the mask overlaid. Returns (fig, axes)
+    or (None, None) when matplotlib is unavailable."""
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        return None
+        return None, None
 
     order = physical_tube_order(x_mm)
     extent = None
@@ -1167,13 +1168,19 @@ def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
                   float(y_mm.min()), float(y_mm.max())) if y_mm is not None else None
     shown = np.log10(np.clip(counts.T, 1, None))
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.4), constrained_layout=True)
-    for ax, title in zip(axes, ("raw", "mask overlay")):
+    for ax, panel in zip(axes, ("raw", "mask overlay")):
         ax.imshow(shown, origin="lower", aspect="auto", cmap="viridis", extent=extent)
         ax.set_xlabel("x (mm)" if extent else "tube index")
         ax.set_ylabel("y (mm)" if extent else "pixel")
-        ax.set_title(title)
+        ax.set_title(panel)
         if extent is None:
             continue
+        # Viewed with tube index ascending left to right, which is how the
+        # detector is looked at. Tube 0 sits at +x on this instrument, so the
+        # millimetre axis descends across the picture. Only the view is
+        # mirrored -- the coordinates are Mantid's and are what --disc and
+        # --beam-center are given, so they keep their signs.
+        ax.invert_xaxis()
         # Second scale in detector indices: millimetres are what --disc and
         # --beam-center take, tube/pixel indices are what --tubes and --top /
         # --bottom take, and both are read off the same picture.
@@ -1190,10 +1197,25 @@ def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
         right.set_yticks(pixel_pos)
         right.set_yticklabels(pixel_labels, fontsize=7)
         right.set_ylabel("pixel index", fontsize=8)
+
     overlay = np.zeros(mask.T.shape + (4,))
     overlay[mask.T] = (1.0, 0.0, 0.0, 0.55)
     axes[1].imshow(overlay, origin="lower", aspect="auto", extent=extent)
-    fig.suptitle(os.path.basename(path).replace("_compare.png", ""))
+    if extent is not None:
+        axes[1].invert_xaxis()      # imshow resets the limits it was given
+    fig.suptitle(title)
+    return fig, axes
+
+
+def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
+                      x_mm: Optional[np.ndarray] = None,
+                      y_mm: Optional[np.ndarray] = None) -> Optional[str]:
+    """Write the comparison PNG. Returns the path, or None without matplotlib."""
+    title = os.path.basename(path).replace("_compare.png", "")
+    fig, _axes = build_comparison_figure(counts, mask, title, x_mm, y_mm)
+    if fig is None:
+        return None
+    import matplotlib.pyplot as plt
     fig.savefig(path, dpi=110)
     plt.close(fig)
     return path
