@@ -871,3 +871,34 @@ def test_every_documented_flag_parses():
     for flag in sorted(documented):
         args = [flag, takes_value[flag]] if flag in takes_value else [flag]
         assert "unknown option" not in (_parse_args(args)[1] or ""), flag
+
+
+def test_how_banded_says_measured_or_convention():
+    """The bands are measured — where response falls below half the plateau —
+    then floored at 11. On every real run measured so far the floor is what
+    applies, so the report has to say which happened."""
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts()
+
+    auto = ms.build_plan(counts, x_mm, y_mm)
+    assert auto.band_source == "auto"
+    assert auto.bottom == max(auto.measured_bottom, ms.DEFAULT_MIN_BAND)
+    assert auto.top == max(auto.measured_top, ms.DEFAULT_MIN_BAND)
+    if auto.measured_bottom < ms.DEFAULT_MIN_BAND:
+        assert "convention" in auto.how_banded()
+
+    given = ms.build_plan(counts, x_mm, y_mm, bottom=14, top=14)
+    assert given.band_source == "given" and given.bottom == 14
+    assert "given" in given.how_banded()
+
+
+def test_bands_are_measured_at_half_the_plateau():
+    """The threshold is the only number behind the measurement, so pin it."""
+    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts[:, :7] = 10.0          # 7 dead-ish pixels: 0.1 of plateau
+    counts[:, -5:] = 10.0
+    assert ms.find_edge_bands(counts) == (7, 5)
+    counts[:, 7] = 60.0           # 0.6 of plateau — above half, so not a band
+    assert ms.find_edge_bands(counts) == (7, 5)
+    counts[:, 7] = 40.0           # 0.4 — below half, so it joins the band
+    assert ms.find_edge_bands(counts) == (8, 5)

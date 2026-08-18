@@ -120,6 +120,28 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.24.1): say where the tube-end bands came from
+
+Asked: are the top/bottom bands a threshold or just a default? Both, and the
+answer was only in the code: `find_edge_bands` walks the mean along-tube profile
+in from each end while it sits **below half the plateau** (`DEFAULT_BAND_DROP`),
+then `build_plan` floors the result at 11 pixels (`DEFAULT_MIN_BAND`, the
+`MASKED_PIXELS = '1-11,246-256'` convention).
+
+**The floor is what applies in practice.** Measured now on four real runs, the
+profile crosses half the plateau at pixel 8-11 — 186621 gives 9/8, 186104 9/8,
+186631 10/8, 186636 11/10 — so every one of them ends up at 11/11. The
+measurement only takes over on a run whose ends fall off further than usual.
+
+`MaskPlan.how_banded()` now reports which happened, next to the beam radius
+derivation added in 0.23.1, and `.params.json` records `bands_measured` and
+`band_source`. Reads: *"tube-end bands: response falls below half the plateau by
+pixel 9 / 8, raised to the 11-pixel EQSANS convention"*.
+
+**Files changed:** `services/mask_service.py` (`how_banded`, `measured_bottom`,
+`measured_top`, `band_source`), `commands/mask.py` (report line, params, help),
+`tests/test_mask.py` (+2, 66 total), README, `knowledge/instrument-files.md`.
+
 ### 2026-08-18 (v0.24.0): `/mask` flag review, and a shorter help
 
 Asked once the command settled: review the flags, trim what is not needed, and

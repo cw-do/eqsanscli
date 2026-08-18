@@ -48,8 +48,10 @@ _USAGE = (
     "\n"
     "[bold]Tube ends and tubes[/bold]\n"
     "  --top <n> / --bottom <n>  how MANY pixels to mask at each end, not indices:\n"
-    "                         --bottom 11 masks pixels 0-10. Default is measured,\n"
-    "                         never below 11; an explicit value overrides that, so\n"
+    "                         --bottom 11 masks pixels 0-10. Default: measured —\n"
+    "                         where response falls below half the plateau — but\n"
+    "                         never below the 11-pixel EQSANS convention, which in\n"
+    "                         practice is what applies. An explicit value wins, so\n"
     "                         --top 0 --bottom 0 turns the bands off. --bottom is\n"
     "                         the low-index end — the machine-physics mask tool\n"
     "                         names these the other way round.\n"
@@ -241,6 +243,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
                      f"r {radius:.0f} mm — {status}")
     if plan.beam is not None:
         lines.append(f"    [dim]{plan.beam.how_sized()}[/dim]")
+    if plan.bottom or plan.top:
+        lines.append(f"    [dim]{plan.how_banded()}[/dim]")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
@@ -300,6 +304,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "beam_scale": opts["beam_scale"] if opts["beam_scale"] is not None else "auto",
         "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": ms.DEFAULT_BAND_DROP,
+        "bands_measured": [plan.measured_bottom, plan.measured_top],
+        "band_source": plan.band_source,
         "band_convention": ("pixel counts at each end; bottom = low pixel index (-y). "
                             "The machine-physics tool names these the other way round."),
         "tubes": plan.tubes, "tube_source": plan.tube_source,

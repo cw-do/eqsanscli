@@ -461,9 +461,26 @@ so you can judge both.
 
    ```
 
-2. **The low-response bands** at both ends of every tube, measured from where the
-   along-tube profile falls below half the plateau, and never smaller than the
-   11-pixel convention EQSANS has used for years.
+2. **The low-response bands** at both ends of every tube. The mean profile along
+   a tube is walked in from each end while it sits **below half the plateau**,
+   and the result is floored at 11 pixels — the convention EQSANS has used for
+   years (`MASKED_PIXELS = '1-11,246-256'` in each cycle's
+   `prepare_sensitivity.py`).
+
+   In practice the floor is what applies. Measured on four real runs the profile
+   crosses half the plateau at pixel 8–11:
+
+   | run | measured | used |
+   |---|---|---|
+   | 186621 (1.3 m, 1 Å) | 9 bottom / 8 top | 11 / 11 |
+   | 186104 (4 m, 2.5 Å) | 9 / 8 | 11 / 11 |
+   | 186631 (4 m, 10 Å) | 10 / 8 | 11 / 11 |
+   | 186636 (9 m, 15 Å) | 11 / 10 | 11 / 11 |
+
+   So the measurement is a safety net for a run whose ends fall off further than
+   usual, not the normal path. Response is still only ~85% of plateau at pixel 12,
+   and it is the sensitivity map that corrects the rest. The report says which
+   applied.
 
    `--top` and `--bottom` set **how many pixels** to mask at each end — counts,
    not indices. `--bottom 11` masks pixels 0–10; `--top 11` masks 245–255,

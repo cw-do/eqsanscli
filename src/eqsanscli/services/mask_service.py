@@ -717,6 +717,27 @@ class MaskPlan:
     leaks: list = field(default_factory=list)   # direct-beam leak discs found
     leaks_masked: bool = False
     leak_scale: float = 1.0  # --leak-scale, applied to the masked leak discs
+    measured_bottom: int = 0   # what the profile said, before the 11-pixel floor
+    measured_top: int = 0
+    band_source: str = "auto"  # "auto" or "given"
+
+    def how_banded(self) -> str:
+        """Where the tube-end bands came from — measured, or the convention.
+
+        The profile along a tube is walked in from each end while it sits below
+        half the plateau. On every run measured so far that lands at 8-11 pixels,
+        so the 11-pixel EQSANS convention (`MASKED_PIXELS = '1-11,246-256'` in
+        each cycle's prepare_sensitivity.py) is what actually applies; the
+        measurement only takes over on a run whose ends fall off further.
+        """
+        if self.band_source == "given":
+            return f"tube-end bands given: {self.bottom} bottom / {self.top} top"
+        measured = f"response falls below half the plateau by pixel " \
+                   f"{self.measured_bottom} / {self.measured_top}"
+        if (self.bottom, self.top) == (self.measured_bottom, self.measured_top):
+            return f"tube-end bands measured: {measured}"
+        return (f"tube-end bands: {measured}, raised to the {DEFAULT_MIN_BAND}-pixel "
+                f"EQSANS convention")
 
     def summary(self) -> str:
         bits = []
@@ -800,6 +821,8 @@ def build_plan(
             plan.leak_scale = float(leak_scale)
 
     auto_bottom, auto_top = find_edge_bands(counts, drop=band_drop)
+    plan.measured_bottom, plan.measured_top = auto_bottom, auto_top
+    plan.band_source = "auto" if bottom is None and top is None else "given"
     plan.bottom = max(auto_bottom, min_band) if bottom is None else int(bottom)
     plan.top = max(auto_top, min_band) if top is None else int(top)
     if plan.bottom > 0:
