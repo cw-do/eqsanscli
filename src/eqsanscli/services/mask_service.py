@@ -64,6 +64,32 @@ DEFAULT_TUBE_SIGMA = 5.0
 #: convention, only above it.
 DEFAULT_MIN_BAND = 11
 
+#: Pixels below `low_frac` x the median count are beam-stop candidates, but never
+#: below `min_count` -- on a dim run a fraction of the median is meaninglessly
+#: small and Poisson noise floods the candidate set.
+#: A beam-stop candidate must be at least this much darker than its own
+#: surroundings (0.6 = 1.7x darker). Local, not global: a dim run's Poisson noise
+#: dips below any global cut, while a bright halo around the stop lifts the local
+#: baseline.
+DEFAULT_BEAM_CONTRAST = 0.6
+
+#: No EQSANS beam stop is anywhere near this big. A larger "detection" means the
+#: image defeated the finder, so refuse rather than mask a quarter of the
+#: detector.
+MAX_BEAM_RADIUS_MM = 60.0
+
+#: The shadow ends where a ring of pixels has recovered this much of its
+#: surrounding brightness.
+BEAM_RECOVERY_LEVEL = 0.75
+
+#: Above this the core is not meaningfully darker than its surroundings, so
+#: there is no shadow to mask -- refuse rather than invent one.
+NO_SHADOW_CONTRAST = 0.8
+
+#: A core shallower than this is not a clean beam stop: the measured radius will
+#: under-state the real one, so say so rather than quietly under-masking.
+SHALLOW_CORE_CONTRAST = 0.35
+
 #: Front and back tubes alternate in packs of this many. See find_deviant_tubes
 #: for the measurement that establishes it.
 TUBE_PACK = 4
@@ -112,6 +138,7 @@ class BeamStop:
     yc: float          # mm
     radius: float      # mm
     npix: int
+    core_contrast: float = 0.0   # how dark the core is vs its surroundings
 
     def as_shape(self) -> dict:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
@@ -145,42 +172,109 @@ def find_beam_stop(
     *,
     scale: float = DEFAULT_BEAM_SCALE,
     pad: float = DEFAULT_BEAM_PAD,
-    search_frac: float = 0.5,
-) -> Optional[BeamStop]:
-    """Locate the beam-stop shadow and describe it as a circle in millimetres.
+    contrast_max: float = DEFAULT_BEAM_CONTRAST,
+    max_radius_mm: float = MAX_BEAM_RADIUS_MM,
+) -> tuple[Optional[BeamStop], str]:
+    """Locate the beam-stop shadow as a circle on the detector face.
 
-    Works on the *deficit* (how far each pixel falls below the local plateau)
-    inside the central `search_frac` of the detector, so a bright sample or an
-    off-centre beam does not drag the result around.
+    Returns (beam, reason). `beam` is None when nothing credible was found, and
+    `reason` then says why — better than emitting a wrong circle, which is what a
+    global threshold does on a dim run.
 
-    The result is physical because tube index is not a spatial coordinate (see
-    the module docstring), but the knobs keep the units of the machine-physics
-    mask tool: `scale` multiplies the fitted radius and `pad` is **in y-pixels**
-    (one pixel along a tube, ~4.09 mm), converted here.
+    The shadow is found by **local** contrast: the image smoothed over ~5 pixels
+    against the same image smoothed over ~41, so a region counts as shadow when
+    it is much darker than *its own surroundings*. A global threshold cannot do
+    this job on both kinds of run:
+
+    - a bright banjo (run 186104, median 90 counts) has a core 12x below plateau
+      and any threshold finds it;
+    - a weak one (run 186631, median 4 counts) has a core only ~2x below
+      plateau, sitting inside a bright halo, while Poisson noise puts ~9% of the
+      whole detector under the same threshold. A global cut there returns
+      thousands of scattered pixels, whose centroid is nowhere near the beam and
+      whose count implies a radius of ~70 mm instead of ~25.
+
+    The centroid is then refined onto the main blob (four rounds, as the
+    machine-physics mask maker does), and the result is checked for credibility
+    before being returned.
     """
-    ny, nx = N_PIXELS, N_TUBES
-    x0, x1 = int(nx * (1 - search_frac) / 2), int(nx * (1 + search_frac) / 2)
-    y0, y1 = int(ny * (1 - search_frac) / 2), int(ny * (1 + search_frac) / 2)
-    window = counts[x0:x1, y0:y1]
-    if window.size == 0:
-        return None
+    from scipy.ndimage import label, uniform_filter
 
-    plateau = float(np.median(window))
-    if plateau <= 0:
-        return None
-    shadow = window < 0.3 * plateau
-    npix = int(shadow.sum())
-    if npix < 4:
-        return None
+    order = physical_tube_order(x_mm)
+    inverse = np.argsort(order)
+    image = counts[order].astype(float)
+    local = uniform_filter(image, size=5, mode="nearest")
+    surround = uniform_filter(image, size=41, mode="nearest")
+    contrast = (local / np.clip(surround, 1e-9, None))[inverse]
 
-    xs = x_mm[x0:x1, y0:y1][shadow]
-    ys = y_mm[x0:x1, y0:y1][shadow]
+    half_w = (x_mm.max() - x_mm.min()) / 2.0
+    half_h = (y_mm.max() - y_mm.min()) / 2.0
+    x_mid = (x_mm.max() + x_mm.min()) / 2.0
+    y_mid = (y_mm.max() + y_mm.min()) / 2.0
+    window = ((np.abs(x_mm - x_mid) <= 0.80 * half_w)
+              & (np.abs(y_mm - y_mid) <= 0.70 * half_h))
+
+    dark = (contrast < contrast_max) & window
+    if int(dark.sum()) < 8:
+        return None, (f"no region is more than {1 / contrast_max:.1f}x darker than its "
+                      f"surroundings — this run may have no beam stop in view")
+
+    # Keep the largest connected blob: scattered noise never forms one.
+    labels, n_blobs = label(dark)
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    blob = labels == int(np.argmax(sizes))
+    npix = int(blob.sum())
+    if npix < 8:
+        return None, (f"the darkest region is only {npix} pixels — too small to be a "
+                      f"beam stop; try a longer run")
+
+    xs, ys = x_mm[blob], y_mm[blob]
     xc, yc = float(xs.mean()), float(ys.mean())
-    # Radius from the shadow's AREA: npix * (area per pixel) = pi r^2. Taking a
-    # median distance instead would overestimate by sqrt(2) on a filled disc.
+    pitch = pixel_pitch_y_mm(y_mm)
+    for _ in range(4):
+        distance = np.hypot(xs - xc, ys - yc)
+        keep = distance <= max(float(np.percentile(distance, 80)) * 1.5, 4.0 * pitch)
+        if int(keep.sum()) < 5:
+            break
+        xc, yc = float(xs[keep].mean()), float(ys[keep].mean())
+
+    # Radius from where the shadow ENDS: the smallest radius at which the ring
+    # of pixels just outside has recovered most of its surrounding brightness.
+    # Taking it from the thresholded pixel count instead would make the radius a
+    # function of the threshold.
+    distance = np.hypot(x_mm - xc, y_mm - yc)
     radius = math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi)
-    pad_mm = pad * pixel_pitch_y_mm(y_mm)
-    return BeamStop(xc=xc, yc=yc, radius=radius * scale + pad_mm, npix=npix)
+    for probe in np.arange(2.0, max_radius_mm, 1.0):
+        ring = (distance >= probe) & (distance < probe + 3.0)
+        if ring.any() and float(contrast[ring].mean()) > BEAM_RECOVERY_LEVEL:
+            radius = float(probe)
+            break
+    core = distance < max(6.0, 1.5 * pitch)
+    core_contrast = float(contrast[core].mean()) if core.any() else 0.0
+
+    if radius > max_radius_mm:
+        return None, (f"the darkest region implies a {radius:.0f} mm radius, larger than "
+                      f"any EQSANS beam stop — detection is not trustworthy on this image")
+    off_centre = math.hypot(xc - x_mid, yc - y_mid)
+    if off_centre > 0.6 * min(half_w, half_h):
+        return None, (f"the darkest region is {off_centre:.0f} mm from the detector centre, "
+                      f"too far out to be the beam stop")
+
+    if core_contrast > NO_SHADOW_CONTRAST:
+        return None, (f"the darkest region is only {1 / max(core_contrast, 1e-9):.2f}x darker "
+                      f"than its surroundings — no beam stop is discernible in this image")
+
+    beam = BeamStop(xc=xc, yc=yc, radius=radius * scale + pad * pitch, npix=npix,
+                    core_contrast=core_contrast)
+    if core_contrast > SHALLOW_CORE_CONTRAST:
+        return beam, (
+            f"the shadow is shallow (core only {1 / max(core_contrast, 1e-9):.1f}x darker "
+            f"than its surroundings), so its apparent size is smaller than the beam stop "
+            f"really is — at long wavelength the halo fills in the penumbra. Check the "
+            f"preview, and set --beam-radius <mm> if it is under-masked"
+        )
+    return beam, ""
 
 
 def find_edge_bands(
@@ -276,6 +370,7 @@ class MaskPlan:
     top: int = 0
     tubes: list[int] = field(default_factory=list)
     tube_source: str = "auto"
+    beam_note: str = ""      # why no beam stop was masked, when there is none
 
     def summary(self) -> str:
         bits = []
@@ -306,12 +401,30 @@ def build_plan(
     tubes: Optional[Sequence[int]] = None,
     use_beam: bool = True,
     use_tubes: bool = True,
+    beam_center: Optional[tuple[float, float]] = None,
+    beam_radius: Optional[float] = None,
 ) -> MaskPlan:
     """Decide what to mask. Explicit arguments override what is measured."""
     plan = MaskPlan()
 
     if use_beam and x_mm is not None and y_mm is not None:
-        plan.beam = find_beam_stop(counts, x_mm, y_mm, scale=beam_scale, pad=beam_pad)
+        if beam_center is not None or beam_radius is not None:
+            # Stated by the user: used verbatim, no scale or pad applied, since
+            # they are describing the mask they want rather than the shadow.
+            measured, _ = find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
+            if beam_center is None and measured is None:
+                plan.beam_note = ("--beam-radius given but the centre could not be "
+                                  "found; add --beam-center <x> <y> in mm")
+            else:
+                xc, yc = beam_center if beam_center is not None else (measured.xc, measured.yc)
+                radius = beam_radius if beam_radius is not None else measured.radius
+                plan.beam = BeamStop(xc=xc, yc=yc, radius=radius, npix=0,
+                                     core_contrast=measured.core_contrast if measured else 0.0)
+                plan.beam_note = "beam stop set explicitly"
+        else:
+            plan.beam, plan.beam_note = find_beam_stop(
+                counts, x_mm, y_mm, scale=beam_scale, pad=beam_pad,
+            )
         if plan.beam:
             plan.shapes.append(plan.beam.as_shape())
 

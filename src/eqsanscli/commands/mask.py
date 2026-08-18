@@ -31,6 +31,8 @@ _USAGE = (
     "  --beam-pad <f>    add a margin beyond it, in pixels along a tube (default 1.0,\n"
     "                    same units as the machine-physics mask tool; 1 px = 4.09 mm).\n"
     "                    The mask itself is a real circle on the detector face.\n"
+    "  --beam-center <x>,<y>  state the beam centre in mm instead of finding it\n"
+    "  --beam-radius <mm>     state the beam radius in mm (used verbatim)\n"
     "  --no-beam         do not mask the beam stop\n"
     "  --top <n>         force the top band size (default: measured, min 11)\n"
     "  --bottom <n>      force the bottom band size\n"
@@ -51,9 +53,11 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         "beam_pad": ms.DEFAULT_BEAM_PAD, "band_drop": ms.DEFAULT_BAND_DROP,
         "tube_sigma": ms.DEFAULT_TUBE_SIGMA, "top": None, "bottom": None,
         "tubes": None, "use_beam": True, "use_tubes": True, "dry_run": False,
+        "beam_center": None, "beam_radius": None,
     }
     floats = {"--beam-scale": "beam_scale", "--beam-pad": "beam_pad",
-              "--band-drop": "band_drop", "--tube-sigma": "tube_sigma"}
+              "--band-drop": "band_drop", "--tube-sigma": "tube_sigma",
+              "--beam-radius": "beam_radius"}
     ints = {"--top": "top", "--bottom": "bottom"}
     i = 0
     while i < len(args):
@@ -64,7 +68,7 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
             opts["use_tubes"] = False
         elif arg in ("--dry-run", "--dryrun"):
             opts["dry_run"] = True
-        elif arg in floats or arg in ints or arg in ("--ipts", "--outdir", "--tubes"):
+        elif arg in floats or arg in ints or arg in ("--ipts", "--outdir", "--tubes", "--beam-center"):
             if i + 1 >= len(args):
                 return opts, f"{args[i]} needs a value"
             value = args[i + 1]
@@ -74,6 +78,11 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
                     opts[floats[arg]] = float(value)
                 elif arg in ints:
                     opts[ints[arg]] = int(value)
+                elif arg == "--beam-center":
+                    parts = value.replace(" ", "").split(",")
+                    if len(parts) != 2:
+                        return opts, "--beam-center needs <x>,<y> in mm"
+                    opts["beam_center"] = (float(parts[0]), float(parts[1]))
                 elif arg == "--tubes":
                     opts["tubes"] = [int(t) for t in value.replace(" ", "").split(",") if t]
                 else:
@@ -135,7 +144,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         lines.append(f"    [dim]{image.title}[/dim]")
 
     plan = ms.build_plan(
-        image.counts, image.x_mm, image.y_mm, beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
+        image.counts, image.x_mm, image.y_mm,
+        beam_center=opts["beam_center"], beam_radius=opts["beam_radius"],
+        beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
         band_drop=opts["band_drop"], tube_sigma=opts["tube_sigma"],
         bottom=opts["bottom"], top=opts["top"], tubes=opts["tubes"],
         use_beam=opts["use_beam"], use_tubes=opts["use_tubes"],
@@ -144,6 +155,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     indices = ms.mask_to_indices(mask)
     n = len(indices)
     lines.append(f"  Masking {n} pixels ({100 * n / mask.size:.2f}%): {plan.summary()}")
+    if plan.beam_note and plan.beam_note != "beam stop set explicitly":
+        marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
+        lines.append(f"    {marker} {plan.beam_note}")
     if plan.tube_source == "auto" and not plan.tubes:
         lines.append("    [dim]no deviant tubes at this threshold — lower --tube-sigma "
                      "to look harder, or name them with --tubes[/dim]")

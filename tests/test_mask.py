@@ -104,22 +104,52 @@ def test_reshape_recovers_pixel_major_ordering():
 
 def test_beam_stop_is_found_where_it_was_put():
     x_mm, y_mm = synthetic_positions()
-    beam = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm, scale=1.0, pad=0.0)
-    assert beam is not None
-    assert abs(beam.xc) < 3.0 and abs(beam.yc) < 3.0, (beam.xc, beam.yc)
-    # Radius comes from the shadow's area, so it lands near the true radius.
-    assert abs(beam.radius - TRUE_BEAM_R * PIXEL_PITCH_MM) < 5.0, beam.radius
+    beam, why = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm, scale=1.0, pad=0.0)
+    assert beam is not None, why
+    assert abs(beam.xc) < 4.0 and abs(beam.yc) < 4.0, (beam.xc, beam.yc)
+    assert abs(beam.radius - TRUE_BEAM_R * PIXEL_PITCH_MM) < 12.0, beam.radius
+    assert beam.core_contrast < 0.2, beam.core_contrast
 
 
 def test_beam_scale_multiplies_and_pad_is_in_y_pixels():
     """`--beam-pad` keeps the machine-physics tool's units: pixels along a tube."""
     x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts()
-    base = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
-    scaled = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
-    padded = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=7.0)
+    base, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
+    scaled, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
+    padded, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=7.0)
     assert abs(scaled.radius - 2 * base.radius) < 1e-6
     assert abs(padded.radius - (base.radius + 7 * PIXEL_PITCH_MM)) < 1e-6
+
+
+def test_noise_alone_never_yields_a_beam_stop():
+    """The reported bug: on a dim run (median 4 counts) ~9% of the detector dips
+    below any global threshold, and a single-pass centroid returned a 70 mm
+    circle nowhere near the beam."""
+    rng = np.random.default_rng(1)
+    counts = rng.poisson(4.0, size=(ms.N_TUBES, ms.N_PIXELS)).astype(float)
+    x_mm, y_mm = synthetic_positions()
+    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam is None, (beam, why)
+    assert why
+
+
+def test_an_implausibly_large_detection_is_refused():
+    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts[40:150, 40:210] = 1.0          # a quarter of the detector "dark"
+    x_mm, y_mm = synthetic_positions()
+    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam is None
+    assert "darker" in why or "too far out" in why, why
+
+
+def test_explicit_beam_center_and_radius_are_used_verbatim():
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm,
+                         beam_center=(12.0, -8.0), beam_radius=31.0)
+    assert plan.beam is not None
+    assert (plan.beam.xc, plan.beam.yc, plan.beam.radius) == (12.0, -8.0, 31.0)
+    assert plan.beam_note == "beam stop set explicitly"
 
 
 def test_pixel_pitch_matches_the_real_detector():

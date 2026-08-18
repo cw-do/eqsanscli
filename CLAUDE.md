@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.16.0 | 2026-08-18 | Beam-stop detection rebuilt on local contrast: a dim run's Poisson noise no longer produces a huge off-centre circle. Refuses when no shadow is discernible; `--beam-center` / `--beam-radius` added. |
 | 0.15.1 | 2026-08-17 | `--beam-pad` back to y-pixels, the units the machine-physics mask tool uses; converted to mm internally. |
 | 0.15.0 | 2026-08-17 | Beam stop masked in millimetres against real pixel positions — tube index is not a spatial coordinate, so the index-space circle was only 87% right. |
 | 0.14.1 | 2026-08-17 | Fix: `/mask --beam-pad` padded only the y radius, distorting the beam circle (13% off aspect at the default, 77% at pad 6). |
@@ -111,6 +112,43 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.16.0): Beam-stop detection on a dim run
+
+Reported: a mask built from run 186631 came out far too big and off-centre,
+while the machine-physics mask maker had been fine.
+
+**Cause.** That run (`S-banjo 4m 10A`, IPTS-38681) has 236,593 counts, a median
+of **4 per pixel** — against 4,025,003 (median 90) for the run I had tested on.
+The detector thresholded at `counts < 0.3 x median` = 1.2 counts, and Poisson
+noise at mean 4 puts ~9% of the whole detector below that. 418 scattered noise
+pixels went into a single-pass centroid, giving a centre 45 mm off and a radius
+of **69.7 mm** from the pixel count — precisely "too big and not centred".
+
+**Also true:** at 10 Å the banjo's halo around the stop is bright, so the core is
+only ~2x darker than plateau (0.54 local contrast) versus 12x (0.04) on the
+bright 2.5 Å run. No global threshold separates those two cases.
+
+**Now.** The shadow is found by **local** contrast — the image smoothed over
+~5 pixels against ~41 — so a region qualifies by being darker than *its own
+surroundings*, which works at both count levels and through a halo. The largest
+connected blob is taken, its centroid refined over four rounds (the same idea
+the machine-physics maker uses, which is what makes that one robust), and the
+radius measured from **where the shadow ends** — the smallest radius at which
+the surrounding ring has recovered 75% of its brightness — rather than from a
+threshold-dependent pixel count.
+
+**It now refuses rather than guesses:** no blob at all, a blob under 8 pixels, a
+core less than 1.25x darker than its surroundings, a radius over 60 mm, or a
+centre more than 60% of the way to an edge — each returns no beam mask and says
+why. Pure Poisson noise is refused, as a test asserts.
+
+**When detection is honest but limited**, it says so: on 186631 it finds the
+centre correctly (26.6, 11.6) mm but warns that the shallow core means the
+apparent size understates the real stop, and points at `--beam-radius`.
+
+**New:** `--beam-center <x>,<y>` and `--beam-radius <mm>` state the beam
+explicitly, in millimetres, used verbatim.
 
 ### 2026-08-17 (v0.15.1): `--beam-pad` speaks y-pixels again
 
