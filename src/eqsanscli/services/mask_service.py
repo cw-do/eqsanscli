@@ -121,8 +121,13 @@ def find_beam_stop(
 
     The mask is a physical circle, which on this detector is an ellipse in index
     space: pixels are finer along a tube than tubes are apart, so
-    ``ry/rx = N_PIXELS/N_TUBES``. `scale` enlarges it; `pad` adds pixels on the
-    y axis afterwards.
+    ``ry/rx = N_PIXELS/N_TUBES``.
+
+    Both knobs keep that ratio, so the masked region stays circular on the
+    detector face: `scale` multiplies the fitted radius, `pad` adds a margin
+    quoted in y-pixels (and therefore ``pad / aspect`` tubes on the x axis).
+    Padding only ry would stretch the circle vertically -- 13% off aspect at the
+    default pad, 77% at pad 6.
     """
     ny, nx = N_PIXELS, N_TUBES
     x0, x1 = int(nx * (1 - search_frac) / 2), int(nx * (1 + search_frac) / 2)
@@ -147,7 +152,8 @@ def find_beam_stop(
     aspect = ny / nx
     rx = math.sqrt(npix / (math.pi * aspect))
     ry = rx * aspect
-    return BeamStop(xc=xc, yc=yc, rx=rx * scale, ry=ry * scale + pad, npix=npix)
+    return BeamStop(xc=xc, yc=yc, rx=rx * scale + pad / aspect,
+                    ry=ry * scale + pad, npix=npix)
 
 
 def find_edge_bands(

@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.14.1 | 2026-08-17 | Fix: `/mask --beam-pad` padded only the y radius, distorting the beam circle (13% off aspect at the default, 77% at pad 6). |
 | 0.14.0 | 2026-08-17 | `/mask create <run>` builds a mask from a run's own image, self-contained, named for its configuration so the resolver finds it. |
 | 0.13.0 | 2026-08-17 | Knowledge base restructured into `knowledge/` with `protocol.md` as the authority; topic-aware loader; stale/contradicting `preset_configs/knowledge.md` removed. |
 | 0.12.0 | 2026-08-17 | `/reduce` preflight: refuses rows with no empty beam (beam centre), with `--skip-missing` / `--force`; autopilot's `--from 4+` gap closed and `_reduce_phase` skips unreducible rows. |
@@ -108,6 +109,20 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.14.1): `/mask --beam-pad` distorted the beam circle
+
+Found while explaining the option. The beam stop is masked as a *physical*
+circle, an ellipse in index space with `ry/rx = 256/192`, but `--beam-pad` added
+its margin to `ry` alone — so padding stretched the mask vertically instead of
+growing the circle: 13% off aspect at the default `pad 1.0`, 39% at 3, 77% at 6.
+(The phrasing "pad is in y-pixels" was carried over from the machine-physics
+skill and applied to one axis only.)
+
+Padding now adds `pad` pixels on y and the matching `pad / aspect` tubes on x, so
+the region stays circular on the detector face at every setting; `--beam-scale`
+already did. The help text says which knob does what. Two tests pin the aspect
+ratio across both knobs and check that `--beam-pad 4` really means four pixels.
 
 ### 2026-08-17 (v0.14.0): `/mask create` — build a mask inside eqsanscli
 

@@ -94,6 +94,24 @@ def test_beam_scale_and_pad_enlarge_it():
     assert big.rx > small.rx and big.ry > small.ry + 2
 
 
+def test_beam_stays_circular_under_both_knobs():
+    """Padding only ry would stretch the circle vertically (13% off at pad 1)."""
+    counts = synthetic_counts()
+    aspect = ms.N_PIXELS / ms.N_TUBES
+    for scale, pad in ((1.0, 0.0), (1.2, 1.0), (1.2, 6.0), (1.0, 6.0), (2.0, 2.0)):
+        beam = ms.find_beam_stop(counts, scale=scale, pad=pad)
+        assert abs(beam.ry / beam.rx - aspect) < 1e-6, (scale, pad, beam)
+
+
+def test_pad_is_quoted_in_pixels():
+    """`--beam-pad 4` adds 4 pixels on y, and the matching arc on x."""
+    counts = synthetic_counts()
+    base = ms.find_beam_stop(counts, scale=1.0, pad=0.0)
+    padded = ms.find_beam_stop(counts, scale=1.0, pad=4.0)
+    assert abs((padded.ry - base.ry) - 4.0) < 1e-6
+    assert abs((padded.rx - base.rx) - 4.0 / (ms.N_PIXELS / ms.N_TUBES)) < 1e-6
+
+
 def test_edge_bands_are_measured():
     bottom, top = ms.find_edge_bands(synthetic_counts())
     assert abs(bottom - TRUE_BAND) <= 3, bottom
