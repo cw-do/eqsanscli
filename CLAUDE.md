@@ -120,6 +120,36 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18: every threshold documented (no version bump — docs only)
+
+Follow-up to the band question: *"is measured threshold 0.8? or 0.85??"* — no,
+**0.5**. The 0.80/0.85 were response *levels* at pixels 11 and 13, printed in the
+same table as the threshold, which is exactly how documentation causes confusion.
+
+**README gains a *What sets each size* section**: one row per measured quantity —
+beam stop with and without flare, beam centre, tube-end bands, dead/hot/marginal
+tubes, leak discs — giving what it is measured from, the number, the bound applied
+after, and the flag that overrides it. Below it, a table of the named constants
+with their values, and the reason for the two that are not self-explanatory (the
+1.2 growth on the no-flare path, the 11-pixel floor).
+
+The band item now shows the walk itself on run 186621 — 0.29 at pixel 8, 0.52 at
+9, 0.72, 0.80, 0.83, 0.85 — so the threshold and the response levels cannot be
+mistaken for each other again, and says why the band stops where response *starts*
+rather than where it is complete: the residual 15-20% is the sensitivity map's
+job.
+
+`test_documented_thresholds` asserts all twelve constants against the table.
+Writing it caught the table naming `FLARE_CONTRAST`, which v0.22.0 deleted when
+cross cuts replaced the ring fit.
+
+Also fixed: a `knowledge/instrument-files.md` edit in v0.24.1 silently did nothing
+because its target text spanned a line break, and the script did not assert. The
+paragraph is now a three-row table of what is measured and what bounds it.
+
+**Files changed:** README.md, `knowledge/instrument-files.md`, SKILL.md,
+AGENT_SKILL.md, `tests/test_mask.py` (+1, 67 total).
+
 ### 2026-08-18 (v0.24.1): say where the tube-end bands came from
 
 Asked: are the top/bottom bands a threshold or just a default? Both, and the

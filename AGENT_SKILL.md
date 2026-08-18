@@ -432,7 +432,10 @@ and the horizontal valley width — wall summit to wall summit — is the diamet
 That survives a shadow filled in by halo or by gravity-dropped beam: at 9 m and
 15 Å it gives 80 mm against a stop 90 mm across, and at 4 m 66 mm against a 68 mm
 hand-made mask. Runs whose cuts have no flare walls fall back to the shadow
-itself, grown slightly; the report says which was used. Counting statistics still
+itself, grown slightly; the report prints the arithmetic behind every size.
+The tube-end bands are measured where response falls below half the plateau and
+floored at the 11-pixel EQSANS convention — in practice the floor is what
+applies. README's *What sets each size* table lists every threshold. Counting statistics still
 matter — ~90 counts/pixel is comfortable, ~4 is marginal. When neither estimator
 is credible the beam is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
 `--beam-radius <mm>` state it explicitly. `--leak` also masks the gravity-dropped beam below the stop, one disc per lobe, and `--leak-scale <f>` grows those discs to catch the faint tail. `--dry-run` previews without writing,

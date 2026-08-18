@@ -87,10 +87,23 @@ configuration.
 
 Build one from a uniformly illuminated run (banjo, flood, empty cell) with
 `/mask create <run>` — the run number alone locates the file, since the archive is
-searched for it as Mantid would: it masks the beam-stop shadow, the low-response bands at
-the tube ends, and tubes deviating from others in their front/back group, then
-writes `mask_<config>_<run>.nxs` into the working folder — named so the search
-above finds it.
+searched for it as Mantid would. It masks three things, each measured from the run
+and then bounded by a convention:
+
+| | measured | bound |
+|---|---|---|
+| beam stop | valley width between the flare walls in a horizontal cut through it | `× 1.0 + 1 pixel`; with no flare, the shadow `× 1.2 + 1 pixel` |
+| tube-end bands | where the along-tube profile falls below **half the plateau** | floored at **11 pixels** |
+| deviant tubes | tube median against a local same-pack baseline | dead below 0.3×, hot above 3×; the 5σ test only where the baseline exceeds 20 counts |
+
+It writes `mask_<config>_<run>.nxs` into the working folder — named so the search
+above finds it — and prints the arithmetic behind each size.
+
+The band threshold is 0.5 and only 0.5. On every run measured so far it lands at
+pixel 8-11, so the 11-pixel convention is what actually applies. Outside the band
+a tube end still reads 15-20% below plateau (0.80 at pixel 11, 0.85 at pixel 13 on
+run 186621) — that residual is the sensitivity map's job, not the mask's, which is
+why the band stops where response *starts* rather than where it is complete.
 
 At long wavelength and long flight path the direct beam **falls under gravity**,
 by an amount going as the square of the wavelength, so some of it misses the stop

@@ -467,6 +467,20 @@ so you can judge both.
    years (`MASKED_PIXELS = '1-11,246-256'` in each cycle's
    `prepare_sensitivity.py`).
 
+   **The threshold is 0.5 — half the plateau — and nothing else.** Walking in from
+   pixel 0 on run 186621, as a fraction of the plateau:
+
+   | pixel | 0–7 | 8 | **9** | 10 | 11 | 12 | 13 |
+   |---|---|---|---|---|---|---|---|
+   | response | 0.01–0.14 | 0.29 | **0.52** | 0.72 | 0.80 | 0.83 | 0.85 |
+
+   The walk stops at pixel 9, so the measurement is 9 — then the floor raises it
+   to 11. The 0.80 and 0.85 further along that row are *response levels*, not
+   thresholds: they say that even outside the band a tube end is still 15–20%
+   down. That is deliberate. The band marks where a tube end starts behaving, not
+   where it has fully recovered; the residual is what the sensitivity map
+   corrects, so masking stops there rather than chasing full response.
+
    In practice the floor is what applies. Measured on four real runs the profile
    crosses half the plateau at pixel 8–11:
 
@@ -478,9 +492,12 @@ so you can judge both.
    | 186636 (9 m, 15 Å) | 11 / 10 | 11 / 11 |
 
    So the measurement is a safety net for a run whose ends fall off further than
-   usual, not the normal path. Response is still only ~85% of plateau at pixel 12,
-   and it is the sensitivity map that corrects the rest. The report says which
-   applied.
+   usual, not the normal path. The report says which applied:
+
+   ```
+   tube-end bands: response falls below half the plateau by pixel 9 / 8,
+   raised to the 11-pixel EQSANS convention
+   ```
 
    `--top` and `--bottom` set **how many pixels** to mask at each end — counts,
    not indices. `--bottom 11` masks pixels 0–10; `--top 11` masks 245–255,
@@ -514,6 +531,50 @@ so you can judge both.
    When the run is too dim to tell a dead tube from an unlucky one, no tubes are
    flagged and it says so. Auto-detection is whole-tube: a dead *segment*
    averages out, so name it with `--tubes`.
+
+### What sets each size
+
+Every size in a mask is measured, then bounded by a convention or a margin. This
+is the whole of it:
+
+| | measured from | the number | then | override |
+|---|---|---|---|---|
+| beam stop, flare present | horizontal cut: distance between the flare wall summits | wall must rise 1.5× above the valley floor and fall back to 0.6× beyond its summit | `× 1.0 + 1 px pad` | `--beam-radius`, `--beam-scale`, `--beam-pad` |
+| beam stop, no flare | the shadow blob: equal-area radius or half its longest extent | local contrast < 0.6 | `× 1.2 + 1 px pad` | as above |
+| beam centre | vertical cut for y, horizontal cut for x — midpoint between the walls | — | — | `--beam-center` |
+| tube-end bands | along-tube profile walked in from each end | below **0.5** of the plateau | floored at **11 pixels** | `--top`, `--bottom` |
+| dead tube | tube median vs local baseline (same pack, ±16 tubes) | below **0.3×** | — | `--tubes`, `--no-tubes` |
+| hot tube | same | above **3×** | — | as above |
+| marginal tube | same, MAD z-score | above **5σ** | only where baseline > 20 counts and deviation > 25% | `--tube-sigma` |
+| gravity leak disc | bright lobe below the stop | local contrast > 3.0 | contains the lobe + 2 px rim | `--leak-scale`, `--disc` |
+
+Every number above is a named constant in `services/mask_service.py`:
+
+| constant | value | what it sets |
+|---|---|---|
+| `DEFAULT_BEAM_CONTRAST` | 0.6 | how much darker than its surroundings the shadow seed must be |
+| `CUT_WALL_MIN_RATIO` | 1.5 | how far a flare wall must rise above the valley floor |
+| `CUT_WALL_DECAY` | 0.6 | how far it must fall again beyond the summit, to be a wall and not the plateau |
+| `CUT_SUMMIT_LEVEL` / `CUT_SUMMIT_BINS` | 0.8 / 2 | the crest averaged for the summit position |
+| `DEFAULT_BEAM_SCALE` / `DEFAULT_BEAM_PAD` | 1.2 / 1.0 px | growth on the no-flare path, and the margin on both |
+| `DEFAULT_BAND_DROP` / `DEFAULT_MIN_BAND` | **0.5** / **11** | the band threshold, and the floor that usually wins |
+| `DEFAULT_DEAD_FRAC` / `DEFAULT_HOT_FRAC` | 0.3 / 3.0 | dead and hot tube ratios |
+| `DEFAULT_TUBE_SIGMA` / `MIN_BASE_FOR_SIGMA` / `TUBE_MIN_DEVIATION` | 5.0 / 20 counts / 0.25 | the statistical tube test and when it is allowed to apply |
+| `LEAK_CONTRAST` / `LEAK_EDGE_PIXELS` | 3.0 / 2 px | what counts as leaked beam, and the rim added to its disc |
+| `MAX_BEAM_RADIUS_MM` | 60 | above this, detection is refused rather than trusted |
+
+`test_documented_thresholds` asserts each of these values, so this table and the
+code cannot drift apart silently.
+
+Two of these are worth knowing the reason for:
+
+- **The 1.2 on the no-flare path** reaches past the umbra. A contrast threshold
+  stops at the dark core, and the beam is still partly blocked outside it — see
+  the penumbra numbers above. A measured valley width needs no such growth, which
+  is why the default depends on which path ran.
+- **The 11-pixel floor** is the EQSANS convention
+  (`MASKED_PIXELS = '1-11,246-256'`), and the measurement has never exceeded it on
+  a real run.
 
 ### When it refuses
 

@@ -902,3 +902,21 @@ def test_bands_are_measured_at_half_the_plateau():
     assert ms.find_edge_bands(counts) == (7, 5)
     counts[:, 7] = 40.0           # 0.4 — below half, so it joins the band
     assert ms.find_edge_bands(counts) == (8, 5)
+
+
+def test_documented_thresholds():
+    """Every number in the README's 'What sets each size' table. Documentation
+    that drifts from the code is worse than none, and these are exactly the
+    numbers people ask about."""
+    assert ms.DEFAULT_BEAM_CONTRAST == 0.6
+    assert ms.CUT_WALL_MIN_RATIO == 1.5
+    assert ms.CUT_WALL_DECAY == 0.6
+    assert (ms.CUT_SUMMIT_LEVEL, ms.CUT_SUMMIT_BINS) == (0.8, 2)
+    assert (ms.DEFAULT_BEAM_SCALE, ms.DEFAULT_BEAM_PAD) == (1.2, 1.0)
+    assert (ms.DEFAULT_BAND_DROP, ms.DEFAULT_MIN_BAND) == (0.5, 11)
+    assert (ms.DEFAULT_DEAD_FRAC, ms.DEFAULT_HOT_FRAC) == (0.3, 3.0)
+    assert ms.DEFAULT_TUBE_SIGMA == 5.0
+    assert (ms.MIN_BASE_FOR_SIGMA, ms.TUBE_MIN_DEVIATION) == (20.0, 0.25)
+    assert (ms.LEAK_CONTRAST, ms.LEAK_EDGE_PIXELS) == (3.0, 2.0)
+    assert ms.MAX_BEAM_RADIUS_MM == 60.0
+    assert (ms.TUBE_BASELINE_WINDOW, ms.TUBE_PACK) == (16, 4)
