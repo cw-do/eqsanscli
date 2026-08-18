@@ -167,6 +167,10 @@ a tube and 4.09 mm along one — not square. Two consequences:
   while physical neighbours are 5.49 mm apart, and **x is not monotonic in tube
   index**. Tube comparisons are therefore made within a pack group; comparing
   odd-to-odd mixes the two populations and hides real outliers.
+- The preview carries both scales: millimetres on the bottom and left, tube and
+  pixel index on the top and right, with tube ticks placed at the tubes' real
+  positions. Tube labels are exact only at the ticks, since the interleave makes
+  index non-linear in x, and on this detector tube 191 sits at the −x edge.
 - A circle drawn in index space is **not** a circle on the detector. For run
   186104's beam stop it agreed with the true disc only 87%, covering a region
   82.6 × 69.5 mm. The beam stop is masked in millimetres against the real pixel

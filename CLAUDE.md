@@ -120,6 +120,30 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.22.2): the preview carries both scales
+
+Asked for: *"when displaying (making comparison png file) display both tube
+index(pixel index) and mm. tube index is useful to mask detector by tube number."*
+
+Right — the two sets of flags speak different languages. `--disc`,
+`--beam-center` and `--beam-radius` are in millimetres; `--tubes`, `--top` and
+`--bottom` are in indices. The picture only carried the first.
+
+`index_ticks()` returns tick positions in mm with the tube / pixel index sitting
+at each, **looked up from the geometry** rather than computed: tube index is not
+linear in x, and on the real detector it runs backwards — tube 191 sits at
+x = −525 mm and tube 0 at +525. `render_comparison` adds a `twiny` (tube index,
+every 16) and a `twinx` (pixel index, every 32) to both panels.
+
+Labels are exact only at the ticks, because of the pack-of-four interleave, and
+the axis label says so. To act on a tube spotted by eye, read the approximate
+index and confirm against the tube list in the report or with
+`--tubes <n> --dry-run`.
+
+**Files changed:** `services/mask_service.py` (`index_ticks`, twin axes, figure
+11x5 -> 12x5.4), `tests/test_mask.py` (+2, 55 total), README, SKILL,
+AGENT_SKILL, `knowledge/instrument-files.md`.
+
 ### 2026-08-18 (v0.22.1): `--leak-scale` — a bigger disc over the fallen beam
 
 Asked for directly: *"what if I want to cover the leak with larger disc?"* It was

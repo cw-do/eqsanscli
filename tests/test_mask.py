@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -727,3 +728,35 @@ def test_leak_scale_implies_leak_and_must_be_positive():
     assert not err and opts["leak_scale"] == 1.4 and opts["mask_leaks"] is True
     assert _parse_args(["--leak-scale", "0"])[1]
     assert _parse_args(["--leak-scale", "-2"])[1]
+
+
+def test_index_ticks_come_from_the_real_geometry():
+    """The second scale on the preview: tube and pixel index against millimetres.
+    Positions are looked up, never computed, because tube index is not linear in
+    x — and on the real detector it runs the other way, 191 at the -x edge."""
+    x_mm, y_mm = synthetic_positions()
+    order = ms.physical_tube_order(x_mm)
+    tube_pos, tube_labels, pixel_pos, pixel_labels = ms.index_ticks(x_mm, y_mm, order)
+
+    for position, tube in zip(tube_pos, tube_labels):
+        assert abs(position - x_mm[tube, 0]) < 1e-9      # tick sits on that tube
+    for position, pixel in zip(pixel_pos, pixel_labels):
+        assert abs(position - y_mm[0, pixel]) < 1e-9
+
+    assert tube_labels[0] == int(order[0])              # both ends included
+    assert tube_labels[-1] == int(order[ms.N_TUBES - 1])
+    assert pixel_labels[0] == 0 and pixel_labels[-1] == ms.N_PIXELS - 1
+    assert np.all(np.diff(tube_pos) > 0)                # ordered as plotted
+
+
+def test_preview_is_written_with_both_scales():
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts()
+    plan = ms.build_plan(counts, x_mm, y_mm)
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = ms.render_comparison(counts, mask, os.path.join(tmp, "c.png"),
+                                    x_mm, y_mm)
+        if path is None:
+            return                                       # no matplotlib here
+        assert os.path.getsize(path) > 10_000

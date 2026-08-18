@@ -1122,6 +1122,29 @@ def physical_tube_order(x_mm: Optional[np.ndarray]) -> Optional[np.ndarray]:
     return np.argsort(x_mm[:, x_mm.shape[1] // 2])
 
 
+def index_ticks(x_mm: np.ndarray, y_mm: np.ndarray, order: np.ndarray,
+                every_tube: int = 16, every_pixel: int = 32
+                ) -> tuple[list[float], list[int], list[float], list[int]]:
+    """Tick positions in mm and the tube / pixel index sitting at each.
+
+    Positions are looked up from the real geometry rather than computed, because
+    tube index is not a linear function of x: the index order interleaves
+    sub-banks in packs of four. Pixel index *is* linear in y, but is read the same
+    way here so both axes come from one place.
+    """
+    slots = list(range(0, N_TUBES, every_tube))
+    if slots[-1] != N_TUBES - 1:
+        slots.append(N_TUBES - 1)
+    tube_pos = [float(x_mm[order[slot], 0]) for slot in slots]
+    tube_labels = [int(order[slot]) for slot in slots]
+
+    rows = list(range(0, N_PIXELS, every_pixel))
+    if rows[-1] != N_PIXELS - 1:
+        rows.append(N_PIXELS - 1)
+    pixel_pos = [float(y_mm[0, row]) for row in rows]
+    return tube_pos, tube_labels, pixel_pos, [int(r) for r in rows]
+
+
 def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
                       x_mm: Optional[np.ndarray] = None,
                       y_mm: Optional[np.ndarray] = None) -> Optional[str]:
@@ -1143,12 +1166,30 @@ def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
         extent = (float(x_mm.min()), float(x_mm.max()),
                   float(y_mm.min()), float(y_mm.max())) if y_mm is not None else None
     shown = np.log10(np.clip(counts.T, 1, None))
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.4), constrained_layout=True)
     for ax, title in zip(axes, ("raw", "mask overlay")):
         ax.imshow(shown, origin="lower", aspect="auto", cmap="viridis", extent=extent)
         ax.set_xlabel("x (mm)" if extent else "tube index")
         ax.set_ylabel("y (mm)" if extent else "pixel")
         ax.set_title(title)
+        if extent is None:
+            continue
+        # Second scale in detector indices: millimetres are what --disc and
+        # --beam-center take, tube/pixel indices are what --tubes and --top /
+        # --bottom take, and both are read off the same picture.
+        tube_pos, tube_labels, pixel_pos, pixel_labels = index_ticks(
+            x_mm, y_mm, order)
+        top = ax.twiny()
+        top.set_xlim(ax.get_xlim())
+        top.set_xticks(tube_pos)
+        top.set_xticklabels(tube_labels, fontsize=7)
+        top.set_xlabel("tube index  (interleaved in packs of 4 — exact at ticks)",
+                       fontsize=8)
+        right = ax.twinx()
+        right.set_ylim(ax.get_ylim())
+        right.set_yticks(pixel_pos)
+        right.set_yticklabels(pixel_labels, fontsize=7)
+        right.set_ylabel("pixel index", fontsize=8)
     overlay = np.zeros(mask.T.shape + (4,))
     overlay[mask.T] = (1.0, 0.0, 0.0, 0.55)
     axes[1].imshow(overlay, origin="lower", aspect="auto", extent=extent)

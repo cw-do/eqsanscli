@@ -528,8 +528,9 @@ repeatable:
 is where the undeflected beam strikes it; `+y` is up. The face spans x −525…525 mm
 and y −521…521 mm, so `(0,0)` is the middle of the detector and `--disc 13,-55,48`
 means a 48 mm disc centred 13 mm to one side and **55 mm below** centre.
-`--beam-center` uses the same system, and the preview's axes are these same
-millimetres — so a position read off the picture can be typed straight in.
+`--beam-center` uses the same system, and the preview carries these millimetres
+on its bottom and left axes — so a position read off the picture can be typed
+straight in — with tube and pixel index on the opposite two.
 
 Not pixels: tube index is not a spatial coordinate (see *Detector geometry*), so a
 disc specified in index space would not be round on the detector. A disc falling
@@ -537,11 +538,24 @@ entirely off the detector is reported rather than silently masking nothing.
 
 ### Reviewing the result
 
-Always open the `_compare.png`. It shows raw beside masked, plotted in **millimetres on the detector face** —
-tubes ordered by ascending x — so the picture matches the detector rather than
-the index ordering, and positions can be read straight off it.
+Always open the `_compare.png`. It shows raw beside masked, and carries **both
+scales at once**:
+
+- **millimetres** along the bottom and left, tubes ordered by ascending x, so the
+  picture matches the detector rather than the index ordering. These are the
+  numbers `--disc`, `--beam-center` and `--beam-radius` take.
+- **tube index** across the top and **pixel index** up the right — the numbers
+  `--tubes`, `--top` and `--bottom` take.
+
 The red overlay should cover the beam shadow, both tube ends, and any bad tubes —
 and nothing else.
+
+Two things to know about the tube axis. It runs **191 at −x to 0 at +x** on this
+detector, and its labels are exact **only at the ticks**: index order interleaves
+sub-banks in packs of four (see *Detector geometry*), so interpolating between two
+ticks can be up to four tubes out. To act on a tube you spotted by eye, take the
+approximate index from the axis and confirm it against the tube list printed in
+the report, or try it with `--tubes <n> --dry-run` and look again.
 
 ```
 /mask create 186104 --ipts 37618 --dry-run     # preview without writing
