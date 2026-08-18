@@ -120,6 +120,44 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.24.0): `/mask` flag review, and a shorter help
+
+Asked once the command settled: review the flags, trim what is not needed, and
+rewrite the help — useful but not long.
+
+**Trimmed one: `--band-drop`.** It moved the threshold the band-edge measurement
+uses, which is never the right tool — `--top` / `--bottom` set the bands directly,
+in the units the convention is written in, and the 11-pixel floor is what the rest
+of the pipeline assumes. `DEFAULT_BAND_DROP` stays as the internal constant and is
+still recorded in `.params.json`.
+
+**Kept, with the reasoning, since two came close:**
+
+- `--beam-scale` and `--beam-pad` overlap — both add margin, one proportional and
+  one in y-pixels. Kept both: the pad is in the units the machine-physics mask
+  tool uses (v0.15.1), and the scale is the mechanism behind the 1.2 default on
+  the shadow path, so removing either would make the printed derivation
+  unexplainable.
+- `--tube-sigma` has a narrow effect since v0.17.0 (the statistical test only
+  applies where counts support it), but the tool itself prints "lower
+  --tube-sigma to look harder" when it finds nothing, so it stays.
+- `--ipts` is rarely needed since v0.23.0 finds the run by number, but still skips
+  the search and disambiguates.
+
+**Help: 110 lines to 65**, reorganised by what people actually reach for —
+`--dry-run`, `--leak`, `--tubes`, `--disc` first under *Common*, then the beam
+stop, then tube ends, then the two path options. The long physics passages (why
+gravity drops the beam, why tube index is not a coordinate, the full worked
+comparison of estimators) live in the README and `knowledge/`; the help keeps one
+line of each where it changes what you would type.
+
+`test_every_documented_flag_parses` walks every `--flag` in the help text through
+the parser, so the two cannot drift apart — it would have caught the `--band-drop`
+line left in the README.
+
+**Files changed:** `commands/mask.py` (help rewritten, flag removed),
+`tests/test_mask.py` (+2, 64 total), README.
+
 ### 2026-08-18 (v0.23.1): say how the beam radius was decided
 
 Asked after a good run on 186621 (`S-banjo 1.3m 1A`, 133.6 M counts, median 2565

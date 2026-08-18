@@ -469,8 +469,7 @@ so you can judge both.
    not indices. `--bottom 11` masks pixels 0–10; `--top 11` masks 245–255,
    reproducing the `MASKED_PIXELS = '1-11,246-256'` convention from each cycle's
    `prepare_sensitivity.py`. An explicit value overrides the 11-pixel floor, so
-   `--top 0 --bottom 0` disables the bands entirely. `--band-drop` moves the
-   threshold that the automatic measurement uses: higher masks more.
+   `--top 0 --bottom 0` disables the bands entirely.
 
    `--bottom` is the low-pixel-index end, which is −y, and is the band at the
    bottom of the preview image (plotted with `origin="lower"`). **The
@@ -536,7 +535,6 @@ point of it.
 | `--leak-scale <f>` | multiplier | 1.0 | enlarge those discs (implies `--leak`) |
 | `--disc <x>,<y>,<r>` | mm | — | mask an extra disc anywhere on the face; repeatable |
 | `--top <n>` / `--bottom <n>` | pixels | measured, min 11 | force band sizes |
-| `--band-drop <f>` | fraction of plateau | 0.5 | where a band edge is called |
 | `--tubes <a,b,c>` | tube indices | auto | mask these tubes explicitly |
 | `--tube-sigma <f>` | robust σ | 5 | auto-flag threshold; higher is stricter |
 | `--no-tubes` | | off | skip tube detection |
@@ -613,7 +611,7 @@ the report, or try it with `--tubes <n> --dry-run` and look again.
 | Whole tubes masked near the centre | fixed in 0.17.0 — was the beam halo moving tube means | rebuild; if it persists, `--no-tubes` and name them |
 | "too low to judge" and no tubes flagged | the run has too few counts to tell a dead tube from noise | use a longer run, or `--tubes` |
 | Too many tubes flagged | threshold too loose | raise `--tube-sigma` |
-| Bands look too narrow | plateau threshold | `--top 12 --bottom 12`, or `--band-drop 0.6` |
+| Bands look too narrow | the automatic measurement stopped short | `--top 12 --bottom 12` |
 
 ### Outputs
 

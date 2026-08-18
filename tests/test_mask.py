@@ -847,3 +847,27 @@ def test_an_explicit_beam_radius_says_so():
                          beam_radius=30.0)
     assert plan.beam.radius == 30.0
     assert plan.beam.how_sized() == "beam stop given explicitly"
+
+
+def test_band_drop_is_no_longer_a_flag():
+    """Trimmed: tuning where the band edge is called was never the right move —
+    --top / --bottom set the bands directly, and the 11-pixel convention is what
+    everything else assumes."""
+    from eqsanscli.commands.mask import _parse_args
+    assert "unknown option" in _parse_args(["--band-drop", "0.6"])[1]
+    opts, err = _parse_args(["--top", "12", "--bottom", "11"])
+    assert not err and opts["top"] == 12 and opts["bottom"] == 11
+
+
+def test_every_documented_flag_parses():
+    """The help and the parser must not drift apart."""
+    import re
+    from eqsanscli.commands.mask import _USAGE, _parse_args
+    documented = set(re.findall(r"--[a-z][a-z-]+", _USAGE))
+    takes_value = {"--ipts": "1", "--outdir": ".", "--beam-scale": "1.1",
+                   "--beam-pad": "1", "--beam-center": "0,0", "--beam-radius": "30",
+                   "--leak-scale": "1.3", "--disc": "0,0,10", "--top": "11",
+                   "--bottom": "11", "--tubes": "5", "--tube-sigma": "5"}
+    for flag in sorted(documented):
+        args = [flag, takes_value[flag]] if flag in takes_value else [flag]
+        assert "unknown option" not in (_parse_args(args)[1] or ""), flag
