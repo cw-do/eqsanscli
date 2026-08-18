@@ -155,6 +155,82 @@ Detector offset, scale components and sample offset are only meaningful if an
 AgBe calibration exists at or before the run. None exists before cycle 2026A —
 older data reduces without them rather than with invented values.
 
+
+---
+
+## MSK — building a mask
+
+Rules for `/mask create`, which produces the `maskfilename` CAL-01 then checks.
+`instrument-files.md` carries the measurements and the reasoning; these are the
+rules a mask must satisfy.
+
+**MSK-01** · blocking · enforced (`services/mask_service.py`, `commands/mask.py`)
+A mask is built from a **uniformly illuminated** run — banjo, flood or empty cell
+— and belongs to the configuration that run was taken at. The configuration comes
+from the run's own logs and goes into the filename (`mask_<config>_<run>.nxs`),
+which is what makes the resolver find it (CAL-04).
+
+**MSK-02** · blocking · enforced (`find_beam_stop`)
+When the beam stop cannot be located credibly, **no beam mask is written** and the
+reason is reported: nothing compact and dark, a core no darker than its
+surroundings with no flare walls to fall back on, an implied radius beyond any
+EQSANS stop, or a centre too far from the detector centre. Loosening a threshold
+to force a detection is not the fix — state it with `--beam-center` /
+`--beam-radius`, or leave it out with `--no-beam`. A wrong beam mask is worse than
+none.
+
+**MSK-03** · blocking · enforced (`beam_from_cross_cuts`)
+The stop's **size** comes from the horizontal cut only — the valley width between
+the flare wall summits. The vertical cut supplies the centre and nothing else,
+because direct beam that fell under gravity lands inside the shadow and makes the
+vertical width read narrow. A run whose cut has no flare walls is sized from the
+shadow instead, and the report says which applied.
+
+**MSK-04** · warning · enforced (`find_beam_stop`, reported by `how_sized`)
+The mask extends past the **umbra** into the penumbra. The visibly dark disc is
+where the stop blocks everything; outside it the beam is still partly blocked, and
+those pixels bias the lowest-Q bins. A shadow-derived radius is therefore grown; a
+measured valley width is not, since it already reaches the rim.
+
+**MSK-05** · warning · enforced (`build_plan`, reported by `how_banded`)
+Tube-end bands are measured — where response falls below half the plateau — and
+then floored at the long-standing 11-pixel convention, which in practice is what
+applies. An explicit `--top` / `--bottom` overrides the floor deliberately.
+
+**MSK-06** · warning · enforced (`find_direct_beam_leaks`, `build_plan`)
+Direct beam that fell past the stop is **always reported and never masked unless
+asked**: covering it costs low-Q coverage, which is the instrument scientist's
+call, not the tool's. `--leak` masks lobes **below** the stop only — neutrons fall,
+so that is where fallen beam goes; a bright patch above it is rim flare and gets a
+`--disc` line to copy instead.
+
+**MSK-07** · warning · enforced (`find_deviant_tubes`)
+Tube health is judged from the **median** along a tube against a **local** baseline
+of same-pack neighbours, with the statistical test applied only where counts
+support it. When a run cannot support the judgement at all, no tubes are flagged
+and the reason is printed — masking noise is worse than masking nothing.
+Detection is whole-tube, so a dead *segment* needs `--tubes`.
+
+**MSK-08** · blocking · enforced (`write_mask`)
+A written mask is read back through the path drtsans itself uses and the masked
+pixel count must match what was requested. A mask that cannot be read back fails
+at creation, not during a reduction.
+
+**MSK-09** · info · enforced (`shapes_to_mask`)
+Beam stop and discs are masked in **millimetres against real pixel positions**;
+only the tube-end bands are index-space, because pixel index is linear in y while
+tube index is not a spatial coordinate at all. Coordinates are millimetres from
+the detector centre, `+y` up.
+
+**MSK-10** · warning · unenforced
+Every mask is reviewed against its `_compare.png` before it is used in a
+reduction: the overlay should cover the beam, both tube ends and any bad tubes,
+and nothing else. Nothing checks that a review happened.
+
+**MSK-11** · warning · unenforced
+A mask should be rebuilt when the beam stop or its position changes within an
+experiment. Nothing compares a stored mask against the run it is about to serve.
+
 ---
 
 ## CFG — configuration parameters
@@ -233,4 +309,6 @@ absolute scale rather than a stitching problem. Threshold: **TBD**.
 
 Rules marked **TBD** need a number: CAT-07 (durations), SCL-03 (scale-factor
 range), STC-05 (stitch scale-factor tolerance). Rules marked `unenforced` are the
-backlog for the `/review` validators.
+backlog for the `/review` validators — MSK-10 and MSK-11 among them, both of which
+need a decision from the instrument scientist about what "reviewed" and "changed"
+should mean mechanically.

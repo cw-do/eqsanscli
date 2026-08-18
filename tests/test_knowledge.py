@@ -174,6 +174,61 @@ def test_knowledge_agrees_with_the_code_on_mandatory_empty_beam():
     assert "EMP-01" in _text(KNOWLEDGE_DIR / "protocol.md")
 
 
+def test_knowledge_agrees_with_the_code_on_the_band_floor():
+    """MSK-05: measured, then floored at the 11-pixel convention."""
+    import numpy as np
+
+    from eqsanscli.services import mask_service as ms
+
+    counts = np.ones((ms.N_TUBES, ms.N_PIXELS)) * 100.0
+    counts[:, :3] = 0.0                      # a run whose ends fall off early
+    plan = ms.build_plan(counts)
+    assert plan.bottom == ms.DEFAULT_MIN_BAND == 11
+    assert "11-pixel" in _text(KNOWLEDGE_DIR / "protocol.md")
+
+
+def test_knowledge_agrees_with_the_code_that_a_bad_beam_stop_is_refused():
+    """MSK-02: refuse rather than emit a wrong circle."""
+    import numpy as np
+
+    from eqsanscli.services import mask_service as ms
+
+    noise = np.random.default_rng(0).poisson(4.0, size=(ms.N_TUBES, ms.N_PIXELS))
+    beam, why = ms.find_beam_stop(noise.astype(float), *_synthetic_positions())
+    assert beam is None and why
+    assert "MSK-02" in _text(KNOWLEDGE_DIR / "protocol.md")
+
+
+def test_knowledge_agrees_with_the_code_that_leaks_are_masked_below_only():
+    """MSK-06: neutrons fall, so --leak covers what fell past the stop."""
+    from eqsanscli.services import mask_service as ms
+
+    source = (ROOT / "src" / "eqsanscli" / "services" / "mask_service.py").read_text()
+    assert "if yc < plan.beam.yc:" in source, "leak masking is no longer below-only"
+    assert ms.LEAK_CONTRAST > 1.0
+
+
+def _synthetic_positions():
+    """Real layout: y linear in pixel index, x interleaved in packs of four."""
+    import numpy as np
+
+    from eqsanscli.services import mask_service as ms
+
+    order = np.empty(ms.N_TUBES, dtype=int)
+    slot = 0
+    for block in range(0, ms.N_TUBES, 8):
+        for offset in range(ms.TUBE_PACK):
+            for pack in (0, 1):
+                tube = block + pack * ms.TUBE_PACK + offset
+                if tube < ms.N_TUBES:
+                    order[tube] = slot
+                    slot += 1
+    x = (order - (ms.N_TUBES - 1) / 2.0) * 5.49
+    y = (np.arange(ms.N_PIXELS) - (ms.N_PIXELS - 1) / 2.0) * 4.09
+    return (np.repeat(x[:, None], ms.N_PIXELS, axis=1),
+            np.repeat(y[None, :], ms.N_TUBES, axis=0))
+
+
 # --- migration ------------------------------------------------------------
 
 def test_legacy_single_file_is_gone():

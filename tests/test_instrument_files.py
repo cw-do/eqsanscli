@@ -247,10 +247,23 @@ def test_live_current_cycle_resolves_to_2026b():
         "2026B_mp/Sensitivity_patched_thinPMMA_4m_186200.nxs")
     assert r.values[PARAM_DARK].endswith("2026B_mp/EQSANS_186198.nxs.h5")
     assert r.values[PARAM_FLUX].endswith("2026B_mp/bl6_flux_2026B_aug_rebinned.txt")
-    assert round(r.values[PARAM_DETOFFSET], 3) == 66.763
-    assert [round(v, 6) for v in r.values[PARAM_SCALECOMP]] == [1.004251, 1.057915, 1.0]
     assert r.values[PARAM_SAMPLEOFFSET] == 285.0
     assert not r.missing
+
+    # The AgBe numbers are NOT pinned to literals: machine physics re-reduces
+    # them within a cycle (2026B moved detoffset 66.763 -> 66.714 on 2026-08-18
+    # under drtsans --dev), and a test that hardcodes them fails on the day the
+    # tool starts doing its job. Assert instead that what resolves is what the
+    # cycle folder currently says, and that it is physically plausible.
+    cycle = next(c for c in scan_cycles(DEFAULT_MP_ROOT) if c.cycle_id == "2026B")
+    agbe = cycle.agbe
+    assert agbe is not None and agbe.usable
+    assert r.values[PARAM_DETOFFSET] == agbe.detoffset
+    assert list(r.values[PARAM_SCALECOMP]) == list(agbe.scalecomp)
+    assert 40.0 < r.values[PARAM_DETOFFSET] < 120.0, r.values[PARAM_DETOFFSET]
+    assert all(0.9 < v < 1.2 for v in r.values[PARAM_SCALECOMP])
+    # and it comes from the newest calibration in the folder, not a backup copy
+    assert ".OLD" not in agbe.source and "legacy" not in agbe.source
 
 
 def test_live_long_distance_uses_4m_flood():
