@@ -56,12 +56,16 @@ _USAGE = (
     "  want.\n"
     "\n"
     "[bold]Extra shapes[/bold]\n"
-    "  --disc <x>,<y>,<r>     mask a disc at (x, y) with radius r, all in mm on the\n"
-    "                         detector face. Repeatable. Positions are millimetres,\n"
-    "                         not pixels: tube index is not a spatial coordinate, so\n"
-    "                         a disc in index space would not be round. Read the\n"
-    "                         position straight off the _compare.png, whose axes are\n"
-    "                         in mm (x -525..525, y -521..521).\n"
+    "  --disc <x>,<y>,<r>     mask a disc at (x, y) with radius r. Repeatable.\n"
+    "\n"
+    "  [bold]Coordinates: millimetres from the centre of the detector[/bold], which is\n"
+    "  where the undeflected beam hits it. +y is up. The face spans x -525..525 and\n"
+    "  y -521..521 mm, so (0,0) is the middle and (13,-55) is 13 mm to one side and\n"
+    "  55 mm BELOW centre. Not pixels: tube index is not a spatial coordinate (the\n"
+    "  index order interleaves sub-banks), so a disc in index space would not be\n"
+    "  round. The _compare.png axes are in these same millimetres, so a position\n"
+    "  read off the picture can be typed straight in. --beam-center uses the same\n"
+    "  system.\n"
     "\n"
     "[bold]Tube ends[/bold]\n"
     "  --top <n> / --bottom <n>  how MANY pixels to mask at each end (not indices).\n"
@@ -235,11 +239,12 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     n = len(indices)
     lines.append(f"  Masking {n} pixels ({100 * n / mask.size:.2f}%): {plan.summary()}")
     for xc, yc, radius in plan.leaks:
-        where = "above" if yc > (plan.beam.yc if plan.beam else 0) else "below"
-        state = "masked" if plan.leaks_masked else (
+        side = "above" if yc > (plan.beam.yc if plan.beam else 0) else "below"
+        # NB: not `state` -- that is this function's SessionState parameter.
+        status = "masked" if plan.leaks_masked else (
             f"[dim]not masked — add --leak, or --disc {xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
-        lines.append(f"    [yellow]•[/yellow] direct-beam leak {where} the stop at "
-                     f"({xc:.0f}, {yc:.0f}) mm, r {radius:.0f} mm — {state}")
+        lines.append(f"    [yellow]•[/yellow] direct-beam leak {side} the stop at "
+                     f"({xc:.0f}, {yc:.0f}) mm, r {radius:.0f} mm — {status}")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")

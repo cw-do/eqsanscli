@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.20.1 | 2026-08-18 | Fix: `/mask create` crashed without `--dry-run` — a local named `state` shadowed the SessionState parameter. Coordinate system documented. |
 | 0.20.0 | 2026-08-18 | Beam mask is a plain disc again; gravity leaks are reported and masked only on `--leak`, as one disc per lobe. Replaces 0.19.0's capsule. |
 | 0.19.0 | 2026-08-18 | The beam mask covers direct beam that fell under gravity: a capsule spanning the vertical streak, not just the shadow. |
 | 0.18.0 | 2026-08-18 | `/mask --disc <x>,<y>,<r>` masks an arbitrary disc in mm; preview axes now in mm so positions can be read off the picture. |
@@ -118,6 +119,28 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.20.1): `/mask create` crashed on the real path
+
+`/mask create 186636` (no `--dry-run`) died with
+`AttributeError: 'str' object has no attribute 'drtsans_version'`.
+
+The leak-reporting loop added in 0.20.0 used `state` as the name for a per-leak
+label — shadowing `_create`'s `state: SessionState` parameter — so the next use of
+`state.drtsans_version`, in the call that writes the mask, hit a string.
+
+**Why no test caught it:** every command-level test used `--dry-run`, which
+returns *before* the write. The gap was the whole non-dry-run path, not one line.
+`tests/test_mask.py` now exercises `/mask create` end to end with
+`read_run_image`/`write_mask` stubbed, so the write path, the params file and the
+leak reporting all run without needing Mantid — and asserts the params contain the
+config, the leak list and `leaks_masked`.
+
+**Also documented, in the help and the README:** `--disc` and `--beam-center`
+coordinates are **millimetres from the centre of the detector** (where the
+undeflected beam hits), `+y` up, face x −525…525 and y −521…521 mm. So
+`--disc 13,-55,48` is 13 mm to one side and 55 mm below centre. The preview's axes
+are the same millimetres.
 
 ### 2026-08-18 (v0.20.0): Back to a disc — leaks reported, masked on request
 

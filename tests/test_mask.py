@@ -11,6 +11,7 @@ answers are known.
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -491,6 +492,64 @@ def test_option_parsing_rejects_bad_input():
     assert _parse_args(["--beam-scale", "wide"])[1]
     assert _parse_args(["--ipts"])[1]
     assert _parse_args(["--nonsense"])[1]
+
+
+def test_create_writes_files_without_mantid(monkeypatch=None):
+    """Exercise the full write path with Mantid stubbed out.
+
+    Every earlier command test used --dry-run, which returns before the write --
+    so a variable named `state` in the leak-reporting loop shadowed the
+    SessionState parameter and nothing caught it until /mask create crashed with
+    "'str' object has no attribute 'drtsans_version'".
+    """
+    import asyncio
+    import json
+    import tempfile
+
+    from eqsanscli.commands import mask as mask_cmd
+    from eqsanscli.models.session_state import SessionState
+
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_gravity_streak()
+    image = ms.RunImage(counts=counts, x_mm=x_mm, y_mm=y_mm, n_spectra=counts.size,
+                        total_counts=float(counts.sum()), distance_m=9.0,
+                        wavelength_a=15.0, frequency_hz=60, title="S-banjo 9m 15A")
+
+    written = {}
+
+    def fake_read(run_file, workdir, **kw):
+        return image, ""
+
+    def fake_write(run_file, indices, mask_path, workdir, **kw):
+        with open(mask_path, "w") as fh:
+            fh.write("stub")
+        written["indices"] = len(indices)
+        return {"mask_file": mask_path, "n_requested": len(indices),
+                "n_masked_readback": len(indices)}, ""
+
+    original = (ms.read_run_image, ms.write_mask, ms.resolve_run_file)
+    ms.read_run_image, ms.write_mask = fake_read, fake_write
+    ms.resolve_run_file = lambda run, ipts=None: ("/fake/EQSANS_186636.nxs.h5", [])
+    try:
+        with tempfile.TemporaryDirectory() as outdir:
+            state = SessionState()
+            state.ipts = 38681
+            result = asyncio.new_event_loop().run_until_complete(
+                mask_cmd.handle_mask(["create", "186636", "--outdir", outdir], state)
+            )
+            assert result.success, result.message
+            names = sorted(os.listdir(outdir))
+            assert any(n.endswith(".nxs") for n in names), names
+            assert any(n.endswith(".params.json") for n in names), names
+            params = json.load(open(os.path.join(
+                outdir, next(n for n in names if n.endswith(".params.json")))))
+            assert params["config"] == "9m15a"
+            assert params["leaks_masked"] is False
+            assert params["leaks_mm"] and len(params["leaks_mm"]) == 2
+            assert "direct-beam leak" in result.message
+    finally:
+        ms.read_run_image, ms.write_mask, ms.resolve_run_file = original
+    assert written["indices"] > 0
 
 
 def test_mask_command_is_registered():

@@ -484,13 +484,16 @@ repeatable:
 /mask create 186104 --disc 0,0,25 --disc 120,-80,15
 ```
 
-**Positions are millimetres, not pixels.** Tube index is not a spatial coordinate
-(see *Detector geometry*), so a disc specified in index space would not be round
-on the detector; and the face spans x −525…525 mm, y −521…521 mm, the same
-coordinate system `--beam-center` and `--beam-radius` use. The preview's axes are
-in mm, so a position read off the picture can be typed straight into `--disc`. A
-disc falling entirely off the detector is reported rather than silently masking
-nothing.
+**Coordinates are millimetres measured from the centre of the detector**, which
+is where the undeflected beam strikes it; `+y` is up. The face spans x −525…525 mm
+and y −521…521 mm, so `(0,0)` is the middle of the detector and `--disc 13,-55,48`
+means a 48 mm disc centred 13 mm to one side and **55 mm below** centre.
+`--beam-center` uses the same system, and the preview's axes are these same
+millimetres — so a position read off the picture can be typed straight in.
+
+Not pixels: tube index is not a spatial coordinate (see *Detector geometry*), so a
+disc specified in index space would not be round on the detector. A disc falling
+entirely off the detector is reported rather than silently masking nothing.
 
 ### Reviewing the result
 
