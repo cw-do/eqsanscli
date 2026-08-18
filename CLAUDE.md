@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.14.0 | 2026-08-17 | `/mask create <run>` builds a mask from a run's own image, self-contained, named for its configuration so the resolver finds it. |
 | 0.13.0 | 2026-08-17 | Knowledge base restructured into `knowledge/` with `protocol.md` as the authority; topic-aware loader; stale/contradicting `preset_configs/knowledge.md` removed. |
 | 0.12.0 | 2026-08-17 | `/reduce` preflight: refuses rows with no empty beam (beam centre), with `--skip-missing` / `--force`; autopilot's `--from 4+` gap closed and `_reduce_phase` skips unreducible rows. |
 | 0.11.0 | 2026-08-17 | Masks resolved per configuration from the working folder → this IPTS's shared folder → the cycle's `masks/` default; foreign-IPTS paths removed from presets; per-config mask note printed. |
@@ -107,6 +108,69 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.14.0): `/mask create` — build a mask inside eqsanscli
+
+Masks were the one calibration input eqsanscli could resolve but not produce: if
+no mask existed, v0.11.0 told the user to make one and stopped. Making one meant
+the `eqsans-mask` skill in the machine-physics folder, which needs the `sansdir`
+library and writes into a cycle folder — wrong shape for a user reducing their
+own experiment.
+
+**`services/mask_service.py`** decides what to mask, in plain numpy, so it is
+testable without Mantid:
+
+- **beam stop** — the low-count blob near the centre, found from the *deficit*
+  inside the central half of the detector so a bright sample cannot drag it. It
+  is a physical circle, which on this detector is an ellipse in index space
+  (`ry/rx = 256/192`); `--beam-scale` and `--beam-pad` tune it.
+- **edge bands** — measured from where the along-tube profile falls below half
+  the plateau, floored at 11 pixels because EQSANS has masked pixels 1-11 and
+  246-256 for years (`MASKED_PIXELS` in each cycle's `prepare_sensitivity.py`).
+- **deviant tubes** — robust (MAD) comparison *within a front/back group*.
+
+**The tube grouping was wrong everywhere it was written down.** The machine-physics
+skill says "odd tubes are compared to odd, even to even". Measured on run 186104,
+tubes alternate front/back in **packs of four**: grouping by `(tube // 4) % 2`
+gives a mean MAD of 2.72, against 19.85 for parity and 20.06 for no grouping, and
+the high/low pattern matches 4-on/4-off across all 192 tubes exactly
+(fraction 1.000). Parity grouping leaves the two populations mixed, inflating the
+spread ~7x — which is why auto tube detection flagged nothing at any threshold.
+The four-tube striping is plainly visible in the generated comparison PNG.
+
+**Detector ordering was verified, not assumed:** workspace index =
+`tube * 256 + pixel`. Reshaped that way the mean profile along the pixel axis
+shows the dead ends (edge/mid 0.23); the transpose shows no structure (0.93).
+`reshape_counts` uses that same test at runtime and falls back with a warning
+rather than masking the wrong pixels.
+
+**Mantid contact is minimal and generated.** Two short scripts — read the counts,
+write the mask — run under the `drtsans` command exactly as `/reduce` does.
+Nothing outside `mask_service.py` is imported by them, and the written file is
+verified by reading it back through `Load` + `ExtractMask`, the path drtsans
+itself uses. The workspace is integrated before saving, so the file is 12 MB
+rather than the ~69 MB of a full save, and still reads back identically.
+
+**Naming is the discoverability mechanism.** `mask_<config>_<run>.nxs` with the
+configuration read from the run's own logs (`detectorZ`, `wavelength`,
+`frequency`) and `.` written as `o` — `mask_4m2o5a_186104.nxs` — is exactly what
+`instrument_files._parse_mask_tokens` reads back, so a mask built in the working
+folder is picked up by `/matchruns` and `/instrument` with no further action. A
+test asserts that round trip for five configurations.
+
+**Verified end to end** on run 186104 (the 2026B banjo): 4380 pixels masked,
+read back as 4380 through drtsans's own path, and the resolver then selects it
+for `4m2.5a` while leaving `4m10a` to fall through to the cycle default.
+Against the hand-made 2026B mask for the same run, the beam centre agrees to
+0.1 pixel (90.8/131.3 vs 90.7/131.2); that mask additionally carries tube 146,
+added manually — in this run tube 146 reads *higher* than its neighbours, and its
+known fault is a dead segment at low pixel numbers rather than a whole-tube
+deficit. Auto-detection is whole-tube; `--tubes 146` covers the rest.
+
+**Files:** `services/mask_service.py` (new), `commands/mask.py` (new),
+`tests/test_mask.py` (new, 21 checks), `commands/registry.py`,
+`services/llm_handler.py`, `app.py`, `knowledge/instrument-files.md`,
+README/SKILL/AGENT_SKILL.
 
 ### 2026-08-17 (v0.13.0): Knowledge base — one authority, no contradictions
 

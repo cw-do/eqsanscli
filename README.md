@@ -337,6 +337,45 @@ transmission or background is a warning only. Escape hatches:
 (send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
 skips unreducible rows at reduction time.
 
+## Building a mask
+
+`/mask create <run>` builds a detector mask from a run's own 2D count image —
+use a uniformly illuminated run (banjo, flood, empty cell). It masks:
+
+1. the **beam-stop shadow** — the low-count blob near the centre, as a physical
+   circle (an ellipse in index space, since pixels are finer along a tube than
+   tubes are apart);
+2. the **low-response bands** at both ends of every tube, measured but never
+   smaller than the long-standing 11-pixel convention;
+3. **deviant tubes** — compared within their front/back group. Front and back
+   tubes alternate in *packs of four* on this detector: grouping that way gives a
+   median absolute deviation of 2.7 counts against 19.9 for odd/even, so
+   comparing odd-to-odd hides real outliers.
+
+The file lands in the folder you started eqsanscli in, named for the
+configuration read from the run's own logs — `mask_4m2o5a_186104.nxs` — which is
+exactly what the resolver reads back, so `/matchruns` and `/instrument` pick it
+up with no further action. Alongside it go a `_compare.png` (raw vs overlay —
+always look at it) and a `.params.json` recording how it was made.
+
+| Option | |
+|---|---|
+| `--ipts <n>` | experiment holding the run (default: the session's) |
+| `--dry-run` | preview PNG only, no mask file |
+| `--beam-scale <f>` / `--beam-pad <f>` | enlarge the beam circle |
+| `--no-beam` | skip the beam stop |
+| `--top <n>` / `--bottom <n>` | force band sizes |
+| `--tubes <a,b>` / `--tube-sigma <f>` / `--no-tubes` | control tube masking |
+| `--outdir <dir>` | write elsewhere (then it is not auto-discovered) |
+
+`/mask list` shows every mask discoverable from where you are, in the order the
+resolver prefers them.
+
+Mantid does the reading and writing, via the `drtsans` command — the same way
+`/reduce` runs. The geometry itself is computed in eqsanscli, and the written
+file is verified by reading it back through `Load` + `ExtractMask`, the path
+drtsans itself uses.
+
 ## Knowledge base
 
 Instrument knowledge lives in `knowledge/`, one file per decision domain, with

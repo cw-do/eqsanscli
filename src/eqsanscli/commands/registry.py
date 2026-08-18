@@ -29,6 +29,7 @@ from eqsanscli.commands.config import (
 from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
 from eqsanscli.commands.export import handle_confirm, handle_export_script, handle_zipnsend
 from eqsanscli.commands.instrument import handle_instrument
+from eqsanscli.commands.mask import handle_mask
 from eqsanscli.commands.matching import handle_assign, handle_matchruns, handle_remove, handle_set
 from eqsanscli.commands.models import handle_models
 from eqsanscli.commands.note import handle_note
@@ -89,6 +90,7 @@ def register_all(router: CommandRouter) -> None:
     router.register("apply preset", handle_apply_preset)
     router.register("compare", handle_compare)
     router.register("instrument", handle_instrument)
+    router.register("mask", handle_mask)
 
     # --- Reduction & analysis ----------------------------------------------
     router.register("reduce", handle_reduce)

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Directories to search for knowledge.md (project root, then cwd)
+
 
 
 def _load_knowledge(topics: list[str] | None = None) -> str:
@@ -230,6 +230,18 @@ CONFIGURATION:
 /config rows <id>               - List which working-table rows reference <id>
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a). Src column: * = you set it,
                                   blank = preset, d = drtsans default, mp:<cycle> = machine-physics calibration
+
+/mask create <run>              - BUILD a mask from a run's own detector image (beam-stop shadow, tube-end
+                                  bands, deviant tubes). Use a uniformly illuminated run: banjo, flood or
+                                  empty cell. Writes mask_<config>_<run>.nxs into the current folder, named
+                                  so it is picked up automatically. Needs drtsans (Mantid), ~30 s.
+    "make a mask from run 186104" -> /mask create 186104
+    "create a beamstop mask" / "I need a maskfile" -> /mask create <run>
+    "mask run 186104 but bigger beam" -> /mask create 186104 --beam-scale 1.4
+    "also mask tube 146" -> /mask create 186104 --tubes 146
+    "just show me what it would mask" -> /mask create 186104 --dry-run
+/mask list                      - Masks discoverable from here, in resolver order
+  If no mask is found for a configuration, offer /mask create <run> rather than inventing a path.
 
 MASKS: resolved automatically per configuration — (1) mask*.nxs in the folder eqsanscli was started in,
 (2) /SNS/EQSANS/IPTS-<current>/shared/, (3) the cycle's <cycle>_mp/masks/*mask.nxs default. Matched by the

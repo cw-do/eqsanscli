@@ -85,6 +85,14 @@ Worked example, IPTS-38773: `maskWS4m10A.nxs` serves `4m10a` and
 wavelength is not borrowed — a token-less mask (the cycle default) serves any
 configuration.
 
+Build one from a uniformly illuminated run (banjo, flood, empty cell) with
+`/mask create <run>`: it masks the beam-stop shadow, the low-response bands at
+the tube ends, and tubes deviating from others in their front/back group, then
+writes `mask_<config>_<run>.nxs` into the working folder — named so the search
+above finds it. Front and back tubes alternate in **packs of four**, so tube
+comparisons are made within a pack group; comparing odd-to-odd mixes the two
+populations and hides real outliers.
+
 The same mask is often reusable across detector distances, so a single
 `mask_4m.nxs` in the working folder is a legitimate setup — it just cannot be
 *assumed*, which is why an unmatched configuration warns rather than guessing.

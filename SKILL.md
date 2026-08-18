@@ -328,6 +328,8 @@ transmission or background is a warning only. Escape hatches:
 (send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
 skips unreducible rows at reduction time.
 
+**Masks:** `/mask create <run>` builds one from a banjo/flood/empty-cell run (beam-stop shadow, tube-end bands, tubes deviating within their front/back pack of four) and writes `mask_<config>_<run>.nxs` into the current folder, named so the resolver finds it automatically. `--dry-run` previews; `--tubes a,b` and `--beam-scale` tune it; `/mask list` shows what is discoverable. Needs drtsans for the Mantid read/write.
+
 ### Reduction
 | Command | Returns |
 |---------|---------|
