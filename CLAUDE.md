@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.18.0 | 2026-08-18 | `/mask --disc <x>,<y>,<r>` masks an arbitrary disc in mm; preview axes now in mm so positions can be read off the picture. |
 | 0.17.0 | 2026-08-18 | Tube detection rebuilt: median against a local baseline, relative dead/hot tests, statistical test gated on counts. A beam halo no longer masks whole tubes. |
 | 0.16.2 | 2026-08-18 | Document `--top`/`--bottom`: pixel counts not indices, the 11-pixel floor and how to bypass it, and that the machine-physics tool names the two ends the other way round. |
 | 0.16.1 | 2026-08-18 | Full `/mask` usage: in-CLI help with examples and troubleshooting, rewritten README section, corrected SKILL/AGENT_SKILL/knowledge/LLM entries. |
@@ -115,6 +116,28 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.18.0): `--disc` for arbitrary discs, in millimetres
+
+Asked for, together with the right question: mm or pixels?
+
+**Millimetres**, for three reasons. Tube index is not a spatial coordinate — the
+pack-of-four interleaving means a disc specified in index space would be
+scattered across the face rather than round. The beam stop already uses mm
+(`--beam-center`, `--beam-radius`), so one coordinate system covers both. And the
+example that came with the request, `--disc 500,500,20`, only parses as mm: in
+pixels the axes stop at 191 and 255, while the face runs x -525..525,
+y -521..521 mm.
+
+The one real argument for pixels was that the preview was drawn in index space,
+which made mm hard to read off — so **the preview axes are now in millimetres**,
+with tubes ordered by ascending x so the axis reads left to right. A position
+read off the picture can be typed straight into `--disc` or `--beam-center`.
+
+`--disc` is repeatable, validated (three numbers, positive radius), warns when a
+disc falls entirely off the detector rather than silently masking nothing, and is
+recorded in `params.json` as `discs_mm`. Verified: a 20 mm disc masks 1258 mm^2
+against pi r^2 = 1257, centred within 1 mm of where it was asked for.
 
 ### 2026-08-18 (v0.17.0): A beam halo was masking whole tubes
 

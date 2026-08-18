@@ -310,6 +310,57 @@ def test_full_plan_masks_a_plausible_fraction():
     assert 0.05 < fraction < 0.15, fraction
 
 
+def test_disc_masks_where_asked_and_is_round():
+    """--disc is in millimetres: tube index is not a spatial coordinate, so a
+    disc specified in index space would not be round on the detector."""
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm, use_beam=False,
+                         use_tubes=False, bottom=0, top=0,
+                         discs=[(100.0, -50.0, 20.0)])
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
+    assert abs(float(x_mm[mask].mean()) - 100.0) < 3.0
+    assert abs(float(y_mm[mask].mean()) + 50.0) < 3.0
+    area = mask.sum() * ms.pixel_area_mm2(x_mm, y_mm)
+    assert abs(area - math.pi * 400) / (math.pi * 400) < 0.1, area
+
+
+def test_several_discs_compose():
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm, use_beam=False,
+                         use_tubes=False, bottom=0, top=0,
+                         discs=[(-300.0, 300.0, 40.0), (250.0, -250.0, 25.0)])
+    assert len(plan.discs) == 2
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
+    for xc, yc, radius in plan.discs:
+        one = ms.shapes_to_mask([{"type": "circle_mm", "xc": xc, "yc": yc, "r": radius}],
+                                x_mm, y_mm)
+        assert one.any() and (one & mask).sum() == one.sum()
+
+
+def test_disc_off_the_detector_is_detected():
+    x_mm, y_mm = synthetic_positions()
+    assert ms.disc_is_on_detector(100.0, -50.0, 20.0, x_mm, y_mm)
+    assert not ms.disc_is_on_detector(900.0, 900.0, 20.0, x_mm, y_mm)
+
+
+def test_disc_option_parsing():
+    from eqsanscli.commands.mask import _parse_args
+
+    opts, err = _parse_args(["--disc", "500,500,20", "--disc", "0,0,25"])
+    assert not err
+    assert opts["discs"] == [(500.0, 500.0, 20.0), (0.0, 0.0, 25.0)]
+    assert _parse_args(["--disc", "1,2"])[1]
+    assert _parse_args(["--disc", "1,2,-3"])[1]
+
+
+def test_preview_axes_run_left_to_right():
+    """Tubes are ordered by ascending x so the plotted mm axis reads normally."""
+    x_mm, _ = synthetic_positions()
+    order = ms.physical_tube_order(x_mm)
+    ordered = x_mm[order][:, 0]
+    assert np.all(np.diff(ordered) > 0)
+
+
 def test_unknown_shape_is_ignored_not_fatal():
     assert not ms.shapes_to_mask([{"type": "triangle"}]).any()
 

@@ -445,6 +445,7 @@ the real stop. Check the preview and set `--beam-radius` if it is under-masked.
 | `--beam-center <x>,<y>` | mm | measured | state the beam centre; used verbatim |
 | `--beam-radius <r>` | mm | measured | state the beam radius; used verbatim, no scale or pad |
 | `--no-beam` | | off | do not mask the beam stop |
+| `--disc <x>,<y>,<r>` | mm | — | mask an extra disc anywhere on the face; repeatable |
 | `--top <n>` / `--bottom <n>` | pixels | measured, min 11 | force band sizes |
 | `--band-drop <f>` | fraction of plateau | 0.5 | where a band edge is called |
 | `--tubes <a,b,c>` | tube indices | auto | mask these tubes explicitly |
@@ -454,10 +455,30 @@ the real stop. Check the preview and set `--beam-radius` if it is under-masked.
 `--beam-scale` and `--beam-pad` compose: the radius is `fitted × scale + pad`.
 `--beam-radius` bypasses both.
 
+### Masking something else
+
+`--disc <x>,<y>,<r>` masks a disc anywhere on the detector face — a blemish, a
+shadow from sample environment, anything the automatic steps do not cover. It is
+repeatable:
+
+```
+/mask create 186104 --disc 120,-80,15
+/mask create 186104 --disc 0,0,25 --disc 120,-80,15
+```
+
+**Positions are millimetres, not pixels.** Tube index is not a spatial coordinate
+(see *Detector geometry*), so a disc specified in index space would not be round
+on the detector; and the face spans x −525…525 mm, y −521…521 mm, the same
+coordinate system `--beam-center` and `--beam-radius` use. The preview's axes are
+in mm, so a position read off the picture can be typed straight into `--disc`. A
+disc falling entirely off the detector is reported rather than silently masking
+nothing.
+
 ### Reviewing the result
 
-Always open the `_compare.png`. It shows raw beside masked, plotted in **physical
-tube order** so the picture matches the detector rather than the index ordering.
+Always open the `_compare.png`. It shows raw beside masked, plotted in **millimetres on the detector face** —
+tubes ordered by ascending x — so the picture matches the detector rather than
+the index ordering, and positions can be read straight off it.
 The red overlay should cover the beam shadow, both tube ends, and any bad tubes —
 and nothing else.
 

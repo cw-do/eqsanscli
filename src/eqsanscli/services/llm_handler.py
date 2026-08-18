@@ -244,6 +244,9 @@ CONFIGURATION:
         /mask create <run> --beam-center <x>,<y> --beam-radius <mm>   (both in mm)
     "the beam mask is too small" -> long wavelength fills the penumbra; /mask create <run> --beam-radius <mm>
     "also mask tube 146" -> /mask create <run> --tubes 146
+    "mask a spot at x=120 y=-80 radius 15" -> /mask create <run> --disc 120,-80,15
+    "mask that blemish too" -> /mask create <run> --disc <x>,<y>,<r>   MILLIMETRES on the detector
+        face, never pixels (the face is x -525..525, y -521..521 mm). Repeat --disc for several.
 /mask list                      - Masks discoverable from here, in resolver order
   If no mask is found for a configuration, offer /mask create <run> rather than inventing a path.
   /mask REFUSES to mask a beam stop it cannot find credibly and says why — that is correct behaviour, not

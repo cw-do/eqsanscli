@@ -162,6 +162,14 @@ class BeamStop:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
 
 
+def disc_is_on_detector(xc: float, yc: float, radius: float,
+                        x_mm: np.ndarray, y_mm: np.ndarray) -> bool:
+    """Does a disc overlap the detector face at all?"""
+    nearest_x = min(max(xc, float(x_mm.min())), float(x_mm.max()))
+    nearest_y = min(max(yc, float(y_mm.min())), float(y_mm.max()))
+    return math.hypot(xc - nearest_x, yc - nearest_y) <= radius
+
+
 def pixel_pitch_y_mm(y_mm: np.ndarray) -> float:
     """Spacing between neighbouring pixels along a tube, from the real positions.
 
@@ -408,6 +416,7 @@ class MaskPlan:
     tube_source: str = "auto"
     beam_note: str = ""      # why no beam stop was masked, when there is none
     tube_note: str = ""      # when the run cannot support judging tubes
+    discs: list = field(default_factory=list)   # extra (x_mm, y_mm, r_mm) discs
 
     def summary(self) -> str:
         bits = []
@@ -420,6 +429,8 @@ class MaskPlan:
             bits.append(f"edge bands {self.bottom} bottom / {self.top} top")
         if self.tubes:
             bits.append(f"{len(self.tubes)} tube(s): {', '.join(map(str, self.tubes))}")
+        for xc, yc, radius in self.discs:
+            bits.append(f"disc at ({xc:g}, {yc:g}) mm, r {radius:g} mm")
         return "; ".join(bits) or "nothing to mask"
 
 
@@ -440,6 +451,7 @@ def build_plan(
     use_tubes: bool = True,
     beam_center: Optional[tuple[float, float]] = None,
     beam_radius: Optional[float] = None,
+    discs: Optional[Sequence[tuple[float, float, float]]] = None,
 ) -> MaskPlan:
     """Decide what to mask. Explicit arguments override what is measured."""
     plan = MaskPlan()
@@ -487,6 +499,12 @@ def build_plan(
     for tube in plan.tubes:
         plan.shapes.append({"type": "rectangle", "x0": float(tube), "y0": 0.0,
                             "x1": float(tube), "y1": float(N_PIXELS - 1)})
+
+    # Extra discs the user asked for, in millimetres on the detector face.
+    for xc, yc, radius in (discs or ()):
+        plan.discs.append((float(xc), float(yc), float(radius)))
+        plan.shapes.append({"type": "circle_mm", "xc": float(xc), "yc": float(yc),
+                            "r": float(radius)})
     return plan
 
 
@@ -793,15 +811,16 @@ def physical_tube_order(x_mm: Optional[np.ndarray]) -> Optional[np.ndarray]:
 
     Index order interleaves sub-banks, so an image plotted against raw tube index
     scrambles the beam stop into stripes. Sorting by x restores the detector's
-    actual appearance.
+    actual appearance, ascending so the plotted axis reads left-to-right.
     """
     if x_mm is None:
         return None
-    return np.argsort(-x_mm[:, x_mm.shape[1] // 2])
+    return np.argsort(x_mm[:, x_mm.shape[1] // 2])
 
 
 def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
-                      x_mm: Optional[np.ndarray] = None) -> Optional[str]:
+                      x_mm: Optional[np.ndarray] = None,
+                      y_mm: Optional[np.ndarray] = None) -> Optional[str]:
     """Raw image beside the same image with the mask overlaid. Returns path or None."""
     try:
         import matplotlib
@@ -811,19 +830,24 @@ def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
         return None
 
     order = physical_tube_order(x_mm)
+    extent = None
     if order is not None:
         counts = counts[order]
         mask = mask[order]
+        # Axes in millimetres, so a position read off the picture can be typed
+        # straight into --disc or --beam-center.
+        extent = (float(x_mm.min()), float(x_mm.max()),
+                  float(y_mm.min()), float(y_mm.max())) if y_mm is not None else None
     shown = np.log10(np.clip(counts.T, 1, None))
     fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
     for ax, title in zip(axes, ("raw", "mask overlay")):
-        ax.imshow(shown, origin="lower", aspect="auto", cmap="viridis")
-        ax.set_xlabel("tube (physical order)" if order is not None else "tube index")
-        ax.set_ylabel("pixel")
+        ax.imshow(shown, origin="lower", aspect="auto", cmap="viridis", extent=extent)
+        ax.set_xlabel("x (mm)" if extent else "tube index")
+        ax.set_ylabel("y (mm)" if extent else "pixel")
         ax.set_title(title)
     overlay = np.zeros(mask.T.shape + (4,))
     overlay[mask.T] = (1.0, 0.0, 0.0, 0.55)
-    axes[1].imshow(overlay, origin="lower", aspect="auto")
+    axes[1].imshow(overlay, origin="lower", aspect="auto", extent=extent)
     fig.suptitle(os.path.basename(path).replace("_compare.png", ""))
     fig.savefig(path, dpi=110)
     plt.close(fig)

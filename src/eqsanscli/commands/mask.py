@@ -43,6 +43,14 @@ _USAGE = (
     "  --beam-radius <mm>     state the radius in mm; used verbatim\n"
     "  --no-beam              do not mask the beam stop\n"
     "\n"
+    "[bold]Extra shapes[/bold]\n"
+    "  --disc <x>,<y>,<r>     mask a disc at (x, y) with radius r, all in mm on the\n"
+    "                         detector face. Repeatable. Positions are millimetres,\n"
+    "                         not pixels: tube index is not a spatial coordinate, so\n"
+    "                         a disc in index space would not be round. Read the\n"
+    "                         position straight off the _compare.png, whose axes are\n"
+    "                         in mm (x -525..525, y -521..521).\n"
+    "\n"
     "[bold]Tube ends[/bold]\n"
     "  --top <n> / --bottom <n>  how MANY pixels to mask at each end (not indices).\n"
     "                         --bottom 11 masks pixels 0-10, --top 11 masks 245-255.\n"
@@ -69,6 +77,8 @@ _USAGE = (
     "  /mask create 186104 --beam-radius 30        state the stop yourself\n"
     "  /mask create 186104 --tubes 146             add a known-bad tube\n"
     "  /mask create 186104 --top 12 --bottom 11    set the tube-end bands\n"
+    "  /mask create 186104 --disc 120,-80,15       mask a blemish at (120,-80) mm\n"
+    "  /mask create 186104 --disc 0,0,25 --disc 120,-80,15    several discs\n"
     "  /mask create 186104 --tube-sigma 3          flag tubes more readily\n"
     "\n"
     "[bold]If it looks wrong[/bold] — always open the _compare.png first:\n"
@@ -93,7 +103,7 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         "beam_pad": ms.DEFAULT_BEAM_PAD, "band_drop": ms.DEFAULT_BAND_DROP,
         "tube_sigma": ms.DEFAULT_TUBE_SIGMA, "top": None, "bottom": None,
         "tubes": None, "use_beam": True, "use_tubes": True, "dry_run": False,
-        "beam_center": None, "beam_radius": None,
+        "beam_center": None, "beam_radius": None, "discs": [],
     }
     floats = {"--beam-scale": "beam_scale", "--beam-pad": "beam_pad",
               "--band-drop": "band_drop", "--tube-sigma": "tube_sigma",
@@ -108,7 +118,8 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
             opts["use_tubes"] = False
         elif arg in ("--dry-run", "--dryrun"):
             opts["dry_run"] = True
-        elif arg in floats or arg in ints or arg in ("--ipts", "--outdir", "--tubes", "--beam-center"):
+        elif arg in floats or arg in ints or arg in ("--ipts", "--outdir", "--tubes",
+                                                    "--beam-center", "--disc"):
             if i + 1 >= len(args):
                 return opts, f"{args[i]} needs a value"
             value = args[i + 1]
@@ -118,6 +129,14 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
                     opts[floats[arg]] = float(value)
                 elif arg in ints:
                     opts[ints[arg]] = int(value)
+                elif arg == "--disc":
+                    parts = value.replace(" ", "").split(",")
+                    if len(parts) != 3:
+                        return opts, "--disc needs <x>,<y>,<radius> in mm"
+                    disc = tuple(float(v) for v in parts)
+                    if disc[2] <= 0:
+                        return opts, "--disc radius must be positive"
+                    opts["discs"].append(disc)
                 elif arg == "--beam-center":
                     parts = value.replace(" ", "").split(",")
                     if len(parts) != 2:
@@ -186,11 +205,17 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     plan = ms.build_plan(
         image.counts, image.x_mm, image.y_mm,
         beam_center=opts["beam_center"], beam_radius=opts["beam_radius"],
+        discs=opts["discs"],
         beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
         band_drop=opts["band_drop"], tube_sigma=opts["tube_sigma"],
         bottom=opts["bottom"], top=opts["top"], tubes=opts["tubes"],
         use_beam=opts["use_beam"], use_tubes=opts["use_tubes"],
     )
+    for disc in opts["discs"]:
+        if not ms.disc_is_on_detector(*disc, image.x_mm, image.y_mm):
+            lines.append(f"  [yellow]⚠[/yellow] --disc {disc[0]:g},{disc[1]:g},{disc[2]:g} lies off "
+                         f"the detector (x {image.x_mm.min():.0f}..{image.x_mm.max():.0f}, "
+                         f"y {image.y_mm.min():.0f}..{image.y_mm.max():.0f} mm) — masks nothing")
     mask = ms.shapes_to_mask(plan.shapes, image.x_mm, image.y_mm)
     indices = ms.mask_to_indices(mask)
     n = len(indices)
@@ -207,7 +232,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     stem = ms.mask_filename(image.distance_m, image.wavelength_a,
                             image.frequency_hz, run).replace(".nxs", "")
     png = ms.render_comparison(image.counts, mask,
-                               os.path.join(outdir, f"{stem}_compare.png"), image.x_mm)
+                               os.path.join(outdir, f"{stem}_compare.png"),
+                               image.x_mm, image.y_mm)
     if png:
         lines.append(f"  [green]✓[/green] preview: {png}")
         lines.append("    [dim]check the red overlay covers the beam, the tube ends and "
@@ -245,6 +271,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "band_convention": ("pixel counts at each end; bottom = low pixel index (-y). "
                             "The machine-physics tool names these the other way round."),
         "tubes": plan.tubes, "tube_source": plan.tube_source,
+        "discs_mm": [{"xc": d[0], "yc": d[1], "r": d[2]} for d in plan.discs] or None,
         "tube_note": plan.tube_note or None,
         "tube_sigma": None if plan.tube_source == "manual" else opts["tube_sigma"],
         "n_masked": n, "shapes": plan.shapes,
