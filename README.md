@@ -1099,8 +1099,9 @@ src/eqsanscli/
   config/         — Presets and settings
   tui/widgets/    — TUI components (completable_input, catalog_table, working_table)
 preset_configs/   — Preset JSON configs + knowledge.md (LLM examples/patterns)
-SKILL.md          — AI agent skill documentation (TUI-oriented)
-AGENT_SKILL.md    — Agent integration spec (headless JSON protocol)
+SKILL.md          — AI agent documentation: both the TUI and the headless
+                    JSON protocol, one command reference
+AGENT_SKILL.md    — stub; merged into SKILL.md
 ```
 
 LLM-to-instruction execution pipeline:
