@@ -377,17 +377,22 @@ so you can judge both.
    index is not a spatial coordinate on this detector — see *Detector geometry*
    below.
 
-   **Gravity-dropped direct beam.** Neutrons fall in flight, and the drop goes as
-   the square of the wavelength, so across a wavelength band the direct beam
-   smears into a *vertical streak*. A beam stop sized for the middle of the band
-   then lets the ends through — bright leakage above and below the shadow. On a
-   9 m 15 Å run those lobes reached 350 and 190 counts against a plateau of 5,
-   which matters far more than the shadow itself. When leakage is found the mask
-   becomes a **capsule** — everything within the radius of a vertical segment —
-   spanning the whole streak, and the tails are followed out to where brightness
-   returns to the plateau (local contrast alone stops short, because inside a
-   broad bright region its own surroundings are lit). Short wavelengths show no
-   leakage and stay a plain circle. `--no-leak` disables the extension.
+   **Gravity-dropped direct beam.** Neutrons fall in flight and the drop goes as
+   the square of the wavelength, so at long wavelength and long flight path some
+   direct beam misses the stop and lands above or below it, bright — on a 9 m 15 Å
+   run, lobes of 350 and 190 counts against a plateau of 5.
+
+   These are always **found and reported**, with position and radius, but not
+   masked by default: masking them costs low-Q coverage, and which of them matters
+   is a judgement for whoever is looking at the preview. `--leak` masks them, one
+   disc per lobe. To take just one, copy the reported numbers into `--disc`:
+
+   ```
+   Masking 4248 pixels (8.64%): beam stop at (16.5, -9.5) mm, r 13.7 mm; ...
+     • direct-beam leak below the stop at (13, -55) mm, r 48 mm — not masked —
+       add --leak, or --disc 13,-55,48
+     • direct-beam leak above the stop at (13, 51) mm, r 61 mm — not masked — ...
+   ```
 
 2. **The low-response bands** at both ends of every tube, measured from where the
    along-tube profile falls below half the plateau, and never smaller than the
@@ -457,7 +462,7 @@ the real stop. Check the preview and set `--beam-radius` if it is under-masked.
 | `--beam-center <x>,<y>` | mm | measured | state the beam centre; used verbatim |
 | `--beam-radius <r>` | mm | measured | state the beam radius; used verbatim, no scale or pad |
 | `--no-beam` | | off | do not mask the beam stop |
-| `--no-leak` | | off | do not extend over gravity-dropped direct beam |
+| `--leak` | | off | also mask gravity-dropped direct beam, one disc per lobe |
 | `--disc <x>,<y>,<r>` | mm | — | mask an extra disc anywhere on the face; repeatable |
 | `--top <n>` / `--bottom <n>` | pixels | measured, min 11 | force band sizes |
 | `--band-drop <f>` | fraction of plateau | 0.5 | where a band edge is called |
@@ -506,7 +511,7 @@ and nothing else.
 | Bands at the wrong end | `top`/`bottom` are named opposite to the machine-physics tool | swap them; `--bottom` is the low-index, −y end |
 | Beam mask far too big, off-centre | dim run — noise dominates | use a brighter run, or `--beam-center` + `--beam-radius` |
 | Beam mask too small | long wavelength: halo fills the penumbra (you will have been warned) | `--beam-radius <mm>` |
-| Bright spot left unmasked above/below the beam | gravity-dropped direct beam not picked up | check the run is a banjo/flood; else `--disc` it, or widen with `--beam-radius` |
+| Bright spot above/below the beam left unmasked | that is deliberate — leaks are reported, not masked | `--leak` for both lobes, or `--disc <reported numbers>` for one |
 | "no beam stop is discernible" | run has no stop in view, or is far too dim | check the raw panel; `--no-beam` if genuinely absent |
 | A known-bad tube is not flagged | auto-detection is whole-tube; a *segment* that is dead reads as normal on average | `--tubes 146` |
 | Whole tubes masked near the centre | fixed in 0.17.0 — was the beam halo moving tube means | rebuild; if it persists, `--no-tubes` and name them |

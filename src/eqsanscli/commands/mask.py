@@ -42,17 +42,18 @@ _USAGE = (
     "  --beam-center <x>,<y>  state the centre in mm; skips detection\n"
     "  --beam-radius <mm>     state the radius in mm; used verbatim\n"
     "  --no-beam              do not mask the beam stop\n"
-    "  --no-leak              do not extend the mask over direct beam that has\n"
-    "                         fallen under gravity (see below)\n"
+    "  --leak                 also mask direct beam that fell under gravity and\n"
+    "                         missed the stop (reported either way; see below)\n"
     "\n"
     "[bold]Gravity-dropped direct beam[/bold]\n"
-    "  At long wavelength and long flight path the beam falls measurably, and the\n"
-    "  drop goes as the square of the wavelength — so across the wavelength band\n"
-    "  the direct beam smears into a vertical streak and a stop sized for the\n"
-    "  middle of it lets the ends through, bright, above and below. When that is\n"
-    "  seen the mask is extended into a capsule spanning the whole streak. On a\n"
-    "  9 m 15 A run the lobes reached 350 counts against a plateau of 5.\n"
-    "  Disable with --no-leak; short wavelengths are unaffected either way.\n"
+    "  Neutrons fall in flight and the drop goes as the square of the wavelength,\n"
+    "  so at long wavelength and long flight path some direct beam misses the stop\n"
+    "  and lands above or below it, bright. On a 9 m 15 A run those lobes reached\n"
+    "  350 counts against a plateau of 5.\n"
+    "  Leaks are always FOUND and REPORTED, with their position and radius, but\n"
+    "  masking them costs low-Q coverage, so it is your call: --leak adds one disc\n"
+    "  per lobe, or copy the reported numbers into --disc to take just the one you\n"
+    "  want.\n"
     "\n"
     "[bold]Extra shapes[/bold]\n"
     "  --disc <x>,<y>,<r>     mask a disc at (x, y) with radius r, all in mm on the\n"
@@ -114,7 +115,7 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         "beam_pad": ms.DEFAULT_BEAM_PAD, "band_drop": ms.DEFAULT_BAND_DROP,
         "tube_sigma": ms.DEFAULT_TUBE_SIGMA, "top": None, "bottom": None,
         "tubes": None, "use_beam": True, "use_tubes": True, "dry_run": False,
-        "beam_center": None, "beam_radius": None, "discs": [], "include_leaks": True,
+        "beam_center": None, "beam_radius": None, "discs": [], "mask_leaks": False,
     }
     floats = {"--beam-scale": "beam_scale", "--beam-pad": "beam_pad",
               "--band-drop": "band_drop", "--tube-sigma": "tube_sigma",
@@ -125,8 +126,8 @@ def _parse_args(args: list[str]) -> tuple[dict, str]:
         arg = args[i].lower()
         if arg in ("--no-beam", "--nobeam"):
             opts["use_beam"] = False
-        elif arg in ("--no-leak", "--no-leaks", "--noleak"):
-            opts["include_leaks"] = False
+        elif arg in ("--leak", "--leaks", "--mask-leak"):
+            opts["mask_leaks"] = True
         elif arg in ("--no-tubes", "--notubes"):
             opts["use_tubes"] = False
         elif arg in ("--dry-run", "--dryrun"):
@@ -218,7 +219,7 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     plan = ms.build_plan(
         image.counts, image.x_mm, image.y_mm,
         beam_center=opts["beam_center"], beam_radius=opts["beam_radius"],
-        discs=opts["discs"], include_leaks=opts["include_leaks"],
+        discs=opts["discs"], mask_leaks=opts["mask_leaks"],
         beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
         band_drop=opts["band_drop"], tube_sigma=opts["tube_sigma"],
         bottom=opts["bottom"], top=opts["top"], tubes=opts["tubes"],
@@ -233,6 +234,12 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
     indices = ms.mask_to_indices(mask)
     n = len(indices)
     lines.append(f"  Masking {n} pixels ({100 * n / mask.size:.2f}%): {plan.summary()}")
+    for xc, yc, radius in plan.leaks:
+        where = "above" if yc > (plan.beam.yc if plan.beam else 0) else "below"
+        state = "masked" if plan.leaks_masked else (
+            f"[dim]not masked — add --leak, or --disc {xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
+        lines.append(f"    [yellow]•[/yellow] direct-beam leak {where} the stop at "
+                     f"({xc:.0f}, {yc:.0f}) mm, r {radius:.0f} mm — {state}")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
@@ -278,10 +285,10 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "beam_mm": (None if plan.beam is None else {
             "xc": plan.beam.xc, "yc": plan.beam.yc, "radius": plan.beam.radius,
             "npix": plan.beam.npix, "units": "mm",
-            "shape": "capsule" if plan.beam.is_streak else "circle",
-            "y_low": plan.beam.y_low, "y_high": plan.beam.y_high,
-            "gravity_leaks": plan.beam.leaks,
             "core_contrast": round(plan.beam.core_contrast, 3)}),
+        "leaks_mm": [{"xc": round(d[0], 1), "yc": round(d[1], 1), "r": round(d[2], 1)}
+                     for d in plan.leaks] or None,
+        "leaks_masked": plan.leaks_masked,
         "beam_scale": opts["beam_scale"],
         "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],

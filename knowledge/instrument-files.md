@@ -92,12 +92,11 @@ writes `mask_<config>_<run>.nxs` into the working folder — named so the search
 above finds it.
 
 At long wavelength and long flight path the direct beam **falls under gravity**,
-by an amount going as the square of the wavelength, so across the wavelength band
-it smears into a vertical streak. A stop sized for the middle of the band lets the
-ends through, and that leakage is bright: on a 9 m 15 Å banjo, lobes of 350 and
-190 counts against a plateau of 5, above and below an 8-count shadow. The mask
-must cover the whole streak, not just the shadow — `/mask create` extends to a
-capsule when it sees leakage.
+by an amount going as the square of the wavelength, so some of it misses the stop
+and lands above or below it: on a 9 m 15 Å banjo, lobes of 350 and 190 counts
+against a plateau of 5, either side of an 8-count shadow. `/mask create` finds and
+reports these but does not mask them unless asked (`--leak`), since covering them
+costs low-Q coverage — a decision for the instrument scientist, not the tool.
 
 The beam stop is found by **local** contrast — the image smoothed over ~5 pixels
 against ~41 — so a region qualifies by being darker than its own surroundings.

@@ -96,12 +96,8 @@ LEAK_COLUMN_FACTOR = 4.0
 LEAK_SEARCH_MM = 200.0
 LEAK_MIN_PIXELS = 10
 
-#: A streak tail is followed until the column's mean falls below this multiple of
-#: the plateau.
-LEAK_TAIL_FACTOR = 2.0
-
-#: However bright the leakage, never let the capsule grow wider than this.
-MAX_LEAK_RADIUS_MM = 100.0
+#: Pixels of rim the ~5-pixel smoothing window trims off a detected lobe.
+LEAK_EDGE_PIXELS = 2.0
 
 #: A core shallower than this is not a clean beam stop: the measured radius will
 #: under-state the real one, so say so rather than quietly under-masking.
@@ -167,36 +163,15 @@ def _edge_ratio(counts: np.ndarray) -> float:
 
 @dataclass
 class BeamStop:
-    """What has to be masked around the beam, in millimetres on the detector face.
-
-    A circle when the direct beam is stopped cleanly. Gravity drop goes as the
-    square of the wavelength, so at long wavelength and long flight path the
-    direct beam smears into a **vertical streak** across the wavelength band and a
-    stop sized for the middle of it lets the ends through — bright leakage above
-    and below. `y_low`/`y_high` then span the whole streak and the masked region
-    is a capsule: everything within `radius` of that vertical segment. Observed on
-    run 186636 (9 m, 15 Å): lobes of 350 and 190 counts either side of a stop
-    covering 8.
-    """
+    """The beam-stop shadow as a circle on the detector face, in millimetres."""
 
     xc: float          # mm
     yc: float          # mm
     radius: float      # mm
     npix: int
-    core_contrast: float = 0.0       # how dark the core is vs its surroundings
-    y_low: Optional[float] = None    # streak bottom, mm (None = a plain circle)
-    y_high: Optional[float] = None   # streak top, mm
-    leaks: int = 0                   # bright direct-beam patches folded in
-
-    @property
-    def is_streak(self) -> bool:
-        return (self.y_low is not None and self.y_high is not None
-                and self.y_high - self.y_low > 2 * self.radius + 1e-6)
+    core_contrast: float = 0.0   # how dark the core is vs its surroundings
 
     def as_shape(self) -> dict:
-        if self.is_streak:
-            return {"type": "capsule_mm", "xc": self.xc, "y0": self.y_low,
-                    "y1": self.y_high, "r": self.radius}
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
 
 
@@ -229,6 +204,22 @@ def pixel_area_mm2(x_mm: np.ndarray, y_mm: np.ndarray) -> float:
     return (width / (N_TUBES - 1)) * (height / (N_PIXELS - 1))
 
 
+def local_contrast(counts: np.ndarray, x_mm: np.ndarray) -> np.ndarray:
+    """Each pixel's brightness relative to its own surroundings.
+
+    The image smoothed over ~5 pixels divided by the same smoothed over ~41, in
+    physical tube order so neighbours really are neighbours. Values below 1 are
+    darker than their surroundings, above 1 brighter.
+    """
+    from scipy.ndimage import uniform_filter
+
+    order = physical_tube_order(x_mm)
+    image = counts[order].astype(float)
+    local = uniform_filter(image, size=5, mode="nearest")
+    surround = uniform_filter(image, size=41, mode="nearest")
+    return (local / np.clip(surround, 1e-9, None))[np.argsort(order)]
+
+
 def find_beam_stop(
     counts: np.ndarray,
     x_mm: np.ndarray,
@@ -238,7 +229,6 @@ def find_beam_stop(
     pad: float = DEFAULT_BEAM_PAD,
     contrast_max: float = DEFAULT_BEAM_CONTRAST,
     max_radius_mm: float = MAX_BEAM_RADIUS_MM,
-    include_leaks: bool = True,
 ) -> tuple[Optional[BeamStop], str]:
     """Locate the beam-stop shadow as a circle on the detector face.
 
@@ -263,14 +253,9 @@ def find_beam_stop(
     machine-physics mask maker does), and the result is checked for credibility
     before being returned.
     """
-    from scipy.ndimage import label, uniform_filter
+    from scipy.ndimage import label
 
-    order = physical_tube_order(x_mm)
-    inverse = np.argsort(order)
-    image = counts[order].astype(float)
-    local = uniform_filter(image, size=5, mode="nearest")
-    surround = uniform_filter(image, size=41, mode="nearest")
-    contrast = (local / np.clip(surround, 1e-9, None))[inverse]
+    contrast = local_contrast(counts, x_mm)
 
     half_w = (x_mm.max() - x_mm.min()) / 2.0
     half_h = (y_mm.max() - y_mm.min()) / 2.0
@@ -330,18 +315,8 @@ def find_beam_stop(
         return None, (f"the darkest region is only {1 / max(core_contrast, 1e-9):.2f}x darker "
                       f"than its surroundings — no beam stop is discernible in this image")
 
-    final_radius = radius * scale + pad * pitch
-    y_low = y_high = None
-    leaks = 0
-    if include_leaks:
-        y_low, y_high, leak_radius, leaks = _direct_beam_leaks(
-            counts, x_mm, y_mm, contrast, xc, yc, final_radius, pitch,
-        )
-        final_radius = max(final_radius, leak_radius)
-
-    beam = BeamStop(xc=xc, yc=yc, radius=final_radius, npix=npix,
-                    core_contrast=core_contrast, y_low=y_low, y_high=y_high,
-                    leaks=leaks)
+    beam = BeamStop(xc=xc, yc=yc, radius=radius * scale + pad * pitch, npix=npix,
+                    core_contrast=core_contrast)
     if core_contrast > SHALLOW_CORE_CONTRAST:
         return beam, (
             f"the shadow is shallow (core only {1 / max(core_contrast, 1e-9):.1f}x darker "
@@ -353,85 +328,56 @@ def find_beam_stop(
 
 
 
-def _direct_beam_leaks(
+def find_direct_beam_leaks(
     counts: np.ndarray,
     x_mm: np.ndarray,
     y_mm: np.ndarray,
-    contrast: np.ndarray,
-    xc: float,
-    yc: float,
-    radius: float,
-    pitch: float,
-) -> tuple[Optional[float], Optional[float], float, int]:
-    """Bright direct-beam leakage above and below a beam stop.
+    beam: "BeamStop",
+    *,
+    contrast: Optional[np.ndarray] = None,
+) -> list[tuple[float, float, float]]:
+    """Bright patches of direct beam that missed the stop, as discs in mm.
 
-    Gravity drop goes as the square of the wavelength, so across a wavelength band
-    the direct beam smears vertically and a stop sized for the middle of the band
-    lets the ends through. Those lobes are far brighter than any sample signal —
-    350 counts against a plateau of 5 on run 186636 — and matter more than the
-    shadow itself.
+    Neutrons fall in flight and the drop goes as the square of the wavelength, so
+    across a wavelength band the direct beam lands at a range of heights. A stop
+    sized for the middle of the band lets the ends through, and the leakage is
+    bright: on run 186636 (9 m, 15 Å) lobes of 350 and 190 counts sat above and
+    below an 8-count shadow, against a plateau of 5.
 
-    Only patches that are much brighter than their surroundings, in the beam's own
-    column and within `LEAK_SEARCH_MM` of the stop, are folded in; sample
-    scattering near the beam is broad and centred, not a compact off-centre lobe.
-    Returns (y_low, y_high, radius, n_leaks) spanning stop and leaks.
+    Returns one (x, y, radius) disc per lobe — the way these are masked by hand —
+    or [] when the beam is stopped cleanly. Reporting is the caller's job: whether
+    to mask them is a decision for the person looking at the preview.
     """
     from scipy.ndimage import label
 
-    near = ((np.abs(x_mm - xc) < LEAK_COLUMN_FACTOR * radius)
-            & (np.abs(y_mm - yc) < LEAK_SEARCH_MM))
+    if contrast is None:
+        contrast = local_contrast(counts, x_mm)
+
+    near = ((np.abs(x_mm - beam.xc) < LEAK_COLUMN_FACTOR * beam.radius)
+            & (np.abs(y_mm - beam.yc) < LEAK_SEARCH_MM))
     bright = (contrast > LEAK_CONTRAST) & near
     if not bright.any():
-        return None, None, radius, 0
+        return []
 
     order = physical_tube_order(x_mm)
-    inverse = np.argsort(order)
-    labels = label(bright[order])[0][inverse]
+    labels = label(bright[order])[0][np.argsort(order)]
 
-    y_low, y_high, out_radius, found = yc - radius, yc + radius, radius, 0
+    discs: list[tuple[float, float, float]] = []
     for index in range(1, int(labels.max()) + 1):
         patch = labels == index
         if int(patch.sum()) < LEAK_MIN_PIXELS:
             continue
-        found += 1
-        y_low = min(y_low, float(y_mm[patch].min()))
-        y_high = max(y_high, float(y_mm[patch].max()))
-        # Contain the patch by construction. Estimating a width instead (half the
-        # x-range, or the median row width) left the widest part of a lobe
-        # unmasked -- 611 counts against a plateau of 5 on run 186636 -- and a
-        # single unmasked direct-beam pixel ruins the low-Q data it lands in.
-        reach = float(np.abs(x_mm[patch] - xc).max()) + pitch
-        out_radius = max(out_radius, min(reach, MAX_LEAK_RADIUS_MM))
-
-    if not found:
-        return None, None, radius, 0
-
-    # Follow the streak's tails out to where brightness returns to the plateau.
-    # Local contrast saturates inside a broad bright region -- its own
-    # surroundings are lit -- so the ends of a long streak read as low contrast
-    # and would be left unmasked. On run 186636 the tail still carried ~23 counts
-    # against a plateau of 5 beyond where the contrast test stopped.
-    plateau = float(np.median(counts[counts > 0])) if (counts > 0).any() else 0.0
-    if plateau > 0:
-        column = np.abs(x_mm - xc) <= out_radius
-        limit = LEAK_TAIL_FACTOR * plateau
-        step = 2.0 * pitch
-        for direction in (-1.0, 1.0):
-            edge = y_low if direction < 0 else y_high
-            while abs(edge - yc) < LEAK_SEARCH_MM:
-                slab = column & (np.abs(y_mm - (edge + direction * step / 2)) <= step / 2)
-                if not slab.any() or float(counts[slab].mean()) < limit:
-                    break
-                edge += direction * step
-            if direction < 0:
-                y_low = edge
-            else:
-                y_high = edge
-
-    # Never let leak-following run away with the whole detector.
-    y_low = max(y_low, yc - LEAK_SEARCH_MM)
-    y_high = min(y_high, yc + LEAK_SEARCH_MM)
-    return y_low, y_high, out_radius, found
+        xc = float(x_mm[patch].mean())
+        yc = float(y_mm[patch].mean())
+        # Contain the patch, then allow for the smoothing window eating its rim:
+        # local contrast is computed over ~5 pixels, so near a lobe's edge the
+        # average already includes surrounding plateau and the detected patch is
+        # about two pixels short all round. A lobe left half-masked is as useless
+        # as one not masked at all.
+        radius = float(np.hypot(x_mm[patch] - xc, y_mm[patch] - yc).max())
+        rim = LEAK_EDGE_PIXELS * math.sqrt(pixel_area_mm2(x_mm, y_mm))
+        discs.append((xc, yc, radius + rim))
+    return sorted(discs, key=lambda d: d[1])
 
 
 def find_edge_bands(
@@ -548,21 +494,18 @@ class MaskPlan:
     beam_note: str = ""      # why no beam stop was masked, when there is none
     tube_note: str = ""      # when the run cannot support judging tubes
     discs: list = field(default_factory=list)   # extra (x_mm, y_mm, r_mm) discs
+    leaks: list = field(default_factory=list)   # direct-beam leak discs found
+    leaks_masked: bool = False
 
     def summary(self) -> str:
         bits = []
         if self.beam:
-            if self.beam.is_streak:
-                bits.append(
-                    f"beam at x {self.beam.xc:.1f} mm, y {self.beam.y_low:.0f} to "
-                    f"{self.beam.y_high:.0f} mm, r {self.beam.radius:.1f} mm "
-                    f"(stop + {self.beam.leaks} gravity-dropped leak(s))"
-                )
-            else:
-                bits.append(
-                    f"beam stop at ({self.beam.xc:.1f}, {self.beam.yc:.1f}) mm, "
-                    f"r {self.beam.radius:.1f} mm"
-                )
+            bits.append(
+                f"beam stop at ({self.beam.xc:.1f}, {self.beam.yc:.1f}) mm, "
+                f"r {self.beam.radius:.1f} mm"
+            )
+            if self.leaks and self.leaks_masked:
+                bits.append(f"{len(self.leaks)} direct-beam leak disc(s)")
         if self.bottom or self.top:
             bits.append(f"edge bands {self.bottom} bottom / {self.top} top")
         if self.tubes:
@@ -587,7 +530,7 @@ def build_plan(
     tubes: Optional[Sequence[int]] = None,
     use_beam: bool = True,
     use_tubes: bool = True,
-    include_leaks: bool = True,
+    mask_leaks: bool = False,
     beam_center: Optional[tuple[float, float]] = None,
     beam_radius: Optional[float] = None,
     discs: Optional[Sequence[tuple[float, float, float]]] = None,
@@ -612,10 +555,17 @@ def build_plan(
         else:
             plan.beam, plan.beam_note = find_beam_stop(
                 counts, x_mm, y_mm, scale=beam_scale, pad=beam_pad,
-                include_leaks=include_leaks,
             )
         if plan.beam:
             plan.shapes.append(plan.beam.as_shape())
+            # Direct beam that missed the stop is found and reported always;
+            # masking it is the user's call, since it costs low-Q coverage.
+            plan.leaks = find_direct_beam_leaks(counts, x_mm, y_mm, plan.beam)
+            plan.leaks_masked = bool(mask_leaks and plan.leaks)
+            if mask_leaks:
+                for xc, yc, radius in plan.leaks:
+                    plan.shapes.append({"type": "circle_mm", "xc": xc, "yc": yc,
+                                        "r": radius})
 
     auto_bottom, auto_top = find_edge_bands(counts, drop=band_drop)
     plan.bottom = max(auto_bottom, min_band) if bottom is None else int(bottom)
@@ -660,16 +610,7 @@ def shapes_to_mask(shapes: Sequence[dict], x_mm: Optional[np.ndarray] = None,
     ys = np.arange(N_PIXELS)[None, :]
     for shape in shapes:
         kind = shape.get("type")
-        if kind == "capsule_mm":
-            if x_mm is None or y_mm is None:
-                logger.warning("Skipping the beam capsule: no detector positions.")
-                continue
-            y0, y1 = sorted((float(shape["y0"]), float(shape["y1"])))
-            # Distance to a vertical segment: clamp y onto it, then measure.
-            nearest_y = np.clip(y_mm, y0, y1)
-            mask |= ((x_mm - float(shape["xc"])) ** 2
-                     + (y_mm - nearest_y) ** 2) <= float(shape["r"]) ** 2
-        elif kind == "circle_mm":
+        if kind == "circle_mm":
             if x_mm is None or y_mm is None:
                 logger.warning("Skipping the beam circle: no detector positions.")
                 continue

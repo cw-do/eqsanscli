@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.20.0 | 2026-08-18 | Beam mask is a plain disc again; gravity leaks are reported and masked only on `--leak`, as one disc per lobe. Replaces 0.19.0's capsule. |
 | 0.19.0 | 2026-08-18 | The beam mask covers direct beam that fell under gravity: a capsule spanning the vertical streak, not just the shadow. |
 | 0.18.0 | 2026-08-18 | `/mask --disc <x>,<y>,<r>` masks an arbitrary disc in mm; preview axes now in mm so positions can be read off the picture. |
 | 0.17.0 | 2026-08-18 | Tube detection rebuilt: median against a local baseline, relative dead/hot tests, statistical test gated on counts. A beam halo no longer masks whole tubes. |
@@ -117,6 +118,43 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.20.0): Back to a disc — leaks reported, masked on request
+
+0.19.0 solved the right problem the wrong way. Feedback: *"that was too much.
+Besides the extension didn't need to go up, that was over-masking. First I want to
+see the centre mask created. Then we can decide whether to cover up the leak.
+Usually I would have done it with two disc-shaped masks."*
+
+All three points were fair. The capsule spanned y -145..+129 mm on run 186636 —
+274 mm of a 1 m detector, extended upward as well as down, and it fused the beam
+stop and the leakage into a single shape so the centre mask could not be judged on
+its own. The tail-following made it worse.
+
+**Now:** the beam mask is a **plain disc** again, always. Leakage is still detected
+— that part was worth keeping — and each lobe is reported with its position and
+radius, but nothing is masked unless asked:
+
+```
+Masking 4248 pixels (8.64%): beam stop at (16.5, -9.5) mm, r 13.7 mm; ...
+  • direct-beam leak below the stop at (13, -55) mm, r 48 mm — not masked —
+    add --leak, or --disc 13,-55,48
+  • direct-beam leak above the stop at (13, 51) mm, r 61 mm — not masked — ...
+```
+
+`--leak` masks them as **one disc per lobe**, matching how they are masked by
+hand; or copy the reported numbers into `--disc` to take just the lower one. On
+186636: 8.6% masked by default, 10.3% with `--leak`, against 12.2% for the
+capsule.
+
+**Removed:** the `capsule_mm` shape, `y_low`/`y_high`/`is_streak` on `BeamStop`,
+tail-following, and two constants. `local_contrast()` came out of `find_beam_stop`
+as a named helper, and `find_direct_beam_leaks()` is now public and returns discs.
+
+One detail kept from the exercise: a leak disc is padded by two pixels, because
+local contrast is computed over a ~5-pixel window and therefore trims about that
+much off a lobe's rim — without it a 20 mm lobe produced a 16.5 mm disc and 20
+pixels of direct beam stayed unmasked.
 
 ### 2026-08-18 (v0.19.0): Masking direct beam that fell under gravity
 

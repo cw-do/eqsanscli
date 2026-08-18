@@ -370,66 +370,67 @@ def _counts_with_gravity_streak():
     """
     counts = synthetic_counts(dead_tube=None)
     x_mm, y_mm = synthetic_positions()
-    column = np.abs(x_mm) < 30.0
-    counts[column & (y_mm > 25) & (y_mm < 80)] = 400.0     # upper lobe
-    counts[column & (y_mm < -25) & (y_mm > -80)] = 300.0    # lower lobe
+    for y_lobe, level in ((60.0, 400.0), (-60.0, 300.0)):
+        lobe = (x_mm ** 2 + (y_mm - y_lobe) ** 2) <= 20.0 ** 2
+        counts[lobe] = level
     return counts
 
 
-def test_gravity_dropped_beam_extends_the_mask_into_a_capsule():
+def test_leaks_are_found_and_reported_but_not_masked_by_default():
+    """The centre disc is the job; whether to spend low-Q coverage on the leak is
+    the user's call, so it is reported and left off unless asked for."""
     x_mm, y_mm = synthetic_positions()
     plan = ms.build_plan(_counts_with_gravity_streak(), x_mm, y_mm,
                          use_tubes=False, bottom=0, top=0)
-    beam = plan.beam
-    assert beam is not None and beam.is_streak, beam
-    assert beam.leaks >= 2, beam.leaks
-    assert beam.y_low < -60 and beam.y_high > 60, (beam.y_low, beam.y_high)
-    assert plan.beam.as_shape()["type"] == "capsule_mm"
+    assert plan.beam is not None
+    assert plan.beam.as_shape()["type"] == "circle_mm"
+    assert len(plan.leaks) == 2, plan.leaks
+    assert plan.leaks_masked is False
+    # one lobe below the stop, one above, sorted by y
+    assert plan.leaks[0][1] < plan.beam.yc < plan.leaks[1][1]
+    # Structural: no leak disc among the shapes (the stop disc may clip a lobe edge).
+    circles = [sh for sh in plan.shapes if sh["type"] == "circle_mm"]
+    assert len(circles) == 1, circles
 
 
-def test_the_capsule_covers_every_bright_leak_pixel():
-    """A single unmasked direct-beam pixel ruins the low-Q data it lands in."""
+def test_leak_option_masks_one_disc_per_lobe():
     x_mm, y_mm = synthetic_positions()
     counts = _counts_with_gravity_streak()
-    plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0)
-    mask = ms.shapes_to_mask([plan.beam.as_shape()], x_mm, y_mm)
+    plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0,
+                         mask_leaks=True)
+    assert plan.leaks_masked is True
+    circles = [sh for sh in plan.shapes if sh["type"] == "circle_mm"]
+    assert len(circles) == 1 + len(plan.leaks)      # the stop plus one per lobe
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
     bright = counts > 250.0
-    assert bright.any()
     assert (bright & ~mask).sum() == 0, int((bright & ~mask).sum())
 
 
-def test_no_leak_keeps_the_plain_disc():
+def test_a_clean_stop_reports_no_leaks():
     x_mm, y_mm = synthetic_positions()
-    plan = ms.build_plan(_counts_with_gravity_streak(), x_mm, y_mm,
-                         use_tubes=False, bottom=0, top=0, include_leaks=False)
-    assert plan.beam is not None and not plan.beam.is_streak
+    plan = ms.build_plan(synthetic_counts(dead_tube=None), x_mm, y_mm,
+                         use_tubes=False, bottom=0, top=0, mask_leaks=True)
+    assert plan.beam is not None and plan.leaks == []
     assert plan.beam.as_shape()["type"] == "circle_mm"
 
 
-def test_a_clean_stop_is_not_turned_into_a_capsule():
-    """Short wavelength: no leakage, so the mask must stay a circle."""
+def test_leak_discs_contain_their_lobes():
+    """A half-masked lobe is as bad as none, so each disc contains its patch."""
     x_mm, y_mm = synthetic_positions()
-    plan = ms.build_plan(synthetic_counts(dead_tube=None), x_mm, y_mm,
-                         use_tubes=False, bottom=0, top=0)
-    assert plan.beam is not None and not plan.beam.is_streak
-    assert plan.beam.leaks == 0
+    counts = _counts_with_gravity_streak()
+    plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0)
+    for xc, yc, radius in plan.leaks:
+        disc = ms.shapes_to_mask([{"type": "circle_mm", "xc": xc, "yc": yc, "r": radius}],
+                                 x_mm, y_mm)
+        lobe = (counts > 250.0) & (np.abs(y_mm - yc) < 30)
+        assert (lobe & ~disc).sum() == 0, (xc, yc, int((lobe & ~disc).sum()))
 
 
-def test_capsule_shape_renders_as_a_stadium():
-    x_mm, y_mm = synthetic_positions()
-    shape = {"type": "capsule_mm", "xc": 0.0, "y0": -100.0, "y1": 100.0, "r": 20.0}
-    mask = ms.shapes_to_mask([shape], x_mm, y_mm)
-    assert mask[np.abs(x_mm) < 5][np.abs(y_mm[np.abs(x_mm) < 5]) < 90].all()
-    # rounded ends: nothing beyond the segment plus the radius
-    assert y_mm[mask].max() <= 100.0 + 20.0 + 1e-6
-    assert y_mm[mask].min() >= -100.0 - 20.0 - 1e-6
-
-
-def test_no_leak_option_parsing():
+def test_leak_option_parsing():
     from eqsanscli.commands.mask import _parse_args
 
-    assert _parse_args(["--no-leak"])[0]["include_leaks"] is False
-    assert _parse_args([])[0]["include_leaks"] is True
+    assert _parse_args(["--leak"])[0]["mask_leaks"] is True
+    assert _parse_args([])[0]["mask_leaks"] is False
 
 
 def test_unknown_shape_is_ignored_not_fatal():
