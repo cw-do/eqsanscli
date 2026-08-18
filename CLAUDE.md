@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.15.1 | 2026-08-17 | `--beam-pad` back to y-pixels, the units the machine-physics mask tool uses; converted to mm internally. |
 | 0.15.0 | 2026-08-17 | Beam stop masked in millimetres against real pixel positions — tube index is not a spatial coordinate, so the index-space circle was only 87% right. |
 | 0.14.1 | 2026-08-17 | Fix: `/mask --beam-pad` padded only the y radius, distorting the beam circle (13% off aspect at the default, 77% at pad 6). |
 | 0.14.0 | 2026-08-17 | `/mask create <run>` builds a mask from a run's own image, self-contained, named for its configuration so the resolver finds it. |
@@ -110,6 +111,20 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.15.1): `--beam-pad` speaks y-pixels again
+
+0.15.0 moved the beam stop into millimetres, correctly, and moved `--beam-pad`
+into millimetres with it — which broke the convention the machine-physics mask
+tool established: its SKILL.md says outright "`--beam-pad` is in y-pixels", and
+the 2026B mask was made with `beam_pad: 1.0` meaning one pixel. Someone用 to that
+tool typing `--beam-pad 3` here would have got 3 mm, about three quarters of a
+pixel, instead of three pixels.
+
+The circle stays physical; only the knob's units revert. `pad` is now in pixels
+along a tube and converted with the pitch measured from the real positions
+(4.090 mm), so the two tools agree on what a number means. `params.json` records
+`beam_pad_units: "y-pixels"` so a stored mask says which convention it used.
 
 ### 2026-08-17 (v0.15.0): The beam stop is a circle in millimetres, not in index space
 

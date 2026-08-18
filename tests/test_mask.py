@@ -111,14 +111,19 @@ def test_beam_stop_is_found_where_it_was_put():
     assert abs(beam.radius - TRUE_BEAM_R * PIXEL_PITCH_MM) < 5.0, beam.radius
 
 
-def test_beam_scale_and_pad_are_in_millimetres():
+def test_beam_scale_multiplies_and_pad_is_in_y_pixels():
+    """`--beam-pad` keeps the machine-physics tool's units: pixels along a tube."""
     x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts()
     base = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
     scaled = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
     padded = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=7.0)
     assert abs(scaled.radius - 2 * base.radius) < 1e-6
-    assert abs(padded.radius - (base.radius + 7.0)) < 1e-6
+    assert abs(padded.radius - (base.radius + 7 * PIXEL_PITCH_MM)) < 1e-6
+
+
+def test_pixel_pitch_matches_the_real_detector():
+    assert abs(ms.pixel_pitch_y_mm(synthetic_positions()[1]) - PIXEL_PITCH_MM) < 0.01
 
 
 def test_masked_beam_region_is_a_disc_on_the_detector():

@@ -103,8 +103,10 @@ a tube and 4.09 mm along one — not square. Two consequences:
 - A circle drawn in index space is **not** a circle on the detector. For run
   186104's beam stop it agreed with the true disc only 87%, covering a region
   82.6 × 69.5 mm. The beam stop is masked in millimetres against the real pixel
-  positions; `--beam-scale` and `--beam-pad` are therefore physical too (pad in
-  mm). Pixel index *is* linear in y, so the tube-end bands stay in index space.
+  positions. `--beam-pad` keeps the machine-physics tool's units — pixels along a
+  tube, ~4.09 mm — and is converted to millimetres internally; `--beam-scale`
+  multiplies the fitted radius. Pixel index *is* linear in y, so the tube-end
+  bands stay in index space.
 
 The same mask is often reusable across detector distances, so a single
 `mask_4m.nxs` in the working folder is a legitimate setup — it just cannot be

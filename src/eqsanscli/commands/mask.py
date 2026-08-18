@@ -28,9 +28,9 @@ _USAGE = (
     "  --ipts <n>        experiment holding the run (default: the session's)\n"
     "  --outdir <dir>    where to write (default: the current folder)\n"
     "  --beam-scale <f>  multiply the fitted beam radius (default 1.2 = 20% bigger)\n"
-    "  --beam-pad <f>    add a margin beyond it, in MILLIMETRES (default 1.0)\n"
-    "                    the beam stop is masked as a real circle on the detector;\n"
-    "                    one pixel is 4.09 mm along a tube\n"
+    "  --beam-pad <f>    add a margin beyond it, in pixels along a tube (default 1.0,\n"
+    "                    same units as the machine-physics mask tool; 1 px = 4.09 mm).\n"
+    "                    The mask itself is a real circle on the detector face.\n"
     "  --no-beam         do not mask the beam stop\n"
     "  --top <n>         force the top band size (default: measured, min 11)\n"
     "  --bottom <n>      force the bottom band size\n"
@@ -183,7 +183,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "beam_mm": (None if plan.beam is None else {
             "xc": plan.beam.xc, "yc": plan.beam.yc, "radius": plan.beam.radius,
             "npix": plan.beam.npix, "units": "mm"}),
-        "beam_scale": opts["beam_scale"], "beam_pad": opts["beam_pad"],
+        "beam_scale": opts["beam_scale"],
+        "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],
         "tubes": plan.tubes, "tube_source": plan.tube_source,
         "tube_sigma": None if plan.tube_source == "manual" else opts["tube_sigma"],

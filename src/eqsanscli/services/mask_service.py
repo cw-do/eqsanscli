@@ -117,6 +117,15 @@ class BeamStop:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
 
 
+def pixel_pitch_y_mm(y_mm: np.ndarray) -> float:
+    """Spacing between neighbouring pixels along a tube, from the real positions.
+
+    ~4.09 mm on EQ-SANS. This is the unit `--beam-pad` is quoted in, matching the
+    machine-physics mask tool, whose `--beam-pad` is likewise in y-pixels.
+    """
+    return float(np.median(np.abs(np.diff(y_mm[0]))))
+
+
 def pixel_area_mm2(x_mm: np.ndarray, y_mm: np.ndarray) -> float:
     """Area one pixel covers, from the real positions.
 
@@ -145,8 +154,9 @@ def find_beam_stop(
     off-centre beam does not drag the result around.
 
     The result is physical because tube index is not a spatial coordinate (see
-    the module docstring): `scale` multiplies the fitted radius, `pad` adds
-    millimetres beyond it. One pixel is 4.09 mm along a tube.
+    the module docstring), but the knobs keep the units of the machine-physics
+    mask tool: `scale` multiplies the fitted radius and `pad` is **in y-pixels**
+    (one pixel along a tube, ~4.09 mm), converted here.
     """
     ny, nx = N_PIXELS, N_TUBES
     x0, x1 = int(nx * (1 - search_frac) / 2), int(nx * (1 + search_frac) / 2)
@@ -169,7 +179,8 @@ def find_beam_stop(
     # Radius from the shadow's AREA: npix * (area per pixel) = pi r^2. Taking a
     # median distance instead would overestimate by sqrt(2) on a filled disc.
     radius = math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi)
-    return BeamStop(xc=xc, yc=yc, radius=radius * scale + pad, npix=npix)
+    pad_mm = pad * pixel_pitch_y_mm(y_mm)
+    return BeamStop(xc=xc, yc=yc, radius=radius * scale + pad_mm, npix=npix)
 
 
 def find_edge_bands(

@@ -362,7 +362,7 @@ always look at it) and a `.params.json` recording how it was made.
 |---|---|
 | `--ipts <n>` | experiment holding the run (default: the session's) |
 | `--dry-run` | preview PNG only, no mask file |
-| `--beam-scale <f>` / `--beam-pad <f>` | enlarge the beam circle |
+| `--beam-scale <f>` / `--beam-pad <f>` | enlarge the beam circle (scale multiplies; pad is in pixels along a tube) |
 | `--no-beam` | skip the beam stop |
 | `--top <n>` / `--bottom <n>` | force band sizes |
 | `--tubes <a,b>` / `--tube-sigma <f>` / `--no-tubes` | control tube masking |
