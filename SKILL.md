@@ -328,7 +328,22 @@ transmission or background is a warning only. Escape hatches:
 (send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
 skips unreducible rows at reduction time.
 
-**Masks:** `/mask create <run>` builds one from a banjo/flood/empty-cell run (beam-stop shadow, tube-end bands, tubes deviating within their front/back pack of four) and writes `mask_<config>_<run>.nxs` into the current folder, named so the resolver finds it automatically. `--dry-run` previews; `--tubes a,b` and `--beam-scale` tune it; `/mask list` shows what is discoverable. Needs drtsans for the Mantid read/write.
+**Masks:** `/mask create <run>` builds one from a uniformly illuminated run
+(banjo, flood, empty cell) and writes `mask_<config>_<run>.nxs` into the current
+folder, named so the resolver finds it automatically, plus a `_compare.png` to
+review and a `.params.json` recording how it was made. It masks the beam-stop
+shadow (found by *local* contrast, masked as a circle in millimetres against real
+pixel positions), the low-response bands at both tube ends, and tubes deviating
+within their front/back pack of four.
+
+Counting statistics matter — ~90 counts/pixel is comfortable, ~4 is marginal —
+and at long wavelength the halo fills the beam-stop penumbra, so a 2.5 Å run
+gives a cleaner shadow than a 10 Å one. When the shadow is not credible the beam
+is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
+`--beam-radius <mm>` state it explicitly. `--dry-run` previews without writing,
+`--tubes a,b` adds known-bad tubes (auto-detection is whole-tube, so a dead
+*segment* averages out), `--tube-sigma` tunes sensitivity. `/mask list` shows what
+is discoverable. Needs drtsans for the Mantid read/write.
 
 ### Reduction
 | Command | Returns |

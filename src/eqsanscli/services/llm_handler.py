@@ -240,8 +240,15 @@ CONFIGURATION:
     "mask run 186104 but bigger beam" -> /mask create 186104 --beam-scale 1.4
     "also mask tube 146" -> /mask create 186104 --tubes 146
     "just show me what it would mask" -> /mask create 186104 --dry-run
+    "the beam mask is too big / wrong place" -> the run is probably too dim; suggest a brighter run, or
+        /mask create <run> --beam-center <x>,<y> --beam-radius <mm>   (both in mm)
+    "the beam mask is too small" -> long wavelength fills the penumbra; /mask create <run> --beam-radius <mm>
+    "also mask tube 146" -> /mask create <run> --tubes 146
 /mask list                      - Masks discoverable from here, in resolver order
   If no mask is found for a configuration, offer /mask create <run> rather than inventing a path.
+  /mask REFUSES to mask a beam stop it cannot find credibly and says why — that is correct behaviour, not
+  an error. Do not work around it by lowering thresholds; either use a brighter/shorter-wavelength run or
+  state --beam-center and --beam-radius. Never invent a beam centre or radius yourself.
 
 MASKS: resolved automatically per configuration — (1) mask*.nxs in the folder eqsanscli was started in,
 (2) /SNS/EQSANS/IPTS-<current>/shared/, (3) the cycle's <cycle>_mp/masks/*mask.nxs default. Matched by the

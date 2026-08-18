@@ -339,43 +339,145 @@ skips unreducible rows at reduction time.
 
 ## Building a mask
 
-`/mask create <run>` builds a detector mask from a run's own 2D count image —
-use a uniformly illuminated run (banjo, flood, empty cell). It masks:
+`/mask create <run>` builds a detector mask from a run's own 2D count image and
+writes it where the reduction will find it. Nothing outside eqsanscli is needed
+beyond `drtsans`, which supplies Mantid for reading the run and writing the mask.
 
-1. the **beam-stop shadow** — the low-count blob near the centre, as a physical
-   circle (an ellipse in index space, since pixels are finer along a tube than
-   tubes are apart);
-2. the **low-response bands** at both ends of every tube, measured but never
-   smaller than the long-standing 11-pixel convention;
-3. **deviant tubes** — compared within their front/back group. Front and back
-   tubes alternate in *packs of four* on this detector: grouping that way gives a
-   median absolute deviation of 2.7 counts against 19.9 for odd/even, so
-   comparing odd-to-odd hides real outliers.
+```
+/mask create 186104 --ipts 37618
+```
 
-The file lands in the folder you started eqsanscli in, named for the
-configuration read from the run's own logs — `mask_4m2o5a_186104.nxs` — which is
-exactly what the resolver reads back, so `/matchruns` and `/instrument` pick it
-up with no further action. Alongside it go a `_compare.png` (raw vs overlay —
-always look at it) and a `.params.json` recording how it was made.
+### Which run to use
 
-| Option | |
+A **uniformly illuminated** run — banjo, flood, or empty cell — so tube and edge
+anomalies stand out against a flat field. Two properties matter:
+
+- **Counting statistics.** A run with a median of ~4 counts per pixel is close to
+  the floor of what can be analysed; ~90 is comfortable. Below that, Poisson
+  noise competes with the features being detected.
+- **Wavelength.** At long wavelength the halo scattered around the beam stop
+  fills in its penumbra, so the shadow *looks* smaller than the stop really is.
+  A 2.5 Å run gives a much cleaner shadow than a 10 Å one.
+
+`/mask create` reports the run's counts and configuration before doing anything,
+so you can judge both.
+
+### What it masks
+
+1. **The beam-stop shadow**, as a circle on the detector face. It is found by
+   *local* contrast — the image smoothed over ~5 pixels compared against the same
+   image smoothed over ~41 — so a region qualifies by being darker than its own
+   surroundings rather than darker than some global number. That is what lets it
+   work on a dim run and through a bright halo. The largest connected blob is
+   taken, its centroid refined over four rounds, and the radius measured from
+   where the shadow ends: the smallest radius at which the surrounding ring has
+   recovered 75% of its brightness.
+
+   Masking happens in **millimetres**, against real pixel positions, because tube
+   index is not a spatial coordinate on this detector — see *Detector geometry*
+   below.
+
+2. **The low-response bands** at both ends of every tube, measured from where the
+   along-tube profile falls below half the plateau, and never smaller than the
+   11-pixel convention EQSANS has used for years.
+
+3. **Deviant tubes**, compared *within their front/back group*. Tubes alternate
+   in packs of four, so grouping that way gives a median absolute deviation of
+   2.7 counts against 19.9 for odd/even — comparing odd-to-odd mixes two
+   populations and hides real outliers.
+
+### When it refuses
+
+The beam stop is not masked, and the reason is printed, when:
+
+- no region is meaningfully darker than its surroundings;
+- the darkest blob is under 8 pixels;
+- the core is less than 1.25× darker than its surroundings — no discernible stop;
+- the implied radius exceeds 60 mm, larger than any EQSANS beam stop;
+- the centre is more than 60% of the way to an edge.
+
+This is deliberate: a wrong beam mask is worse than none, and every one of these
+cases came from a real failure. Use `--beam-center` / `--beam-radius` to state it
+yourself, or `--no-beam` to skip it.
+
+There is also a warning short of refusal: if the core is less than ~3× darker
+than its surroundings, the shadow is shallow and the measured radius understates
+the real stop. Check the preview and set `--beam-radius` if it is under-masked.
+
+### Options
+
+| Option | Units | Default | |
+|---|---|---|---|
+| `--ipts <n>` | | session's IPTS | experiment holding the run |
+| `--outdir <dir>` | | current folder | where to write (elsewhere = not auto-discovered) |
+| `--dry-run` | | off | report and write the preview PNG only, no mask file |
+| `--beam-scale <f>` | multiplier | 1.2 | enlarge the fitted beam radius |
+| `--beam-pad <f>` | pixels along a tube | 1.0 | margin beyond it (1 px ≈ 4.09 mm) |
+| `--beam-center <x>,<y>` | mm | measured | state the beam centre; used verbatim |
+| `--beam-radius <r>` | mm | measured | state the beam radius; used verbatim, no scale or pad |
+| `--no-beam` | | off | do not mask the beam stop |
+| `--top <n>` / `--bottom <n>` | pixels | measured, min 11 | force band sizes |
+| `--band-drop <f>` | fraction of plateau | 0.5 | where a band edge is called |
+| `--tubes <a,b,c>` | tube indices | auto | mask these tubes explicitly |
+| `--tube-sigma <f>` | robust σ | 5 | auto-flag threshold; higher is stricter |
+| `--no-tubes` | | off | skip tube detection |
+
+`--beam-scale` and `--beam-pad` compose: the radius is `fitted × scale + pad`.
+`--beam-radius` bypasses both.
+
+### Reviewing the result
+
+Always open the `_compare.png`. It shows raw beside masked, plotted in **physical
+tube order** so the picture matches the detector rather than the index ordering.
+The red overlay should cover the beam shadow, both tube ends, and any bad tubes —
+and nothing else.
+
+```
+/mask create 186104 --ipts 37618 --dry-run     # preview without writing
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Beam mask far too big, off-centre | dim run — noise dominates | use a brighter run, or `--beam-center` + `--beam-radius` |
+| Beam mask too small | long wavelength: halo fills the penumbra (you will have been warned) | `--beam-radius <mm>` |
+| "no beam stop is discernible" | run has no stop in view, or is far too dim | check the raw panel; `--no-beam` if genuinely absent |
+| A known-bad tube is not flagged | auto-detection is whole-tube; a *segment* that is dead reads as normal on average | `--tubes 146` |
+| Too many tubes flagged | threshold too loose | raise `--tube-sigma` |
+| Bands look too narrow | plateau threshold | `--top 12 --bottom 12`, or `--band-drop 0.6` |
+
+### Outputs
+
+Three files, named for the configuration read from the run's own logs:
+
+| File | |
 |---|---|
-| `--ipts <n>` | experiment holding the run (default: the session's) |
-| `--dry-run` | preview PNG only, no mask file |
-| `--beam-scale <f>` / `--beam-pad <f>` | enlarge the beam circle (scale multiplies; pad is in pixels along a tube) |
-| `--beam-center <x>,<y>` / `--beam-radius <mm>` | state the beam explicitly in mm when detection is uncertain |
-| `--no-beam` | skip the beam stop |
-| `--top <n>` / `--bottom <n>` | force band sizes |
-| `--tubes <a,b>` / `--tube-sigma <f>` / `--no-tubes` | control tube masking |
-| `--outdir <dir>` | write elsewhere (then it is not auto-discovered) |
+| `mask_4m2o5a_186104.nxs` | the mask; ~12 MB |
+| `mask_4m2o5a_186104_compare.png` | raw vs overlay |
+| `mask_4m2o5a_186104.params.json` | every setting used, for reproducing or editing |
 
-`/mask list` shows every mask discoverable from where you are, in the order the
-resolver prefers them.
+The name is the discovery mechanism: `4m2o5a` is the configuration with `.`
+written as `o`, exactly what the mask resolver reads back, so a mask written into
+your working folder is picked up by `/matchruns` and `/instrument` with no further
+action. `/mask list` shows every mask discoverable from where you are, in the
+order the resolver prefers them.
 
-Mantid does the reading and writing, via the `drtsans` command — the same way
-`/reduce` runs. The geometry itself is computed in eqsanscli, and the written
-file is verified by reading it back through `Load` + `ExtractMask`, the path
-drtsans itself uses.
+The written file is verified by reading it back through `Load` + `ExtractMask` —
+the path drtsans itself uses — so a mask that cannot be consumed fails at
+creation rather than mid-reduction.
+
+### Detector geometry
+
+Worth knowing, because it is why the beam mask is computed in millimetres.
+Measured from the instrument definition: 192 tubes × 256 pixels over ~1049 ×
+1042 mm, so a pixel is 5.49 mm across a tube and 4.09 mm along one. Pixel index
+is linear in y, but **tube index is not a spatial coordinate**: consecutive
+indices are 10.94 mm apart in x while physical neighbours are 5.49 mm apart,
+because the index order interleaves sub-banks in packs of four (physical order by
+x runs 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, …). A circle drawn in index space is
+therefore not a circle on the detector — measured on run 186104 it agreed with
+the true disc only 87%, covering a region 82.6 × 69.5 mm instead of round.
 
 ## Knowledge base
 

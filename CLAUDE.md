@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.16.1 | 2026-08-18 | Full `/mask` usage: in-CLI help with examples and troubleshooting, rewritten README section, corrected SKILL/AGENT_SKILL/knowledge/LLM entries. |
 | 0.16.0 | 2026-08-18 | Beam-stop detection rebuilt on local contrast: a dim run's Poisson noise no longer produces a huge off-centre circle. Refuses when no shadow is discernible; `--beam-center` / `--beam-radius` added. |
 | 0.15.1 | 2026-08-17 | `--beam-pad` back to y-pixels, the units the machine-physics mask tool uses; converted to mm internally. |
 | 0.15.0 | 2026-08-17 | Beam stop masked in millimetres against real pixel positions — tube index is not a spatial coordinate, so the index-space circle was only 87% right. |
@@ -112,6 +113,30 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.16.1): `/mask` documentation
+
+`/mask` had grown three behaviours worth explaining — refusal, the shallow-shadow
+warning, and the explicit `--beam-center` / `--beam-radius` overrides — while its
+help was still the flag list written when the command was first added, and the
+README section still described the beam as an index-space ellipse, which
+v0.15.0 disproved.
+
+- **In-CLI `/mask`** now groups options by what they control, states units and
+  defaults, gives five worked examples, and ends with an *if it looks wrong*
+  section mapping each symptom to its cause and fix. (`[options]` in the first
+  line needed escaping — Rich was reading it as markup and dropping it.)
+- **README** gained: which run to use and why (counting statistics, wavelength),
+  what each of the three components does, when detection refuses and why that is
+  deliberate, a full option table with units and defaults, how to review the
+  preview, a troubleshooting table, what the three output files are, and the
+  detector-geometry note that explains why the beam mask is computed in mm.
+- **SKILL.md / AGENT_SKILL.md** rewritten to match, including the refusal.
+- **`knowledge/instrument-files.md`** records the local-contrast method and the
+  statistics/wavelength constraints.
+- **LLM reference** learns the new flags and, importantly, that a refusal is
+  correct behaviour: do not work around it by loosening thresholds, and never
+  invent a beam centre or radius.
 
 ### 2026-08-18 (v0.16.0): Beam-stop detection on a dim run
 

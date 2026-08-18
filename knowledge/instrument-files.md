@@ -91,6 +91,16 @@ the tube ends, and tubes deviating from others in their front/back group, then
 writes `mask_<config>_<run>.nxs` into the working folder — named so the search
 above finds it.
 
+The beam stop is found by **local** contrast — the image smoothed over ~5 pixels
+against ~41 — so a region qualifies by being darker than its own surroundings.
+A global threshold cannot serve both a bright run (core 12× below plateau) and a
+dim one (core ~2× below plateau, while Poisson noise at a median of 4 counts puts
+~9% of the detector under any cut). When no credible shadow is found the beam is
+**not masked** and the reason is reported; `--beam-center` and `--beam-radius`
+state it explicitly. Counting statistics and wavelength both matter: at long
+wavelength the halo fills the penumbra, so the apparent shadow understates the
+real stop.
+
 **Detector geometry, measured from the instrument definition.** 192 tubes ×
 256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across
 a tube and 4.09 mm along one — not square. Two consequences:
