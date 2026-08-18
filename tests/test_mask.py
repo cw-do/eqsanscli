@@ -822,3 +822,28 @@ def test_an_explicit_path_still_wins():
         open(run_file, "w").close()
         path, searched = ms.resolve_run_file(run_file)
         assert path == run_file and searched == [run_file]
+
+
+def test_how_sized_explains_both_paths():
+    """'How big should it be' is the question this gets asked most, so every run
+    reports the measurement, the scale and the pad that produced its radius."""
+    x_mm, y_mm = synthetic_positions()
+
+    cut, _ = ms.find_beam_stop(_counts_with_flare_walls(), x_mm, y_mm)
+    assert "valley" in cut.how_sized() and f"{cut.radius:.1f} mm" in cut.how_sized()
+    assert cut.applied_scale == 1.0
+    assert abs(cut.raw_radius * cut.applied_scale + cut.applied_pad - cut.radius) < 1e-9
+
+    shadow, _ = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm)
+    assert "shadow" in shadow.how_sized()
+    assert shadow.applied_scale == ms.DEFAULT_BEAM_SCALE
+    assert abs(shadow.raw_radius * shadow.applied_scale + shadow.applied_pad
+               - shadow.radius) < 1e-9
+
+
+def test_an_explicit_beam_radius_says_so():
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm, beam_center=(0.0, 0.0),
+                         beam_radius=30.0)
+    assert plan.beam.radius == 30.0
+    assert plan.beam.how_sized() == "beam stop given explicitly"

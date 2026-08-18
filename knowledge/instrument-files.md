@@ -134,6 +134,12 @@ Three details are load-bearing, each from a real failure:
   gravity-dropped beam, merged with the rim flare and far broader — pulls the
   centre 6 mm down the detector.
 
+The mask is deliberately wider than the visibly dark disc. That disc is the
+umbra; around it the stop blocks part of the beam, and those pixels bias the
+lowest-Q bins. On run 186621 (1.3 m, 1 Å) the dark disc ends at r ≈ 30 mm where
+counts are still 0.30 of the surrounding level, reaching 0.88 at the 40.7 mm mask
+edge. `/mask create` prints the measurement, scale and pad behind every radius.
+
 A side that rises onto the plateau and stays up is not a wall, and a run with no
 flare (186104 at 2.5 Å) is sized from the shadow instead: its equal-area radius or
 half its longest extent, grown by 1.2 to compensate a threshold that stops short

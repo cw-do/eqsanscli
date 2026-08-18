@@ -289,10 +289,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
                       f"{xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
         lines.append(f"    [yellow]•[/yellow] {what} at ({xc:.0f}, {yc:.0f}) mm, "
                      f"r {radius:.0f} mm — {status}")
-    if plan.beam is not None and plan.beam.source == "cross cut":
-        lines.append(f"    [dim]centre and size from cross cuts: the valley between "
-                     f"the flare walls is {plan.beam.valley_width:.0f} mm wide "
-                     f"horizontally[/dim]")
+    if plan.beam is not None:
+        lines.append(f"    [dim]{plan.beam.how_sized()}[/dim]")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
@@ -340,6 +338,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
             "npix": plan.beam.npix, "units": "mm",
             "core_contrast": round(plan.beam.core_contrast, 3),
             "found_from": plan.beam.source,
+            "raw_radius_mm": round(plan.beam.raw_radius, 1),
+            "applied_scale": plan.beam.applied_scale,
+            "applied_pad_mm": round(plan.beam.applied_pad, 2),
             "valley_width_mm": (round(plan.beam.valley_width, 1)
                                 if plan.beam.valley_width else None)}),
         "leaks_mm": [{"xc": round(d[0], 1), "yc": round(d[1], 1), "r": round(d[2], 1)}

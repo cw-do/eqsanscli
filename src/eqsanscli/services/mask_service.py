@@ -200,9 +200,26 @@ class BeamStop:
     core_contrast: float = 0.0   # how dark the core is vs its surroundings
     source: str = "shadow"       # "cross cut" when the cuts gave centre + size
     valley_width: float = 0.0    # measured valley width, mm (0 when not measured)
+    raw_radius: float = 0.0      # measured radius before scale and pad, mm
+    applied_scale: float = 1.0
+    applied_pad: float = 0.0     # pad converted to mm
 
     def as_shape(self) -> dict:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
+
+    def how_sized(self) -> str:
+        """One line saying where the radius came from — the question this gets
+        asked more than any other."""
+        if not self.raw_radius:
+            return "beam stop given explicitly"
+        if self.source == "cross cut":
+            measured = (f"valley between the flare walls {self.valley_width:.0f} mm "
+                        f"wide horizontally, so r {self.raw_radius:.1f}")
+        else:
+            measured = (f"no flare walls in the cut, so sized from the shadow: "
+                        f"r {self.raw_radius:.1f}")
+        return (f"{measured} x {self.applied_scale:g} + {self.applied_pad:.1f} mm "
+                f"pad = {self.radius:.1f} mm")
 
 
 def disc_is_on_detector(xc: float, yc: float, radius: float,
@@ -516,7 +533,8 @@ def find_beam_stop(
 
     beam = BeamStop(xc=xc, yc=yc, radius=radius * scale + pad * pitch, npix=npix,
                     core_contrast=core_contrast, source=source,
-                    valley_width=valley_width)
+                    valley_width=valley_width, raw_radius=radius,
+                    applied_scale=float(scale), applied_pad=pad * pitch)
     if source == "cross cut":
         return beam, ""      # measured width: the shallow-core caveat is moot
     if core_contrast > SHALLOW_CORE_CONTRAST:

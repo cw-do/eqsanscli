@@ -120,6 +120,36 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.23.1): say how the beam radius was decided
+
+Asked after a good run on 186621 (`S-banjo 1.3m 1A`, 133.6 M counts, median 2565
+per pixel — the brightest run yet): *"do you decide the size of auto-created
+center mask by how? ... i think it created slightly larger mask?"*
+
+**Checked, and it is not too large.** That run has no flare, so it takes the
+shadow path: r 30.5 x 1.2 + 4.1 mm pad = 40.7 mm. Measuring the transmitted level
+in rings about the centre, as a fraction of the level well outside:
+
+| radius | 186621 | 186104 |
+|---|---|---|
+| edge of the visibly dark disc | 0.30 (30 mm) | 0.15 (24 mm) |
+| the mask edge | 0.88 (41 mm) | 1.19 (34 mm) |
+| 1.25x the mask edge | 1.16 (51 mm) | 1.09 (43 mm) |
+
+The dark disc is the umbra; the ring outside it is penumbra, where 70% of the beam
+is still blocked at 30 mm on 186621. A mask drawn round the dark disc would leave
+those pixels in the lowest-Q bins. 186104 lands at 34.2 mm against a hand-made
+mask of ~34 mm, which is the one external reference for the no-flare path, and
+186636 at 44.0 mm against a stop measured at 90 mm across.
+
+**What changed:** the report now prints the arithmetic behind every radius —
+`BeamStop.how_sized()`, plus `raw_radius`, `applied_scale` and `applied_pad`
+fields and the same three in `.params.json`. Both paths are covered, and an
+explicit `--beam-radius` says so rather than inventing a derivation.
+
+**Files changed:** `services/mask_service.py`, `commands/mask.py`,
+`tests/test_mask.py` (+2, 62 total), README, `knowledge/instrument-files.md`.
+
 ### 2026-08-18 (v0.23.0): a run number is enough for `/mask create`
 
 Asked: Mantid finds a run from its number without being told the experiment —

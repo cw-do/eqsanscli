@@ -407,10 +407,27 @@ so you can judge both.
    won over the real 110-pixel shadow.
 
    Runs whose cuts have no flare walls — the profile rises onto the plateau and
-   stays up, as a bright 2.5 Å run does — are sized from the shadow itself, grown
-   by 1.2 to compensate a threshold that stops short of the rim. Run 186104 takes
-   this path and gives 34 mm, matching the mask made by hand for that cycle. The
-   report says which was used.
+   stays up, as a bright short-wavelength run does — are sized from the shadow
+   itself, grown by 1.2 to reach past the umbra. Run 186104 takes this path and
+   gives 34 mm, matching the mask made by hand for that cycle.
+
+   **How the size is decided** is printed with every mask, because it is the
+   question that gets asked most:
+
+   ```
+   valley between the flare walls 80 mm wide horizontally, so r 39.9 x 1 + 4.1 mm pad = 44.0 mm
+   no flare walls in the cut, so sized from the shadow: r 30.5 x 1.2 + 4.1 mm pad = 40.7 mm
+   ```
+
+   **The mask is meant to be wider than the dark disc you can see.** The visibly
+   dark core is the umbra; around it is a penumbra where the stop blocks part of
+   the beam, and those pixels are contaminated. On run 186621 (1.3 m, 1 Å) the
+   dark disc ends at r ≈ 30 mm, but the counts there are still only **0.30** of
+   the surrounding level — 70% of the beam blocked — reaching 0.88 at the 40.7 mm
+   mask edge and full level by 51 mm. A mask drawn round the dark disc would leave
+   a ring of two-thirds-shadowed pixels in the lowest-Q bins. If you want it
+   tighter anyway, `--beam-scale 1.0` drops the growth, and `--beam-radius <mm>`
+   sets it outright.
 
    Masking happens in **millimetres**, against real pixel positions, because tube
    index is not a spatial coordinate on this detector — see *Detector geometry*
