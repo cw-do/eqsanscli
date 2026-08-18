@@ -8,8 +8,8 @@ drtsans consumes — are shelled out to the `drtsans` command, the same mechanis
 
 What gets masked, in the spirit of how EQSANS masks have always been made:
 
-1. the **beam-stop shadow** — the low-count blob near the detector centre,
-   enlarged slightly;
+1. the **beam stop** — located from the flare ring around it (the shadow itself
+   only seeds that fit), with a small margin;
 2. the **top and bottom pixel bands**, where response falls away at the tube
    ends (the long-standing convention is pixels 1-11 and 246-256, 1-based);
 3. **deviant tubes** — tubes that differ from their neighbours *of the same
@@ -52,8 +52,32 @@ N_PIXELS = 256
 N_SPECTRA = N_TUBES * N_PIXELS
 
 #: Defaults, chosen to reproduce masks of the kind used in recent cycles.
+#: Applied when only the shadow itself could be measured — a contrast threshold
+#: stops short of the true edge, so the fitted disc is grown a little. It is NOT
+#: applied when the flare ring was fitted, because that measures the edge
+#: directly (see `fit_flare_ring`).
 DEFAULT_BEAM_SCALE = 1.2
 DEFAULT_BEAM_PAD = 1.0
+#: Flare ring. The beam stop is ringed by scattering brighter than the plateau,
+#: and that ring is a far better handle on the stop than the filled-in shadow is:
+#: its centre is the stop's centre, and where the flare *begins* is the stop's
+#: edge. Pixels this much brighter than their surroundings count as flare.
+FLARE_CONTRAST = 1.6
+#: Flare is looked for within this distance of the shadow, so that bright
+#: scattering elsewhere on the detector cannot join the circle fit — unrestricted,
+#: least squares wandered to a centre 187 mm off the face with a 213 mm radius.
+FLARE_SEARCH_MM = 150.0
+FLARE_MIN_PIXELS = 30
+#: The ring must appear in at least this many of the eight octants around the
+#: fitted centre — it has to go round the stop. Two bright lobes side by side
+#: reach five octants between them and would otherwise pass. Real rings do
+#: better: 8/8 on run 186636, 7/8 on 186631.
+FLARE_MIN_OCTANTS = 6
+#: The stop edge is where the flare starts: this percentile of the ring pixels'
+#: distances from the fitted centre. On run 186636 it gives 45.2 mm for a stop
+#: measured at 90 mm across.
+FLARE_EDGE_PERCENTILE = 5.0
+
 DEFAULT_BAND_DROP = 0.5
 DEFAULT_TUBE_SIGMA = 5.0
 
@@ -77,10 +101,6 @@ DEFAULT_BEAM_CONTRAST = 0.6
 #: image defeated the finder, so refuse rather than mask a quarter of the
 #: detector.
 MAX_BEAM_RADIUS_MM = 60.0
-
-#: The shadow ends where a ring of pixels has recovered this much of its
-#: surrounding brightness.
-BEAM_RECOVERY_LEVEL = 0.75
 
 #: Above this the core is not meaningfully darker than its surroundings, so
 #: there is no shadow to mask -- refuse rather than invent one.
@@ -170,6 +190,8 @@ class BeamStop:
     radius: float      # mm
     npix: int
     core_contrast: float = 0.0   # how dark the core is vs its surroundings
+    source: str = "shadow"       # "flare ring" when the ring gave centre + size
+    ring_radius: float = 0.0     # fitted flare radius, mm (0 when none was found)
 
     def as_shape(self) -> dict:
         return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
@@ -220,12 +242,74 @@ def local_contrast(counts: np.ndarray, x_mm: np.ndarray) -> np.ndarray:
     return (local / np.clip(surround, 1e-9, None))[np.argsort(order)]
 
 
+def _fit_circle(px: np.ndarray, py: np.ndarray) -> tuple[float, float, float]:
+    """Least-squares circle through scattered points (the algebraic/Kasa fit)."""
+    design = np.column_stack([px, py, np.ones_like(px)])
+    solution, *_ = np.linalg.lstsq(design, px ** 2 + py ** 2, rcond=None)
+    xc, yc = float(solution[0]) / 2.0, float(solution[1]) / 2.0
+    return xc, yc, float(math.sqrt(max(solution[2] + xc ** 2 + yc ** 2, 0.0)))
+
+
+def fit_flare_ring(
+    counts: np.ndarray,
+    x_mm: np.ndarray,
+    y_mm: np.ndarray,
+    seed_x: float,
+    seed_y: float,
+    seed_radius: float,
+    *,
+    contrast: Optional[np.ndarray] = None,
+) -> Optional[tuple[float, float, float, float, int, int]]:
+    """Fit the bright ring around the beam stop; returns centre, edge and ring.
+
+    This is how these masks are judged by eye: the stop is a dark disc ringed by
+    a flare of increased intensity, so the ring's centre is the stop's centre and
+    the stop is slightly smaller than the ring. It succeeds exactly where
+    measuring the shadow fails — at long wavelength the halo and the
+    gravity-dropped beam fill the shadow in, but they *are* the ring.
+
+    Returns `(xc, yc, edge_radius, ring_radius, npix, octants)`, or None when no
+    credible ring is present (a bright short run at 2.5 A can have none, and then
+    the shadow is unambiguous anyway).
+    """
+    if contrast is None:
+        contrast = local_contrast(counts, x_mm)
+
+    seed_distance = np.hypot(x_mm - seed_x, y_mm - seed_y)
+    flare = ((contrast > FLARE_CONTRAST)
+             & (seed_distance < FLARE_SEARCH_MM)
+             & (seed_distance > 0.5 * seed_radius))
+    if int(flare.sum()) < FLARE_MIN_PIXELS:
+        return None
+
+    px, py = x_mm[flare], y_mm[flare]
+    xc, yc, ring = seed_x, seed_y, seed_radius
+    for _ in range(5):
+        xc, yc, ring = _fit_circle(px, py)
+        distance = np.hypot(px - xc, py - yc)
+        keep = np.abs(distance - ring) < max(0.30 * ring, 15.0)
+        if int(keep.sum()) < 20:
+            break
+        px, py = px[keep], py[keep]
+    if len(px) < FLARE_MIN_PIXELS or not np.isfinite([xc, yc, ring]).all():
+        return None
+
+    angle = np.degrees(np.arctan2(py - yc, px - xc)) % 360.0
+    octants = len(set((angle // 45).astype(int)))
+    if octants < FLARE_MIN_OCTANTS:
+        return None
+
+    distance = np.hypot(px - xc, py - yc)
+    edge = float(np.percentile(distance, FLARE_EDGE_PERCENTILE))
+    return xc, yc, edge, float(ring), int(len(px)), octants
+
+
 def find_beam_stop(
     counts: np.ndarray,
     x_mm: np.ndarray,
     y_mm: np.ndarray,
     *,
-    scale: float = DEFAULT_BEAM_SCALE,
+    scale: Optional[float] = None,
     pad: float = DEFAULT_BEAM_PAD,
     contrast_max: float = DEFAULT_BEAM_CONTRAST,
     max_radius_mm: float = MAX_BEAM_RADIUS_MM,
@@ -269,15 +353,30 @@ def find_beam_stop(
         return None, (f"no region is more than {1 / contrast_max:.1f}x darker than its "
                       f"surroundings — this run may have no beam stop in view")
 
-    # Keep the largest connected blob: scattered noise never forms one.
+    # Largest connected blob whose own centroid lies inside it. Scattered noise
+    # never forms a blob at all, and the containment test throws out the *ring*
+    # of low contrast that surrounds a bright beam complex: just outside the
+    # bright region the 41-pixel surround still includes it, so those pixels read
+    # as very dark. On run 186636 that ring was 3804 px spanning 385 x 376 mm and
+    # was being chosen over the real 110 px shadow, putting the "beam centre" at
+    # the middle of the detector.
     labels, n_blobs = label(dark)
-    sizes = np.bincount(labels.ravel())
-    sizes[0] = 0
-    blob = labels == int(np.argmax(sizes))
-    npix = int(blob.sum())
-    if npix < 8:
-        return None, (f"the darkest region is only {npix} pixels — too small to be a "
-                      f"beam stop; try a longer run")
+    blob = None
+    npix = 0
+    for index in range(1, n_blobs + 1):
+        candidate = labels == index
+        size = int(candidate.sum())
+        if size < 8 or size <= npix:
+            continue
+        cx = float(x_mm[candidate].mean())
+        cy = float(y_mm[candidate].mean())
+        nearest = int(np.argmin(np.hypot(x_mm - cx, y_mm - cy)))
+        if not bool(candidate.ravel()[nearest]):
+            continue        # a ring: its centroid is in the hole, not in itself
+        blob, npix = candidate, size
+    if blob is None:
+        return None, ("no compact dark region found — this run may have no beam "
+                      "stop in view, or too few counts to see it")
 
     xs, ys = x_mm[blob], y_mm[blob]
     xc, yc = float(xs.mean()), float(ys.mean())
@@ -289,17 +388,35 @@ def find_beam_stop(
             break
         xc, yc = float(xs[keep].mean()), float(ys[keep].mean())
 
-    # Radius from where the shadow ENDS: the smallest radius at which the ring
-    # of pixels just outside has recovered most of its surrounding brightness.
-    # Taking it from the thresholded pixel count instead would make the radius a
-    # function of the threshold.
+    # Size the shadow from the blob itself: its equal-area radius, or half its
+    # longest extent when it is asymmetric -- at long wavelength the leaked beam
+    # eats into one side, so the extent is the better guide. Walking outward until
+    # a ring "recovers" brightness collapses here, because the rings quickly
+    # include the bright lobes flanking the stop: it returned 10 mm for a stop
+    # that is 90 mm across.
+    extent_x = float(x_mm[blob].max() - x_mm[blob].min())
+    extent_y = float(y_mm[blob].max() - y_mm[blob].min())
+    radius = max(math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi),
+                 max(extent_x, extent_y) / 2.0)
+
+    # Prefer the flare ring: the shadow above is only a seed for it. Where both
+    # work they agree; where they differ the ring is right, because what fills a
+    # shadow in (halo, gravity-dropped beam) leaves the ring alone.
+    source, ring_radius = "shadow", 0.0
+    ring_fit = fit_flare_ring(counts, x_mm, y_mm, xc, yc, radius, contrast=contrast)
+    if ring_fit is not None:
+        ring_x, ring_y, ring_edge, ring_radius, _ring_px, _octants = ring_fit
+        if (math.hypot(ring_x - xc, ring_y - yc) < 2.0 * max(radius, 20.0)
+                and ring_edge <= max_radius_mm):
+            xc, yc, radius, source = ring_x, ring_y, ring_edge, "flare ring"
+
+    # The 1.2 growth compensates a threshold that stops short of the true edge;
+    # the ring measures that edge, so it is not grown again. An explicit
+    # --beam-scale always wins.
+    if scale is None:
+        scale = 1.0 if source == "flare ring" else DEFAULT_BEAM_SCALE
+
     distance = np.hypot(x_mm - xc, y_mm - yc)
-    radius = math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi)
-    for probe in np.arange(2.0, max_radius_mm, 1.0):
-        ring = (distance >= probe) & (distance < probe + 3.0)
-        if ring.any() and float(contrast[ring].mean()) > BEAM_RECOVERY_LEVEL:
-            radius = float(probe)
-            break
     core = distance < max(6.0, 1.5 * pitch)
     core_contrast = float(contrast[core].mean()) if core.any() else 0.0
 
@@ -311,12 +428,14 @@ def find_beam_stop(
         return None, (f"the darkest region is {off_centre:.0f} mm from the detector centre, "
                       f"too far out to be the beam stop")
 
-    if core_contrast > NO_SHADOW_CONTRAST:
+    if core_contrast > NO_SHADOW_CONTRAST and source != "flare ring":
         return None, (f"the darkest region is only {1 / max(core_contrast, 1e-9):.2f}x darker "
                       f"than its surroundings — no beam stop is discernible in this image")
 
     beam = BeamStop(xc=xc, yc=yc, radius=radius * scale + pad * pitch, npix=npix,
-                    core_contrast=core_contrast)
+                    core_contrast=core_contrast, source=source, ring_radius=ring_radius)
+    if source == "flare ring":
+        return beam, ""      # sized from the ring: the shallow-core caveat is moot
     if core_contrast > SHALLOW_CORE_CONTRAST:
         return beam, (
             f"the shadow is shallow (core only {1 / max(core_contrast, 1e-9):.1f}x darker "
@@ -520,7 +639,7 @@ def build_plan(
     x_mm: Optional[np.ndarray] = None,
     y_mm: Optional[np.ndarray] = None,
     *,
-    beam_scale: float = DEFAULT_BEAM_SCALE,
+    beam_scale: Optional[float] = None,   # None = auto, see find_beam_stop
     beam_pad: float = DEFAULT_BEAM_PAD,
     band_drop: float = DEFAULT_BAND_DROP,
     min_band: int = DEFAULT_MIN_BAND,

@@ -357,21 +357,37 @@ anomalies stand out against a flat field. Two properties matter:
   noise competes with the features being detected.
 - **Wavelength.** At long wavelength the halo scattered around the beam stop
   fills in its penumbra, so the shadow *looks* smaller than the stop really is.
-  A 2.5 Å run gives a much cleaner shadow than a 10 Å one.
+  This is why the stop is sized from the flare ring around it rather than from the
+  shadow (below) — but a 2.5 Å run is still the easier image to check by eye.
 
 `/mask create` reports the run's counts and configuration before doing anything,
 so you can judge both.
 
 ### What it masks
 
-1. **The beam-stop shadow**, as a circle on the detector face. It is found by
-   *local* contrast — the image smoothed over ~5 pixels compared against the same
-   image smoothed over ~41 — so a region qualifies by being darker than its own
-   surroundings rather than darker than some global number. That is what lets it
-   work on a dim run and through a bright halo. The largest connected blob is
-   taken, its centroid refined over four rounds, and the radius measured from
-   where the shadow ends: the smallest radius at which the surrounding ring has
-   recovered 75% of its brightness.
+1. **The beam stop**, as a circle on the detector face, found from the **flare
+   ring** around it. A stop is a dark disc ringed by brighter scattering, so the
+   ring's centre is the stop's centre and the stop reaches to where the flare
+   begins. A circle is fitted to the flare pixels near the stop and the edge taken
+   as the 5th percentile of their distance from that centre — no fudge factor.
+
+   This is the estimator that survives a filled-in shadow. On the 9 m 15 Å banjo
+   (run 186636) halo and gravity-dropped beam land inside the shadow, which then
+   reads as ~10 mm; the ring gives 45 mm, against a stop measured at 90 mm across.
+   What fills a shadow in leaves the ring alone.
+
+   The shadow is still found first, as the seed for that fit, by *local* contrast —
+   the image smoothed over ~5 pixels compared against the same image smoothed over
+   ~41 — so a region qualifies by being darker than its own surroundings rather
+   than darker than some global number. A dark region whose own centroid does not
+   lie inside it is discarded as a *ring* of low contrast around a bright complex
+   (an artefact of the wide surround window): on 186636 one such covered 3804
+   pixels over 385 × 376 mm and otherwise won over the real 110-pixel shadow.
+
+   Runs with no flare — a bright 2.5 Å run often has none — use the shadow's own
+   size, grown by 1.2 to compensate a threshold that stops short of the edge. A
+   ring fit is not grown that way. Run 186104 takes this path and gives 34 mm,
+   matching the mask made by hand for that cycle. The report says which was used.
 
    Masking happens in **millimetres**, against real pixel positions, because tube
    index is not a spatial coordinate on this detector — see *Detector geometry*
@@ -437,8 +453,9 @@ so you can judge both.
 The beam stop is not masked, and the reason is printed, when:
 
 - no region is meaningfully darker than its surroundings;
-- the darkest blob is under 8 pixels;
-- the core is less than 1.25× darker than its surroundings — no discernible stop;
+- no compact dark region is left after ring-shaped artefacts are discarded;
+- the core is less than 1.25× darker than its surroundings *and* no flare ring was
+  fitted — nothing discernible either way;
 - the implied radius exceeds 60 mm, larger than any EQSANS beam stop;
 - the centre is more than 60% of the way to an edge.
 
@@ -446,9 +463,10 @@ This is deliberate: a wrong beam mask is worse than none, and every one of these
 cases came from a real failure. Use `--beam-center` / `--beam-radius` to state it
 yourself, or `--no-beam` to skip it.
 
-There is also a warning short of refusal: if the core is less than ~3× darker
-than its surroundings, the shadow is shallow and the measured radius understates
-the real stop. Check the preview and set `--beam-radius` if it is under-masked.
+There is also a warning short of refusal, on the shadow path only: if the core is
+less than ~3× darker than its surroundings, the shadow is shallow and its size
+understates the real stop. Check the preview and set `--beam-radius` if it is
+under-masked. A ring fit does not carry that caveat, which is the point of it.
 
 ### Options
 
@@ -457,7 +475,7 @@ the real stop. Check the preview and set `--beam-radius` if it is under-masked.
 | `--ipts <n>` | | session's IPTS | experiment holding the run |
 | `--outdir <dir>` | | current folder | where to write (elsewhere = not auto-discovered) |
 | `--dry-run` | | off | report and write the preview PNG only, no mask file |
-| `--beam-scale <f>` | multiplier | 1.2 | enlarge the fitted beam radius |
+| `--beam-scale <f>` | multiplier | 1.0 ring / 1.2 shadow | enlarge the fitted beam radius |
 | `--beam-pad <f>` | pixels along a tube | 1.0 | margin beyond it (1 px ≈ 4.09 mm) |
 | `--beam-center <x>,<y>` | mm | measured | state the beam centre; used verbatim |
 | `--beam-radius <r>` | mm | measured | state the beam radius; used verbatim, no scale or pad |
@@ -471,7 +489,9 @@ the real stop. Check the preview and set `--beam-radius` if it is under-masked.
 | `--no-tubes` | | off | skip tube detection |
 
 `--beam-scale` and `--beam-pad` compose: the radius is `fitted × scale + pad`.
-`--beam-radius` bypasses both.
+Its default depends on how the stop was found — 1.0 for a flare-ring fit, since
+that already measures the stop edge, and 1.2 when only the shadow was visible.
+An explicit value applies either way. `--beam-radius` bypasses both.
 
 ### Masking something else
 
@@ -513,7 +533,7 @@ and nothing else.
 |---|---|---|
 | Bands at the wrong end | `top`/`bottom` are named opposite to the machine-physics tool | swap them; `--bottom` is the low-index, −y end |
 | Beam mask far too big, off-centre | dim run — noise dominates | use a brighter run, or `--beam-center` + `--beam-radius` |
-| Beam mask too small | long wavelength: halo fills the penumbra (you will have been warned) | `--beam-radius <mm>` |
+| Beam mask too small | no flare ring found and the shadow was filled in (the report says which was used) | `--beam-radius <mm>` |
 | Bright spot above/below the beam left unmasked | that is deliberate — leaks are reported, not masked | `--leak` for both lobes, or `--disc <reported numbers>` for one |
 | "no beam stop is discernible" | run has no stop in view, or is far too dim | check the raw panel; `--no-beam` if genuinely absent |
 | A known-bad tube is not flagged | auto-detection is whole-tube; a *segment* that is dead reads as normal on average | `--tubes 146` |

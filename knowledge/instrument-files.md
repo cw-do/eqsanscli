@@ -98,15 +98,38 @@ against a plateau of 5, either side of an 8-count shadow. `/mask create` finds a
 reports these but does not mask them unless asked (`--leak`), since covering them
 costs low-Q coverage — a decision for the instrument scientist, not the tool.
 
-The beam stop is found by **local** contrast — the image smoothed over ~5 pixels
-against ~41 — so a region qualifies by being darker than its own surroundings.
-A global threshold cannot serve both a bright run (core 12× below plateau) and a
-dim one (core ~2× below plateau, while Poisson noise at a median of 4 counts puts
-~9% of the detector under any cut). When no credible shadow is found the beam is
-**not masked** and the reason is reported; `--beam-center` and `--beam-radius`
-state it explicitly. Counting statistics and wavelength both matter: at long
-wavelength the halo fills the penumbra, so the apparent shadow understates the
-real stop.
+The beam stop is found from the **flare ring** around it. A stop is a dark disc
+ringed by brighter scattering, so the ring's centre is the stop's centre and the
+stop reaches to where the flare begins — taken as the 5th percentile of the ring
+pixels' distance from the fitted centre. The ring is fitted as a circle through
+flare pixels (local contrast > 1.6) within 150 mm of the shadow; restricting it to
+that neighbourhood matters, since unrestricted least squares is dragged off the
+detector by bright scattering elsewhere, and the ring must appear in at least six
+of the eight octants around its centre, or two lobes on one side would pass as a
+ring.
+
+This works precisely where measuring the dark patch fails. On the 9 m 15 Å banjo
+(run 186636) the shadow is filled in by halo and by the gravity-dropped beam
+landing inside it, so it reads as ~10 mm; the ring gives 45 mm, against a stop the
+instrument scientist measures at 90 mm across. What fills a shadow in leaves the
+ring alone. The shadow is still needed as a seed, and is found by **local**
+contrast — the image smoothed over ~5 pixels against ~41 — so a region qualifies
+by being darker than its own surroundings. A global threshold cannot serve both a
+bright run (core 12× below plateau) and a dim one (core ~2× below plateau, while
+Poisson noise at a median of 4 counts puts ~9% of the detector under any cut).
+Among dark regions, one whose own centroid does not lie inside it is discarded: it
+is a *ring* of low contrast surrounding a bright complex, an artefact of the
+41-pixel surround window including that complex. On run 186636 such a ring
+covered 3804 px over 385 × 376 mm and was otherwise chosen over the real 110 px
+shadow, putting the "beam centre" at the middle of the detector.
+
+Runs with no flare fall back to the shadow's own size — its equal-area radius or
+half its longest extent — grown by 1.2 to compensate a threshold that stops short
+of the true edge. A ring fit is *not* grown that way, because it measures the edge
+directly. Run 186104 (4 m, 2.5 Å) has no discernible flare and this path gives
+34 mm, matching the mask made by hand for that cycle. `/mask create` reports which
+of the two was used. When neither is credible the beam is **not masked** and the
+reason is reported; `--beam-center` and `--beam-radius` state it explicitly.
 
 **Detector geometry, measured from the instrument definition.** 192 tubes ×
 256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across

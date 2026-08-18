@@ -421,15 +421,17 @@ skips unreducible rows at reduction time.
 **Masks:** `/mask create <run>` builds one from a uniformly illuminated run
 (banjo, flood, empty cell) and writes `mask_<config>_<run>.nxs` into the current
 folder, named so the resolver finds it automatically, plus a `_compare.png` to
-review and a `.params.json` recording how it was made. It masks the beam-stop
-shadow (found by *local* contrast, masked as a circle in millimetres against real
-pixel positions), the low-response bands at both tube ends, and tubes deviating
-within their front/back pack of four.
+review and a `.params.json` recording how it was made. It masks the beam stop
+(masked as a circle in millimetres against real pixel positions), the low-response
+bands at both tube ends, and tubes deviating within their front/back pack of four.
 
-Counting statistics matter — ~90 counts/pixel is comfortable, ~4 is marginal —
-and at long wavelength the halo fills the beam-stop penumbra, so a 2.5 Å run
-gives a cleaner shadow than a 10 Å one. When the shadow is not credible the beam
-is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
+The stop is located from the **flare ring** around it: its centre is the ring's
+centre and it reaches to where the flare begins. That survives a shadow filled in
+by halo or by gravity-dropped beam, which at 9 m and 15 Å made the shadow read
+~10 mm against a stop 90 mm across. Runs with no flare fall back to the shadow
+itself, grown slightly; the report says which was used. Counting statistics still
+matter — ~90 counts/pixel is comfortable, ~4 is marginal. When neither estimator
+is credible the beam is **not masked** and the reason is printed; `--beam-center <x>,<y>` and
 `--beam-radius <mm>` state it explicitly. `--dry-run` previews without writing,
 `--tubes a,b` adds known-bad tubes (auto-detection is whole-tube, so a dead
 *segment* averages out), `--tube-sigma` tunes sensitivity. `/mask list` shows what

@@ -141,7 +141,8 @@ def test_an_implausibly_large_detection_is_refused():
     x_mm, y_mm = synthetic_positions()
     beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
     assert beam is None
-    assert "darker" in why or "too far out" in why, why
+    assert ("darker" in why or "too far out" in why
+            or "no compact dark region" in why), why
 
 
 def test_explicit_beam_center_and_radius_are_used_verbatim():
@@ -575,3 +576,96 @@ if __name__ == "__main__":
     print(f"\n{len(tests) - len(failures)}/{len(tests)} passed"
           + (f" — FAILED: {', '.join(failures)}" if failures else ""))
     sys.exit(1 if failures else 0)
+
+
+# --- the flare ring ---------------------------------------------------------
+# A beam stop is a dark disc ringed by a flare of increased intensity. The ring
+# is the better handle on the stop: it survives the two things that destroy the
+# shadow at long wavelength -- a halo that fills the penumbra, and the
+# gravity-dropped beam landing inside it.
+
+def _counts_with_flare_ring(centre=(30.0, -15.0), stop_r=45.0, flare_r=62.0,
+                            fill=9.0):
+    """A halo-filled shadow: the core is barely darker than the plateau, but the
+    flare ring around it is unmistakable. Run 186636 in miniature."""
+    counts = synthetic_counts(dead_tube=None)
+    x_mm, y_mm = synthetic_positions()
+    distance = np.hypot(x_mm - centre[0], y_mm - centre[1])
+    counts[distance <= flare_r] = 260.0            # the flare
+    counts[distance <= stop_r] = fill              # shadow, filled in by halo
+    return counts
+
+
+def test_flare_ring_gives_the_centre_and_the_stop_edge():
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_ring()
+    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam is not None, why
+    assert beam.source == "flare ring", beam.source
+    assert math.hypot(beam.xc - 30.0, beam.yc + 15.0) < 10.0, (beam.xc, beam.yc)
+    # Sized from where the flare begins, so it lands just outside the 45 mm stop
+    # rather than on the shrunken visible shadow.
+    assert 43.0 < beam.radius < 56.0, beam.radius
+    assert beam.ring_radius > beam.radius
+
+
+def test_a_filled_shadow_is_not_undersized_when_a_ring_is_present():
+    """Without the ring this image reads as a ~10 mm stop; the point of the ring
+    is that it does not."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_ring()
+    beam, _ = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam.radius > 35.0, beam.radius
+
+
+def test_ring_sized_stop_is_not_grown_again_by_the_default_scale():
+    """DEFAULT_BEAM_SCALE compensates a threshold that stops short of the edge.
+    The ring measures the edge, so applying it too would over-mask."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_ring()
+    auto, _ = ms.find_beam_stop(counts, x_mm, y_mm)
+    explicit, _ = ms.find_beam_stop(counts, x_mm, y_mm,
+                                    scale=ms.DEFAULT_BEAM_SCALE)
+    assert explicit.radius > auto.radius * 1.15
+
+
+def test_an_explicit_beam_scale_still_applies_to_a_ring_fit():
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_ring()
+    one, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
+    two, _ = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
+    assert abs(two.radius - 2.0 * one.radius) < 1e-6
+
+
+def test_flare_on_one_side_only_does_not_move_the_beam_centre():
+    """Two bright lobes off to one side are not a ring: between them they reach
+    five octants and a circle can be drawn through them, so the guard that
+    matters is that the fitted centre must stay near the shadow."""
+    x_mm, y_mm = synthetic_positions()
+    counts = synthetic_counts(dead_tube=None)
+    for x_lobe in (-40.0, 40.0):
+        counts[(x_mm - x_lobe) ** 2 + (y_mm - 80.0) ** 2 <= 20.0 ** 2] = 400.0
+    assert ms.fit_flare_ring(counts, x_mm, y_mm, 0.0, 0.0, 25.0) is None
+    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam is not None, why
+    assert abs(beam.yc) < 20.0, beam.yc      # not dragged up to the lobes
+
+
+def test_distant_bright_scattering_does_not_drag_the_ring_fit():
+    """Unrestricted least squares wandered off the detector; the fit only sees
+    flare within FLARE_SEARCH_MM of the shadow."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_flare_ring()
+    counts[(x_mm + 400.0) ** 2 + y_mm ** 2 <= 40.0 ** 2] = 500.0   # far-off flare
+    beam, why = ms.find_beam_stop(counts, x_mm, y_mm)
+    assert beam is not None, why
+    assert math.hypot(beam.xc - 30.0, beam.yc + 15.0) < 20.0, (beam.xc, beam.yc)
+
+
+def test_a_clean_shadow_needs_no_ring():
+    """A bright short run at 2.5 A can have no flare at all -- the shadow is
+    unambiguous there, and detection must still work."""
+    x_mm, y_mm = synthetic_positions()
+    beam, why = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm)
+    assert beam is not None, why
+    assert beam.source == "shadow"

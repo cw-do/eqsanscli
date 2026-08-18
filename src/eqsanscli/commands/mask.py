@@ -36,7 +36,16 @@ _USAGE = (
     "  --dry-run              report + preview PNG only, write no mask file\n"
     "\n"
     "[bold]Beam stop[/bold]\n"
-    "  --beam-scale <f>       multiply the fitted radius (default 1.2)\n"
+    "  Found from the [bold]flare ring[/bold] — the stop is a dark disc ringed by brighter\n"
+    "  scattering, so the ring's centre is the stop's centre and the stop reaches to\n"
+    "  where the flare begins. That holds when the shadow itself has been filled in\n"
+    "  by halo or by gravity-dropped beam, which is where measuring the dark patch\n"
+    "  under-reads: on a 9 m 15 A banjo the shadow suggested r 10 mm and the ring\n"
+    "  gave 45 mm, against a stop measured at 90 mm across. Runs with no flare fall\n"
+    "  back to the shadow. The report says which was used.\n"
+    "  --beam-scale <f>       multiply the fitted radius. Default: 1.0 for a ring\n"
+    "                         fit (it already measures the stop edge), 1.2 when only\n"
+    "                         the shadow was visible (a threshold stops short).\n"
     "  --beam-pad <f>         margin beyond it, in pixels along a tube (default 1.0;\n"
     "                         1 px = 4.09 mm). Radius = fitted x scale + pad.\n"
     "  --beam-center <x>,<y>  state the centre in mm; skips detection\n"
@@ -100,8 +109,8 @@ _USAGE = (
     "[bold]If it looks wrong[/bold] — always open the _compare.png first:\n"
     "  too big / off-centre   the run is too dim; use a brighter one, or give\n"
     "                         --beam-center and --beam-radius\n"
-    "  too small              long wavelength fills the penumbra (you are warned);\n"
-    "                         set --beam-radius\n"
+    "  too small              no flare ring was found and the shadow was filled in\n"
+    "                         (the report says which was used); set --beam-radius\n"
     "  bad tube not flagged   auto-detection is whole-tube, so a dead *segment*\n"
     "                         averages out; name it with --tubes\n"
     "\n"
@@ -115,7 +124,8 @@ _USAGE = (
 def _parse_args(args: list[str]) -> tuple[dict, str]:
     """Returns (options, error)."""
     opts: dict = {
-        "ipts": None, "outdir": None, "beam_scale": ms.DEFAULT_BEAM_SCALE,
+        # None = auto: 1.0 for a ring fit, DEFAULT_BEAM_SCALE for a shadow fit.
+        "ipts": None, "outdir": None, "beam_scale": None,
         "beam_pad": ms.DEFAULT_BEAM_PAD, "band_drop": ms.DEFAULT_BAND_DROP,
         "tube_sigma": ms.DEFAULT_TUBE_SIGMA, "top": None, "bottom": None,
         "tubes": None, "use_beam": True, "use_tubes": True, "dry_run": False,
@@ -245,6 +255,10 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
             f"[dim]not masked — add --leak, or --disc {xc:.0f},{yc:.0f},{radius:.0f}[/dim]")
         lines.append(f"    [yellow]•[/yellow] direct-beam leak {side} the stop at "
                      f"({xc:.0f}, {yc:.0f}) mm, r {radius:.0f} mm — {status}")
+    if plan.beam is not None and plan.beam.source == "flare ring":
+        lines.append(f"    [dim]beam stop from the flare ring around it: ring r "
+                     f"{plan.beam.ring_radius:.0f} mm, stop edge where the flare "
+                     f"begins[/dim]")
     if plan.beam_note and plan.beam_note != "beam stop set explicitly":
         marker = "[yellow]⚠[/yellow]" if plan.beam else "[yellow]⚠ no beam stop masked:[/yellow]"
         lines.append(f"    {marker} {plan.beam_note}")
@@ -290,11 +304,14 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "beam_mm": (None if plan.beam is None else {
             "xc": plan.beam.xc, "yc": plan.beam.yc, "radius": plan.beam.radius,
             "npix": plan.beam.npix, "units": "mm",
-            "core_contrast": round(plan.beam.core_contrast, 3)}),
+            "core_contrast": round(plan.beam.core_contrast, 3),
+            "found_from": plan.beam.source,
+            "flare_ring_radius": (round(plan.beam.ring_radius, 1)
+                                  if plan.beam.ring_radius else None)}),
         "leaks_mm": [{"xc": round(d[0], 1), "yc": round(d[1], 1), "r": round(d[2], 1)}
                      for d in plan.leaks] or None,
         "leaks_masked": plan.leaks_masked,
-        "beam_scale": opts["beam_scale"],
+        "beam_scale": opts["beam_scale"] if opts["beam_scale"] is not None else "auto",
         "beam_pad": opts["beam_pad"], "beam_pad_units": "y-pixels",
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],
         "band_convention": ("pixel counts at each end; bottom = low pixel index (-y). "

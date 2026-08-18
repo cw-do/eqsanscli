@@ -120,6 +120,64 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.21.0): the beam stop is found from the flare ring
+
+**Problem.** On the 9 m 15 Å banjo (run 186636) `/mask create` put the stop at
+(16.5, −9.5) mm with r 13.7 mm. The instrument scientist measures that stop at
+**90 mm across**, centred near the middle, with the gravity-dropped direct beam
+forming a large blob near (0, −50) mm. Two separate faults:
+
+1. The largest connected `contrast < 0.6` region was a **3804 px annulus**
+   spanning 385 × 376 mm — the wide (41 px) surround window used by
+   `local_contrast` includes the bright beam complex, so pixels just *outside* it
+   read as very dark. Its centroid sits in the hole, i.e. at the detector centre,
+   which is exactly what got reported as the beam.
+2. The radius came from walking outward until a ring "recovered" 75% of its
+   surrounding brightness. Those rings immediately hit the bright gravity lobes,
+   so it stopped at 10 mm.
+
+**Solution — use the ring of increased intensity, not the dark patch.** As the
+user put it: the stop is a dark centre surrounded by a flare, so the flare's
+centre is the stop's centre and the stop is slightly smaller than the flare.
+
+- New `fit_flare_ring()` — flare pixels (`local_contrast > FLARE_CONTRAST` 1.6)
+  within `FLARE_SEARCH_MM` (150) of the shadow, fitted with an algebraic circle
+  fit, five rounds of trimming to |d − r| < 30%. Restricting to the neighbourhood
+  is essential: unrestricted, least squares walked to a centre 187 mm off the face
+  with r 213 mm. Requires ≥ 6 of 8 octants (two lobes side by side reach five) and
+  ≥ 30 px.
+- The **stop edge** is the 5th percentile of the ring pixels' distance from the
+  fitted centre — where the flare begins. No fudge factor: it gives 45.2 mm on
+  186636 against the measured 45 mm.
+- `find_beam_stop` now treats the shadow as a **seed** for that fit, and among
+  dark regions discards any whose own centroid does not lie inside it — that
+  single test kills the annulus (a ring's centroid is in its hole).
+- Shadow sizing, used when there is no flare, is now the blob's equal-area radius
+  or half its longest extent, whichever is larger. `BEAM_RECOVERY_LEVEL` deleted.
+- `--beam-scale` default is now **conditional**: 1.0 for a ring fit (it measures
+  the edge directly) and 1.2 for a shadow fit (a threshold stops short). Passing
+  it explicitly applies either way. `BeamStop` gained `source` and `ring_radius`;
+  both are reported in the output and in `.params.json` (`found_from`).
+- The shallow-core warning is suppressed on the ring path, and the "no shadow
+  discernible" refusal no longer vetoes a good ring fit.
+
+**Measured against the three runs on disk:**
+
+| run | config | result | ground truth |
+|---|---|---|---|
+| 186636 | 9 m 15 Å | (11.3, −4.2), r 49.3 mm, flare ring (ring r 61) | stop 90 mm across |
+| 186104 | 4 m 2.5 Å | (27.8, 15.0), r 34.2 mm, shadow (no flare) | hand-made 2026B mask ≈ 34 mm |
+| 186631 | 4 m 10 Å | (22.1, 17.6), r 29.4 mm, flare ring (ring r 38) | — |
+
+Leak reporting on 186636 is unchanged and matches the user's description: discs at
+(13, −55) r 48 mm and (13, 51) r 61 mm, still not masked unless `--leak` is given.
+
+**Files changed:** `services/mask_service.py` (`fit_flare_ring`, `_fit_circle`,
+centroid-containment test, extent sizing, conditional scale, `BeamStop.source`),
+`commands/mask.py` (auto `--beam-scale`, estimator reported, `found_from` in
+params, help text), `tests/test_mask.py` (+7 tests, 50 total),
+`knowledge/instrument-files.md`, `README.md`, `SKILL.md`, `AGENT_SKILL.md`.
+
 ### 2026-08-18 (v0.20.1): `/mask create` crashed on the real path
 
 `/mask create 186636` (no `--dry-run`) died with
