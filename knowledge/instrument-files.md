@@ -86,7 +86,8 @@ wavelength is not borrowed — a token-less mask (the cycle default) serves any
 configuration.
 
 Build one from a uniformly illuminated run (banjo, flood, empty cell) with
-`/mask create <run>`: it masks the beam-stop shadow, the low-response bands at
+`/mask create <run>` — the run number alone locates the file, since the archive is
+searched for it as Mantid would: it masks the beam-stop shadow, the low-response bands at
 the tube ends, and tubes deviating from others in their front/back group, then
 writes `mask_<config>_<run>.nxs` into the working folder — named so the search
 above finds it.

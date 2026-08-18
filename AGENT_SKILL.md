@@ -418,7 +418,7 @@ transmission or background is a warning only. Escape hatches:
 (send them to drtsans anyway). `/autopilot` checks the same thing at Step 3 and
 skips unreducible rows at reduction time.
 
-**Masks:** `/mask create <run>` builds one from a uniformly illuminated run
+**Masks:** `/mask create <run>` builds one from a uniformly illuminated run (the run number alone is enough — the archive is searched for it, so no `/load ipts` is needed first)
 (banjo, flood, empty cell) and writes `mask_<config>_<run>.nxs` into the current
 folder, named so the resolver finds it automatically, plus a `_compare.png` to review —
 millimetres on the bottom and left axes (what `--disc` takes), tube and pixel

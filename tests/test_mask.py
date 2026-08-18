@@ -783,3 +783,42 @@ def test_the_view_is_mirrored_so_tube_index_ascends_left_to_right():
     finally:
         import matplotlib.pyplot as plt
         plt.close(fig)
+
+
+# --- finding a run from its number alone -----------------------------------
+
+def test_run_is_found_from_the_number_alone():
+    """Mantid resolves a run number against the archive; so does this, so
+    /mask create <run> works before (or without) /load ipts."""
+    original = ms.find_run_in_archive
+    ms.find_run_in_archive = lambda run: [f"/SNS/EQSANS/IPTS-38681/nexus/EQSANS_{run}.nxs.h5"]
+    try:
+        path, searched = ms.resolve_run_file("186636")
+        assert path == "/SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5"
+        assert any("IPTS-*" in entry for entry in searched), searched
+    finally:
+        ms.find_run_in_archive = original
+
+
+def test_archive_patterns_name_the_run_exactly():
+    """Both layouts are covered — nexus/*.nxs.h5 for recent experiments, data/
+    *.nxs for pre-2013 ones — and the filename carries no wildcard, so the
+    _ORIG.nxs.h5 copies some folders keep are never picked up."""
+    assert len(ms.ARCHIVE_PATTERNS) == 2
+    for pattern in ms.ARCHIVE_PATTERNS:
+        path = pattern.format(run="186636")
+        assert path.count("*") == 1 and "IPTS-*" in path, path
+        assert os.path.basename(path).startswith("EQSANS_186636.")
+
+
+def test_ipts_is_read_back_from_the_path():
+    assert ms.ipts_from_path("/SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5") == "38681"
+    assert ms.ipts_from_path("/somewhere/else/EQSANS_186636.nxs.h5") == ""
+
+
+def test_an_explicit_path_still_wins():
+    with tempfile.TemporaryDirectory() as tmp:
+        run_file = os.path.join(tmp, "EQSANS_1.nxs.h5")
+        open(run_file, "w").close()
+        path, searched = ms.resolve_run_file(run_file)
+        assert path == run_file and searched == [run_file]

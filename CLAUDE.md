@@ -120,6 +120,32 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 
 ## Change Log
 
+### 2026-08-18 (v0.23.0): a run number is enough for `/mask create`
+
+Asked: Mantid finds a run from its number without being told the experiment —
+can `/mask create` do the same, with no `/load ipts` first? Yes, and it needs no
+Mantid to do it: the SNS archive layout is fixed, so one glob locates the run.
+
+`find_run_in_archive()` tries `/SNS/EQSANS/IPTS-*/nexus/EQSANS_<run>.nxs.h5`, then
+`/SNS/EQSANS/IPTS-*/data/EQSANS_<run>.nxs` for experiments before ~2013 (surveyed
+on disk: those are the two layouts in use). The filename is exact, never globbed,
+so the `_ORIG.nxs.h5` copies some folders keep are not matched, and the second
+pattern is only paid for when the first misses. About 0.9 s across the 1117
+experiment folders on disk.
+
+`resolve_run_file` order: an absolute path, the session's (or `--ipts`) folder,
+the current folder, then the archive. The report names the experiment found —
+`found in IPTS-38681 by searching the archive` — and `ipts_from_path()` reads it
+back out of the path.
+
+Verified end to end on a fresh session with `state.ipts` unset: `/mask create
+186636 --dry-run` located the file, read it through Mantid and produced the plan.
+
+**Files changed:** `services/mask_service.py` (`ARCHIVE_PATTERNS`,
+`find_run_in_archive`, `ipts_from_path`, `resolve_run_file`), `commands/mask.py`
+(report line, `--ipts` help), `tests/test_mask.py` (+4, 60 total), README,
+SKILL, AGENT_SKILL, knowledge.
+
 ### 2026-08-18 (v0.22.3): the preview was mirrored
 
 Reported: *"i realize that horizontal index is reversed. the correct image should

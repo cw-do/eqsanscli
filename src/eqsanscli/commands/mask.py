@@ -30,7 +30,11 @@ _USAGE = (
     "others in their front/back pack of four.\n"
     "\n"
     "[bold]Where the run comes from[/bold]\n"
-    "  --ipts <n>             experiment holding the run (default: the session's)\n"
+    "  --ipts <n>             experiment holding the run. Rarely needed: the run\n"
+    "                         number alone is enough, since the archive is searched\n"
+    "                         for it the way Mantid does, so /mask create works\n"
+    "                         before /load ipts. Use it to disambiguate or to skip\n"
+    "                         the search.\n"
     "  --outdir <dir>         where to write (default: the current folder, which\n"
     "                         is what makes the mask auto-discoverable)\n"
     "  --dry-run              report + preview PNG only, write no mask file\n"
@@ -226,14 +230,19 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Could not find that run. Looked in:\n"
             + "".join(f"    {p}\n" for p in searched)
-            + ("  Give --ipts <number>, or pass a full path."
-               if not ipts else "  Check the run number, or pass a full path."),
+            + "  Check the run number, or pass a full path.",
         )
+    found_ipts = ms.ipts_from_path(run_file)
 
     outdir = os.path.abspath(opts["outdir"] or os.getcwd())
     os.makedirs(outdir, exist_ok=True)
 
-    lines = [f"Reading run {run} — {run_file}", "  [dim]Mantid via drtsans; ~10 s[/dim]"]
+    lines = [f"Reading run {run} — {run_file}"]
+    if found_ipts and str(found_ipts) != str(ipts or ""):
+        # The archive was searched by run number, the way Mantid does — say which
+        # experiment the run turned out to belong to.
+        lines.append(f"  [dim]found in IPTS-{found_ipts} by searching the archive[/dim]")
+    lines.append("  [dim]Mantid via drtsans; ~10 s[/dim]")
     image, error = ms.read_run_image(run_file, outdir, drtsans_version=state.drtsans_version)
     if image is None:
         return CommandResult(success=False, message="\n".join(lines + [f"[red]✗ {error}[/red]"]))

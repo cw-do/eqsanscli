@@ -347,6 +347,22 @@ beyond `drtsans`, which supplies Mantid for reading the run and writing the mask
 /mask create 186104 --ipts 37618
 ```
 
+### Finding the run
+
+The run number on its own is enough — `/mask create 186636` works with no session
+loaded. The session's IPTS and the current folder are tried first, then the
+archive is searched for that exact run the way Mantid does
+(`/SNS/EQSANS/IPTS-*/nexus/EQSANS_<run>.nxs.h5`, and `data/EQSANS_<run>.nxs` for
+experiments before ~2013), which takes about a second across the ~1100 experiment
+folders. The report names the experiment it turned out to belong to:
+
+```
+Reading run 186636 — /SNS/EQSANS/IPTS-38681/nexus/EQSANS_186636.nxs.h5
+  found in IPTS-38681 by searching the archive
+```
+
+`--ipts <n>` skips the search, and a full path is taken as given.
+
 ### Which run to use
 
 A **uniformly illuminated** run — banjo, flood, or empty cell — so tube and edge
@@ -491,7 +507,7 @@ point of it.
 
 | Option | Units | Default | |
 |---|---|---|---|
-| `--ipts <n>` | | session's IPTS | experiment holding the run |
+| `--ipts <n>` | | found from the run number | experiment holding the run; rarely needed |
 | `--outdir <dir>` | | current folder | where to write (elsewhere = not auto-discovered) |
 | `--dry-run` | | off | report and write the preview PNG only, no mask file |
 | `--beam-scale <f>` | multiplier | 1.0 cross cut / 1.2 shadow | enlarge the fitted beam radius |
