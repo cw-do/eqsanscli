@@ -243,6 +243,9 @@ CONFIGURATION:
     "the beam mask is too big / wrong place" -> the run is probably too dim; suggest a brighter run, or
         /mask create <run> --beam-center <x>,<y> --beam-radius <mm>   (both in mm)
     "the beam mask is too small" -> long wavelength fills the penumbra; /mask create <run> --beam-radius <mm>
+    "there is a bright spot below/above the beam" -> that is direct beam that fell under gravity (drop goes
+        as wavelength squared, so the beam smears vertically and the stop only blocks its middle).
+        /mask create covers it automatically as a capsule; --no-leak turns that off.
     "also mask tube 146" -> /mask create <run> --tubes 146
     "mask a spot at x=120 y=-80 radius 15" -> /mask create <run> --disc 120,-80,15
     "mask that blemish too" -> /mask create <run> --disc <x>,<y>,<r>   MILLIMETRES on the detector

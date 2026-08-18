@@ -91,6 +91,14 @@ the tube ends, and tubes deviating from others in their front/back group, then
 writes `mask_<config>_<run>.nxs` into the working folder — named so the search
 above finds it.
 
+At long wavelength and long flight path the direct beam **falls under gravity**,
+by an amount going as the square of the wavelength, so across the wavelength band
+it smears into a vertical streak. A stop sized for the middle of the band lets the
+ends through, and that leakage is bright: on a 9 m 15 Å banjo, lobes of 350 and
+190 counts against a plateau of 5, above and below an 8-count shadow. The mask
+must cover the whole streak, not just the shadow — `/mask create` extends to a
+capsule when it sees leakage.
+
 The beam stop is found by **local** contrast — the image smoothed over ~5 pixels
 against ~41 — so a region qualifies by being darker than its own surroundings.
 A global threshold cannot serve both a bright run (core 12× below plateau) and a

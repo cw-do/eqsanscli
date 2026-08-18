@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.19.0 | 2026-08-18 | The beam mask covers direct beam that fell under gravity: a capsule spanning the vertical streak, not just the shadow. |
 | 0.18.0 | 2026-08-18 | `/mask --disc <x>,<y>,<r>` masks an arbitrary disc in mm; preview axes now in mm so positions can be read off the picture. |
 | 0.17.0 | 2026-08-18 | Tube detection rebuilt: median against a local baseline, relative dead/hot tests, statistical test gated on counts. A beam halo no longer masks whole tubes. |
 | 0.16.2 | 2026-08-18 | Document `--top`/`--bottom`: pixel counts not indices, the 11-pixel floor and how to bypass it, and that the machine-physics tool names the two ends the other way round. |
@@ -116,6 +117,43 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-18 (v0.19.0): Masking direct beam that fell under gravity
+
+Reported: automatic centre masking failed on the 9 m case (run 186636). The user
+would have masked the dark disc around pixel (90, 130) *and* the bright spot just
+below it — direct beam that fell under gravity.
+
+**The physics, confirmed in the data.** Gravity drop goes as the square of the
+wavelength, so across a wavelength band the direct beam lands at a range of
+heights: it is a vertical *streak*, not a spot. A beam stop sized for the middle
+of the band blocks the middle of the streak and lets the ends through. The
+vertical profile through run 186636's beam column shows exactly that — bright
+lobes of 348 and 190 counts at y ≈ +50 and −55 mm, either side of an 8-count
+shadow at y ≈ +10, against a detector plateau of 5.
+
+**Only ever looking for darkness was the flaw.** The leaked beam is what actually
+ruins the data — a single unmasked direct-beam pixel spoils the low-Q bin it lands
+in — and the old detector could not see it at all.
+
+**Now**, after locating the shadow, bright patches in the beam's own column are
+folded in (contrast > 3, ≥ 10 px, within 4 stop radii in x and 200 mm in y) and
+the mask becomes a **capsule**: everything within the radius of a vertical
+segment. Two further details were needed:
+
+- **Contain, do not estimate.** Taking half a lobe's x-range, or its median row
+  width, left the widest part unmasked — 611 counts against a plateau of 5. The
+  radius now contains the detected patches by construction.
+- **Follow the tails.** Local contrast saturates inside a broad bright region,
+  because its own surroundings are lit, so the streak's ends read as low contrast
+  and stopped the capsule short while ~23 counts per pixel remained. The tails are
+  now followed until the column's mean falls back below twice the plateau.
+
+Result on 186636: a capsule at x 16.5 mm spanning y −145…+129 mm, r 56 mm,
+12.2% of the detector, with the worst unmasked pixel in the beam column down to
+**4 counts against a plateau of 1** (previously 611). Runs with no leakage are
+untouched: 186631 and 186104 still produce plain circles, and a test asserts a
+clean stop is never turned into a capsule. `--no-leak` disables the extension.
 
 ### 2026-08-18 (v0.18.0): `--disc` for arbitrary discs, in millimetres
 

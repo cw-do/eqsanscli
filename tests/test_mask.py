@@ -361,6 +361,77 @@ def test_preview_axes_run_left_to_right():
     assert np.all(np.diff(ordered) > 0)
 
 
+def _counts_with_gravity_streak():
+    """A stop blocking the middle of a vertically smeared direct beam.
+
+    Gravity drop goes as wavelength squared, so across the band the beam lands at
+    a range of heights; a stop sized for the middle lets the ends through. This is
+    run 186636 in miniature.
+    """
+    counts = synthetic_counts(dead_tube=None)
+    x_mm, y_mm = synthetic_positions()
+    column = np.abs(x_mm) < 30.0
+    counts[column & (y_mm > 25) & (y_mm < 80)] = 400.0     # upper lobe
+    counts[column & (y_mm < -25) & (y_mm > -80)] = 300.0    # lower lobe
+    return counts
+
+
+def test_gravity_dropped_beam_extends_the_mask_into_a_capsule():
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(_counts_with_gravity_streak(), x_mm, y_mm,
+                         use_tubes=False, bottom=0, top=0)
+    beam = plan.beam
+    assert beam is not None and beam.is_streak, beam
+    assert beam.leaks >= 2, beam.leaks
+    assert beam.y_low < -60 and beam.y_high > 60, (beam.y_low, beam.y_high)
+    assert plan.beam.as_shape()["type"] == "capsule_mm"
+
+
+def test_the_capsule_covers_every_bright_leak_pixel():
+    """A single unmasked direct-beam pixel ruins the low-Q data it lands in."""
+    x_mm, y_mm = synthetic_positions()
+    counts = _counts_with_gravity_streak()
+    plan = ms.build_plan(counts, x_mm, y_mm, use_tubes=False, bottom=0, top=0)
+    mask = ms.shapes_to_mask([plan.beam.as_shape()], x_mm, y_mm)
+    bright = counts > 250.0
+    assert bright.any()
+    assert (bright & ~mask).sum() == 0, int((bright & ~mask).sum())
+
+
+def test_no_leak_keeps_the_plain_disc():
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(_counts_with_gravity_streak(), x_mm, y_mm,
+                         use_tubes=False, bottom=0, top=0, include_leaks=False)
+    assert plan.beam is not None and not plan.beam.is_streak
+    assert plan.beam.as_shape()["type"] == "circle_mm"
+
+
+def test_a_clean_stop_is_not_turned_into_a_capsule():
+    """Short wavelength: no leakage, so the mask must stay a circle."""
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(dead_tube=None), x_mm, y_mm,
+                         use_tubes=False, bottom=0, top=0)
+    assert plan.beam is not None and not plan.beam.is_streak
+    assert plan.beam.leaks == 0
+
+
+def test_capsule_shape_renders_as_a_stadium():
+    x_mm, y_mm = synthetic_positions()
+    shape = {"type": "capsule_mm", "xc": 0.0, "y0": -100.0, "y1": 100.0, "r": 20.0}
+    mask = ms.shapes_to_mask([shape], x_mm, y_mm)
+    assert mask[np.abs(x_mm) < 5][np.abs(y_mm[np.abs(x_mm) < 5]) < 90].all()
+    # rounded ends: nothing beyond the segment plus the radius
+    assert y_mm[mask].max() <= 100.0 + 20.0 + 1e-6
+    assert y_mm[mask].min() >= -100.0 - 20.0 - 1e-6
+
+
+def test_no_leak_option_parsing():
+    from eqsanscli.commands.mask import _parse_args
+
+    assert _parse_args(["--no-leak"])[0]["include_leaks"] is False
+    assert _parse_args([])[0]["include_leaks"] is True
+
+
 def test_unknown_shape_is_ignored_not_fatal():
     assert not ms.shapes_to_mask([{"type": "triangle"}]).any()
 
