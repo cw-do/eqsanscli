@@ -10,6 +10,7 @@ answers are known.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -21,8 +22,33 @@ sys.path.insert(0, str(ROOT / "src"))
 from eqsanscli.services import mask_service as ms
 
 TRUE_BEAM_X, TRUE_BEAM_Y, TRUE_BEAM_R = 91.0, 131.0, 6.0
+# Real geometry, measured from the EQ-SANS instrument definition.
+PIXEL_PITCH_MM = 4.09      # along a tube
+TUBE_PITCH_MM = 5.493      # between physical neighbours
 TRUE_BAND = 11
 DEAD_TUBE = 57
+
+
+def synthetic_positions() -> tuple[np.ndarray, np.ndarray]:
+    """Real detector layout: y linear in pixel index, x interleaved in packs of 4.
+
+    Physical order by x is 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, ... so tube index is
+    NOT a spatial coordinate — the property that makes an index-space circle
+    wrong.
+    """
+    order = np.empty(ms.N_TUBES, dtype=int)
+    slot = 0
+    for block in range(0, ms.N_TUBES, 8):
+        for offset in range(ms.TUBE_PACK):
+            for pack in (0, 1):
+                tube = block + pack * ms.TUBE_PACK + offset
+                if tube < ms.N_TUBES:
+                    order[tube] = slot
+                    slot += 1
+    x = (order - (ms.N_TUBES - 1) / 2.0) * TUBE_PITCH_MM
+    y = (np.arange(ms.N_PIXELS) - (ms.N_PIXELS - 1) / 2.0) * PIXEL_PITCH_MM
+    return (np.repeat(x[:, None], ms.N_PIXELS, axis=1),
+            np.repeat(y[None, :], ms.N_TUBES, axis=0))
 
 
 def synthetic_counts(dead_tube: int | None = DEAD_TUBE) -> np.ndarray:
@@ -40,12 +66,9 @@ def synthetic_counts(dead_tube: int | None = DEAD_TUBE) -> np.ndarray:
     ramp[-TRUE_BAND:] = np.linspace(0.35, 0.0, TRUE_BAND)
     counts *= ramp[None, :]
 
-    # Beam stop: a physical circle, so an ellipse in index space.
-    xs = np.arange(ms.N_TUBES)[:, None]
-    ys = np.arange(ms.N_PIXELS)[None, :]
-    aspect = ms.N_PIXELS / ms.N_TUBES
-    shadow = (((xs - TRUE_BEAM_X) / TRUE_BEAM_R) ** 2
-              + ((ys - TRUE_BEAM_Y) / (TRUE_BEAM_R * aspect)) ** 2) <= 1.0
+    # Beam stop: a circle on the detector face, in millimetres.
+    x_mm, y_mm = synthetic_positions()
+    shadow = (x_mm ** 2 + y_mm ** 2) <= (TRUE_BEAM_R * PIXEL_PITCH_MM) ** 2
     counts[shadow] *= 0.02
 
     if dead_tube is not None:
@@ -80,36 +103,64 @@ def test_reshape_recovers_pixel_major_ordering():
 # --- shapes ---------------------------------------------------------------
 
 def test_beam_stop_is_found_where_it_was_put():
-    beam = ms.find_beam_stop(synthetic_counts())
+    x_mm, y_mm = synthetic_positions()
+    beam = ms.find_beam_stop(synthetic_counts(), x_mm, y_mm, scale=1.0, pad=0.0)
     assert beam is not None
-    assert abs(beam.xc - TRUE_BEAM_X) < 1.5, beam.xc
-    assert abs(beam.yc - TRUE_BEAM_Y) < 1.5, beam.yc
-    # Radii keep the physical circle's aspect ratio.
-    assert abs(beam.ry / beam.rx - ms.N_PIXELS / ms.N_TUBES) < 0.35
+    assert abs(beam.xc) < 3.0 and abs(beam.yc) < 3.0, (beam.xc, beam.yc)
+    # Radius comes from the shadow's area, so it lands near the true radius.
+    assert abs(beam.radius - TRUE_BEAM_R * PIXEL_PITCH_MM) < 5.0, beam.radius
 
 
-def test_beam_scale_and_pad_enlarge_it():
-    small = ms.find_beam_stop(synthetic_counts(), scale=1.0, pad=0.0)
-    big = ms.find_beam_stop(synthetic_counts(), scale=2.0, pad=3.0)
-    assert big.rx > small.rx and big.ry > small.ry + 2
-
-
-def test_beam_stays_circular_under_both_knobs():
-    """Padding only ry would stretch the circle vertically (13% off at pad 1)."""
+def test_beam_scale_and_pad_are_in_millimetres():
+    x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts()
-    aspect = ms.N_PIXELS / ms.N_TUBES
-    for scale, pad in ((1.0, 0.0), (1.2, 1.0), (1.2, 6.0), (1.0, 6.0), (2.0, 2.0)):
-        beam = ms.find_beam_stop(counts, scale=scale, pad=pad)
-        assert abs(beam.ry / beam.rx - aspect) < 1e-6, (scale, pad, beam)
+    base = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=0.0)
+    scaled = ms.find_beam_stop(counts, x_mm, y_mm, scale=2.0, pad=0.0)
+    padded = ms.find_beam_stop(counts, x_mm, y_mm, scale=1.0, pad=7.0)
+    assert abs(scaled.radius - 2 * base.radius) < 1e-6
+    assert abs(padded.radius - (base.radius + 7.0)) < 1e-6
 
 
-def test_pad_is_quoted_in_pixels():
-    """`--beam-pad 4` adds 4 pixels on y, and the matching arc on x."""
+def test_masked_beam_region_is_a_disc_on_the_detector():
+    """The point of masking in mm. Area is the robust measure -- a bounding box
+    is quantised by the 5.49 mm tube pitch and 4.09 mm pixel pitch, which on a
+    ~12-pixel disc is worth over 10% on its own."""
+    x_mm, y_mm = synthetic_positions()
     counts = synthetic_counts()
-    base = ms.find_beam_stop(counts, scale=1.0, pad=0.0)
-    padded = ms.find_beam_stop(counts, scale=1.0, pad=4.0)
-    assert abs((padded.ry - base.ry) - 4.0) < 1e-6
-    assert abs((padded.rx - base.rx) - 4.0 / (ms.N_PIXELS / ms.N_TUBES)) < 1e-6
+    plan = ms.build_plan(counts, x_mm, y_mm)
+    beam_only = ms.shapes_to_mask([plan.beam.as_shape()], x_mm, y_mm)
+
+    area = beam_only.sum() * ms.pixel_area_mm2(x_mm, y_mm)
+    expected = math.pi * plan.beam.radius ** 2
+    assert abs(area - expected) / expected < 0.15, (area, expected)
+
+    # And it is compact: every masked pixel lies within the stated radius.
+    dist = np.hypot(x_mm[beam_only] - plan.beam.xc, y_mm[beam_only] - plan.beam.yc)
+    assert dist.max() <= plan.beam.radius + 1e-6
+
+
+def test_beam_mask_is_not_contiguous_in_tube_index():
+    """Interleaving means a physical disc skips tube indices — the signature
+    that the mask is spatial rather than index-space."""
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm)
+    beam_only = ms.shapes_to_mask([plan.beam.as_shape()], x_mm, y_mm)
+    touched = np.nonzero(beam_only.any(axis=1))[0]
+    span = set(range(touched.min(), touched.max() + 1))
+    assert span - set(touched.tolist()), "expected gaps from the pack interleave"
+
+
+def test_beam_needs_positions():
+    """Without real positions there is no honest circle, so none is drawn."""
+    plan = ms.build_plan(synthetic_counts())
+    assert plan.beam is None
+    assert not ms.shapes_to_mask([{"type": "circle_mm", "xc": 0, "yc": 0, "r": 5}]).any()
+
+
+def test_pixel_area_matches_the_real_detector():
+    x_mm, y_mm = synthetic_positions()
+    area = ms.pixel_area_mm2(x_mm, y_mm)
+    assert abs(area - TUBE_PITCH_MM * PIXEL_PITCH_MM) < 0.5, area
 
 
 def test_edge_bands_are_measured():
@@ -129,12 +180,12 @@ def test_edge_bands_never_go_below_the_convention():
 
 
 def test_dead_tube_is_flagged():
-    plan = ms.build_plan(synthetic_counts())
+    plan = ms.build_plan(synthetic_counts(), *synthetic_positions())
     assert DEAD_TUBE in plan.tubes, plan.tubes
 
 
 def test_healthy_detector_flags_nothing():
-    plan = ms.build_plan(synthetic_counts(dead_tube=None))
+    plan = ms.build_plan(synthetic_counts(dead_tube=None), *synthetic_positions())
     assert plan.tubes == [], plan.tubes
 
 
@@ -179,8 +230,9 @@ def test_shapes_render_and_index_as_tube_major():
 
 
 def test_full_plan_masks_a_plausible_fraction():
-    plan = ms.build_plan(synthetic_counts())
-    mask = ms.shapes_to_mask(plan.shapes)
+    x_mm, y_mm = synthetic_positions()
+    plan = ms.build_plan(synthetic_counts(), x_mm, y_mm)
+    mask = ms.shapes_to_mask(plan.shapes, x_mm, y_mm)
     fraction = mask.sum() / mask.size
     assert 0.05 < fraction < 0.15, fraction
 

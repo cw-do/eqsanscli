@@ -20,6 +20,17 @@ Detector layout, verified against run 186104: 192 tubes × 256 pixels, workspace
 index = ``tube * 256 + pixel``. Reshaped that way the mean profile along the
 pixel axis shows the characteristic dead ends (edge/mid ≈ 0.23); the transpose
 shows no such structure (≈ 0.93), which is how `reshape_counts` self-checks.
+
+**Tube index is not a spatial coordinate.** Measured from the instrument
+geometry: pixels step 4.09 mm along a tube (so pixel index *is* linear in y), but
+consecutive tube indices are 10.94 mm apart in x while physical neighbours are
+5.49 mm apart — the index order interleaves sub-banks in packs of four
+(0, 4, 1, 5, 2, 6, 3, 7, 8, 12, …), and x is not monotonic in tube index. A
+circle drawn in index space is therefore not a circle on the detector: for run
+186104's beam stop it agreed with the true disc only 87%, masking a region
+82.6 × 69.5 mm instead of round. The beam stop is consequently masked in
+**millimetres**, against the real pixel positions, which Mantid gives us in the
+same pass that reads the counts.
 """
 
 from __future__ import annotations
@@ -95,39 +106,47 @@ def _edge_ratio(counts: np.ndarray) -> float:
 
 @dataclass
 class BeamStop:
-    xc: float          # tube axis
-    yc: float          # pixel axis
-    rx: float
-    ry: float
+    """The beam-stop shadow as a circle on the detector face, in millimetres."""
+
+    xc: float          # mm
+    yc: float          # mm
+    radius: float      # mm
     npix: int
 
     def as_shape(self) -> dict:
-        return {"type": "ellipse", "xc": self.xc, "yc": self.yc,
-                "rx": self.rx, "ry": self.ry}
+        return {"type": "circle_mm", "xc": self.xc, "yc": self.yc, "r": self.radius}
+
+
+def pixel_area_mm2(x_mm: np.ndarray, y_mm: np.ndarray) -> float:
+    """Area one pixel covers, from the real positions.
+
+    The active face spans ~1049 x 1042 mm over 192 x 256 pixels, so a pixel is
+    ~5.49 mm across a tube and ~4.09 mm along one: not square, which is exactly
+    why the beam stop cannot be a circle in index space.
+    """
+    width = float(x_mm.max() - x_mm.min())
+    height = float(y_mm.max() - y_mm.min())
+    return (width / (N_TUBES - 1)) * (height / (N_PIXELS - 1))
 
 
 def find_beam_stop(
     counts: np.ndarray,
+    x_mm: np.ndarray,
+    y_mm: np.ndarray,
     *,
     scale: float = DEFAULT_BEAM_SCALE,
     pad: float = DEFAULT_BEAM_PAD,
     search_frac: float = 0.5,
 ) -> Optional[BeamStop]:
-    """Locate the beam-stop shadow: the low-count blob near the centre.
+    """Locate the beam-stop shadow and describe it as a circle in millimetres.
 
     Works on the *deficit* (how far each pixel falls below the local plateau)
     inside the central `search_frac` of the detector, so a bright sample or an
     off-centre beam does not drag the result around.
 
-    The mask is a physical circle, which on this detector is an ellipse in index
-    space: pixels are finer along a tube than tubes are apart, so
-    ``ry/rx = N_PIXELS/N_TUBES``.
-
-    Both knobs keep that ratio, so the masked region stays circular on the
-    detector face: `scale` multiplies the fitted radius, `pad` adds a margin
-    quoted in y-pixels (and therefore ``pad / aspect`` tubes on the x axis).
-    Padding only ry would stretch the circle vertically -- 13% off aspect at the
-    default pad, 77% at pad 6.
+    The result is physical because tube index is not a spatial coordinate (see
+    the module docstring): `scale` multiplies the fitted radius, `pad` adds
+    millimetres beyond it. One pixel is 4.09 mm along a tube.
     """
     ny, nx = N_PIXELS, N_TUBES
     x0, x1 = int(nx * (1 - search_frac) / 2), int(nx * (1 + search_frac) / 2)
@@ -144,16 +163,13 @@ def find_beam_stop(
     if npix < 4:
         return None
 
-    xs, ys = np.nonzero(shadow)
-    xc = float(xs.mean()) + x0
-    yc = float(ys.mean()) + y0
-
-    # Area -> radii, keeping the physical circle's aspect ratio.
-    aspect = ny / nx
-    rx = math.sqrt(npix / (math.pi * aspect))
-    ry = rx * aspect
-    return BeamStop(xc=xc, yc=yc, rx=rx * scale + pad / aspect,
-                    ry=ry * scale + pad, npix=npix)
+    xs = x_mm[x0:x1, y0:y1][shadow]
+    ys = y_mm[x0:x1, y0:y1][shadow]
+    xc, yc = float(xs.mean()), float(ys.mean())
+    # Radius from the shadow's AREA: npix * (area per pixel) = pi r^2. Taking a
+    # median distance instead would overestimate by sqrt(2) on a filled disc.
+    radius = math.sqrt(npix * pixel_area_mm2(x_mm, y_mm) / math.pi)
+    return BeamStop(xc=xc, yc=yc, radius=radius * scale + pad, npix=npix)
 
 
 def find_edge_bands(
@@ -187,6 +203,8 @@ def find_deviant_tubes(
     bottom: int = 0,
     top: int = 0,
     beam: Optional[BeamStop] = None,
+    x_mm: Optional[np.ndarray] = None,
+    y_mm: Optional[np.ndarray] = None,
 ) -> list[int]:
     """Tubes whose response differs from others in the same front/back group.
 
@@ -202,15 +220,14 @@ def find_deviant_tubes(
     """
     y_hi = N_PIXELS - top if top else N_PIXELS
     usable = counts[:, bottom:y_hi].astype(float, copy=True)
-    if beam is not None:
-        # Blank the beam shadow only -- not the whole tube, or the ~24 tubes
-        # crossing the beam would have no data left to judge them by.
-        x_lo = max(0, int(beam.xc - 2 * beam.rx))
-        x_hi = min(N_TUBES, int(beam.xc + 2 * beam.rx) + 1)
-        y_lo = max(bottom, int(beam.yc - 2 * beam.ry)) - bottom
-        y_top = min(y_hi, int(beam.yc + 2 * beam.ry) + 1) - bottom
-        if x_hi > x_lo and y_top > y_lo:
-            usable[x_lo:x_hi, y_lo:y_top] = np.nan
+    if beam is not None and x_mm is not None and y_mm is not None:
+        # Blank a generous disc around the beam -- not whole tubes, or the tubes
+        # crossing the beam would have no data left to judge them by. The beam is
+        # a physical circle, so this has to be done in millimetres too.
+        wide = {"type": "circle_mm", "xc": beam.xc, "yc": beam.yc,
+                "r": beam.radius * 2.0}
+        blank = shapes_to_mask([wide], x_mm, y_mm)[:, bottom:y_hi]
+        usable[blank] = np.nan
     with np.errstate(invalid="ignore"):
         totals = np.nanmean(usable, axis=1)
 
@@ -253,8 +270,8 @@ class MaskPlan:
         bits = []
         if self.beam:
             bits.append(
-                f"beam stop at tube {self.beam.xc:.1f}, pixel {self.beam.yc:.1f} "
-                f"(r {self.beam.rx:.1f}x{self.beam.ry:.1f})"
+                f"beam stop at ({self.beam.xc:.1f}, {self.beam.yc:.1f}) mm, "
+                f"r {self.beam.radius:.1f} mm"
             )
         if self.bottom or self.top:
             bits.append(f"edge bands {self.bottom} bottom / {self.top} top")
@@ -265,6 +282,8 @@ class MaskPlan:
 
 def build_plan(
     counts: np.ndarray,
+    x_mm: Optional[np.ndarray] = None,
+    y_mm: Optional[np.ndarray] = None,
     *,
     beam_scale: float = DEFAULT_BEAM_SCALE,
     beam_pad: float = DEFAULT_BEAM_PAD,
@@ -280,8 +299,8 @@ def build_plan(
     """Decide what to mask. Explicit arguments override what is measured."""
     plan = MaskPlan()
 
-    if use_beam:
-        plan.beam = find_beam_stop(counts, scale=beam_scale, pad=beam_pad)
+    if use_beam and x_mm is not None and y_mm is not None:
+        plan.beam = find_beam_stop(counts, x_mm, y_mm, scale=beam_scale, pad=beam_pad)
         if plan.beam:
             plan.shapes.append(plan.beam.as_shape())
 
@@ -301,7 +320,8 @@ def build_plan(
         plan.tube_source = "manual"
     elif use_tubes:
         plan.tubes = find_deviant_tubes(
-            counts, sigma=tube_sigma, bottom=plan.bottom, top=plan.top, beam=plan.beam,
+            counts, sigma=tube_sigma, bottom=plan.bottom, top=plan.top,
+            beam=plan.beam, x_mm=x_mm, y_mm=y_mm,
         )
         plan.tube_source = "auto"
     for tube in plan.tubes:
@@ -310,14 +330,25 @@ def build_plan(
     return plan
 
 
-def shapes_to_mask(shapes: Sequence[dict]) -> np.ndarray:
-    """Render shapes into a boolean (tubes, pixels) array. True = masked."""
+def shapes_to_mask(shapes: Sequence[dict], x_mm: Optional[np.ndarray] = None,
+                   y_mm: Optional[np.ndarray] = None) -> np.ndarray:
+    """Render shapes into a boolean (tubes, pixels) array. True = masked.
+
+    `circle_mm` shapes need the real pixel positions; rectangles are in index
+    space (a tube is a tube, and pixel index is linear in y).
+    """
     mask = np.zeros((N_TUBES, N_PIXELS), dtype=bool)
     xs = np.arange(N_TUBES)[:, None]
     ys = np.arange(N_PIXELS)[None, :]
     for shape in shapes:
         kind = shape.get("type")
-        if kind == "ellipse":
+        if kind == "circle_mm":
+            if x_mm is None or y_mm is None:
+                logger.warning("Skipping the beam circle: no detector positions.")
+                continue
+            mask |= ((x_mm - float(shape["xc"])) ** 2
+                     + (y_mm - float(shape["yc"])) ** 2) <= float(shape["r"]) ** 2
+        elif kind == "ellipse":
             rx = max(float(shape["rx"]), 1e-9)
             ry = max(float(shape["ry"]), 1e-9)
             mask |= (((xs - float(shape["xc"])) / rx) ** 2
@@ -379,12 +410,23 @@ import sys
 import numpy as np
 from mantid.simpleapi import Integration, LoadEventNexus
 
-run_file, counts_out, meta_out = sys.argv[1], sys.argv[2], sys.argv[3]
+run_file, counts_out, meta_out, pos_out = sys.argv[1:5]
 
 ws = LoadEventNexus(Filename=run_file, OutputWorkspace="mask_src", LoadMonitors=False)
 integrated = Integration(InputWorkspace=ws, OutputWorkspace="mask_src_i")
 counts = np.array([integrated.readY(i)[0] for i in range(integrated.getNumberHistograms())])
 np.save(counts_out, counts)
+
+# Real pixel positions in mm. Tube index is not a spatial coordinate on this
+# detector, so the beam stop has to be masked against these, not against indices.
+detector_info = ws.detectorInfo()
+spectrum_info = ws.spectrumInfo()
+positions = np.array(
+    [[spectrum_info.position(i).X() * 1000.0, spectrum_info.position(i).Y() * 1000.0]
+     for i in range(integrated.getNumberHistograms())],
+    dtype=np.float32,
+)
+np.save(pos_out, positions)
 
 run = ws.getRun()
 
@@ -451,6 +493,8 @@ class RunImage:
     """A run's detector image plus the logs that identify its configuration."""
 
     counts: np.ndarray
+    x_mm: np.ndarray
+    y_mm: np.ndarray
     n_spectra: int
     total_counts: float
     distance_m: float
@@ -517,23 +561,30 @@ def read_run_image(run_file: str, workdir: str, *, drtsans_version: str = "defau
     """Load a run's counts and configuration logs via Mantid."""
     counts_path = os.path.join(workdir, "_eqsanscli_counts.npy")
     meta_path = os.path.join(workdir, "_eqsanscli_meta.json")
+    pos_path = os.path.join(workdir, "_eqsanscli_positions.npy")
     ok, message = _run_drtsans(
-        _COUNTS_SCRIPT, [run_file, counts_path, meta_path], workdir, "read_counts",
+        _COUNTS_SCRIPT, [run_file, counts_path, meta_path, pos_path], workdir, "read_counts",
         drtsans_version=drtsans_version, timeout=timeout,
     )
     if not ok:
         return None, message
     try:
         flat = np.load(counts_path)
+        positions = np.load(pos_path)
         with open(meta_path) as fh:
             meta = json.load(fh)
     except (OSError, ValueError) as exc:
         return None, f"could not read the counts Mantid produced: {exc}"
+    if positions.shape != (flat.size, 2):
+        return None, (f"detector positions have shape {positions.shape}, "
+                      f"expected ({flat.size}, 2)")
 
     distance_mm = meta.get("detector_distance_mm")
     frequency = meta.get("frequency")
     image = RunImage(
         counts=reshape_counts(flat),
+        x_mm=positions[:, 0].reshape(N_TUBES, N_PIXELS).astype(float),
+        y_mm=positions[:, 1].reshape(N_TUBES, N_PIXELS).astype(float),
         n_spectra=int(meta.get("n_spectra", flat.size)),
         total_counts=float(meta.get("total_counts", float(flat.sum()))),
         distance_m=round(float(distance_mm) / 1000.0, 3) if distance_mm else 0.0,
@@ -541,7 +592,7 @@ def read_run_image(run_file: str, workdir: str, *, drtsans_version: str = "defau
         frequency_hz=int(round(float(frequency))) if frequency else 60,
         title=str(meta.get("title", "")),
     )
-    for temp in (counts_path, meta_path):
+    for temp in (counts_path, meta_path, pos_path):
         try:
             os.remove(temp)
         except OSError:
@@ -577,7 +628,20 @@ def write_mask(run_file: str, indices: Sequence[int], mask_path: str, workdir: s
     return result, ""
 
 
-def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str) -> Optional[str]:
+def physical_tube_order(x_mm: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    """Tube indices sorted by physical x, for display.
+
+    Index order interleaves sub-banks, so an image plotted against raw tube index
+    scrambles the beam stop into stripes. Sorting by x restores the detector's
+    actual appearance.
+    """
+    if x_mm is None:
+        return None
+    return np.argsort(-x_mm[:, x_mm.shape[1] // 2])
+
+
+def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str,
+                      x_mm: Optional[np.ndarray] = None) -> Optional[str]:
     """Raw image beside the same image with the mask overlaid. Returns path or None."""
     try:
         import matplotlib
@@ -586,11 +650,15 @@ def render_comparison(counts: np.ndarray, mask: np.ndarray, path: str) -> Option
     except ImportError:
         return None
 
+    order = physical_tube_order(x_mm)
+    if order is not None:
+        counts = counts[order]
+        mask = mask[order]
     shown = np.log10(np.clip(counts.T, 1, None))
     fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
     for ax, title in zip(axes, ("raw", "mask overlay")):
         ax.imshow(shown, origin="lower", aspect="auto", cmap="viridis")
-        ax.set_xlabel("tube")
+        ax.set_xlabel("tube (physical order)" if order is not None else "tube index")
         ax.set_ylabel("pixel")
         ax.set_title(title)
     overlay = np.zeros(mask.T.shape + (4,))

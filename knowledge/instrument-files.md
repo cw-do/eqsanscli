@@ -89,9 +89,22 @@ Build one from a uniformly illuminated run (banjo, flood, empty cell) with
 `/mask create <run>`: it masks the beam-stop shadow, the low-response bands at
 the tube ends, and tubes deviating from others in their front/back group, then
 writes `mask_<config>_<run>.nxs` into the working folder — named so the search
-above finds it. Front and back tubes alternate in **packs of four**, so tube
-comparisons are made within a pack group; comparing odd-to-odd mixes the two
-populations and hides real outliers.
+above finds it.
+
+**Detector geometry, measured from the instrument definition.** 192 tubes ×
+256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across
+a tube and 4.09 mm along one — not square. Two consequences:
+
+- Front and back tubes alternate in **packs of four**. Physical order by x runs
+  0, 4, 1, 5, 2, 6, 3, 7, 8, 12, …, consecutive *indices* are 10.94 mm apart
+  while physical neighbours are 5.49 mm apart, and **x is not monotonic in tube
+  index**. Tube comparisons are therefore made within a pack group; comparing
+  odd-to-odd mixes the two populations and hides real outliers.
+- A circle drawn in index space is **not** a circle on the detector. For run
+  186104's beam stop it agreed with the true disc only 87%, covering a region
+  82.6 × 69.5 mm. The beam stop is masked in millimetres against the real pixel
+  positions; `--beam-scale` and `--beam-pad` are therefore physical too (pad in
+  mm). Pixel index *is* linear in y, so the tube-end bands stay in index space.
 
 The same mask is often reusable across detector distances, so a single
 `mask_4m.nxs` in the working folder is a legitimate setup — it just cannot be

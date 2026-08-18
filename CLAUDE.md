@@ -82,6 +82,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.15.0 | 2026-08-17 | Beam stop masked in millimetres against real pixel positions — tube index is not a spatial coordinate, so the index-space circle was only 87% right. |
 | 0.14.1 | 2026-08-17 | Fix: `/mask --beam-pad` padded only the y radius, distorting the beam circle (13% off aspect at the default, 77% at pad 6). |
 | 0.14.0 | 2026-08-17 | `/mask create <run>` builds a mask from a run's own image, self-contained, named for its configuration so the resolver finds it. |
 | 0.13.0 | 2026-08-17 | Knowledge base restructured into `knowledge/` with `protocol.md` as the authority; topic-aware loader; stale/contradicting `preset_configs/knowledge.md` removed. |
@@ -109,6 +110,45 @@ The `.venv` has textual/rich but the system Python may not — use `sys.path.ins
 ---
 
 ## Change Log
+
+### 2026-08-17 (v0.15.0): The beam stop is a circle in millimetres, not in index space
+
+Prompted by the question "did you consider that the number of x-pixels and
+y-pixels differ for the same square geometry?" — I had, but only halfway, and
+checking it against the instrument definition showed the reasoning was wrong.
+
+**What I assumed.** The detector is ~1 m square with 192 tubes × 256 pixels, so a
+physical circle is an ellipse in index space with `ry/rx = 256/192 = 1.333`.
+
+**What the geometry actually says.** Measured from `LoadEmptyInstrument`
+(remembering spectrum 0 is a monitor — 49153 spectra, 49152 pixels): pixels step
+**4.09 mm** along a tube, but consecutive tube *indices* are **10.94 mm** apart in
+x while physical neighbours are **5.49 mm** apart. The index order interleaves
+sub-banks in packs of four — physical order by x is 0, 4, 1, 5, 2, 6, 3, 7, 8,
+12, … — so **x is not monotonic in tube index at all**. The premise that index
+maps linearly to position is false, which makes the aspect-ratio question moot.
+
+**How wrong it was.** Run 186104's beam shadow is physically round (49.5 mm wide
+× 49.0 mm tall) and touches tube indices 83–95 — but only 10 of those 13, with
+84, 85, 86 physically elsewhere. The index-space ellipse agreed with a true disc
+of the same area only **87.4%**: it missed 23 px of the disc and masked 21 px
+outside it, covering a region 82.6 × 69.5 mm.
+
+**Now.** `read_run_image` dumps the real pixel positions in the same Mantid pass
+that reads the counts. The beam stop is found and masked as a circle in
+millimetres (`{"type": "circle_mm", …}`), its radius derived from the shadow's
+**area** (`npix × pixel_area = πr²`; a median distance would overestimate by √2
+on a filled disc). `--beam-scale` multiplies the radius, `--beam-pad` adds
+millimetres. The masked region is now 60.6 × 61.3 mm — round. Tube-end bands stay
+in index space, correctly: pixel index *is* linear in y.
+
+Comparison images are now plotted in physical tube order, which removes the
+four-tube striping that was an artifact of index ordering, and shows the beam as
+the round blob it is.
+
+Two tests pin this: the masked area matches `πr²` within 15%, and the beam mask
+is deliberately asserted to be *non-contiguous in tube index* — the signature
+that it is spatial rather than index-space.
 
 ### 2026-08-17 (v0.14.1): `/mask --beam-pad` distorted the beam circle
 

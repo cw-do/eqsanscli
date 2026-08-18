@@ -28,8 +28,9 @@ _USAGE = (
     "  --ipts <n>        experiment holding the run (default: the session's)\n"
     "  --outdir <dir>    where to write (default: the current folder)\n"
     "  --beam-scale <f>  multiply the fitted beam radius (default 1.2 = 20% bigger)\n"
-    "  --beam-pad <f>    add a margin beyond it, in pixels (default 1.0)\n"
-    "                    both keep the masked region circular on the detector\n"
+    "  --beam-pad <f>    add a margin beyond it, in MILLIMETRES (default 1.0)\n"
+    "                    the beam stop is masked as a real circle on the detector;\n"
+    "                    one pixel is 4.09 mm along a tube\n"
     "  --no-beam         do not mask the beam stop\n"
     "  --top <n>         force the top band size (default: measured, min 11)\n"
     "  --bottom <n>      force the bottom band size\n"
@@ -134,12 +135,12 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         lines.append(f"    [dim]{image.title}[/dim]")
 
     plan = ms.build_plan(
-        image.counts, beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
+        image.counts, image.x_mm, image.y_mm, beam_scale=opts["beam_scale"], beam_pad=opts["beam_pad"],
         band_drop=opts["band_drop"], tube_sigma=opts["tube_sigma"],
         bottom=opts["bottom"], top=opts["top"], tubes=opts["tubes"],
         use_beam=opts["use_beam"], use_tubes=opts["use_tubes"],
     )
-    mask = ms.shapes_to_mask(plan.shapes)
+    mask = ms.shapes_to_mask(plan.shapes, image.x_mm, image.y_mm)
     indices = ms.mask_to_indices(mask)
     n = len(indices)
     lines.append(f"  Masking {n} pixels ({100 * n / mask.size:.2f}%): {plan.summary()}")
@@ -149,7 +150,8 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
 
     stem = ms.mask_filename(image.distance_m, image.wavelength_a,
                             image.frequency_hz, run).replace(".nxs", "")
-    png = ms.render_comparison(image.counts, mask, os.path.join(outdir, f"{stem}_compare.png"))
+    png = ms.render_comparison(image.counts, mask,
+                               os.path.join(outdir, f"{stem}_compare.png"), image.x_mm)
     if png:
         lines.append(f"  [green]✓[/green] preview: {png}")
         lines.append("    [dim]check the red overlay covers the beam, the tube ends and "
@@ -178,9 +180,9 @@ async def _create(args: list[str], state: SessionState) -> CommandResult:
         "run": str(run), "config": image.config, "source": run_file,
         "created": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "created_by": "eqsanscli /mask create",
-        "beam": (None if plan.beam is None else {
-            "xc": plan.beam.xc, "yc": plan.beam.yc, "rx": plan.beam.rx,
-            "ry": plan.beam.ry, "npix": plan.beam.npix}),
+        "beam_mm": (None if plan.beam is None else {
+            "xc": plan.beam.xc, "yc": plan.beam.yc, "radius": plan.beam.radius,
+            "npix": plan.beam.npix, "units": "mm"}),
         "beam_scale": opts["beam_scale"], "beam_pad": opts["beam_pad"],
         "bottom": plan.bottom, "top": plan.top, "band_drop": opts["band_drop"],
         "tubes": plan.tubes, "tube_source": plan.tube_source,
