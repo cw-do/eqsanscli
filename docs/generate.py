@@ -73,14 +73,23 @@ def shell(page: str, title: str, body: str, *, toc: list | None = None,
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
-  <nav class="tabs">{nav}</nav>
-  <div class="search">
-    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
-           autocomplete="off" spellcheck="false">
-    <div id="results" hidden></div>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v{collect.version()}</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
   </div>
+  <nav class="subnav"><div class="bar"><div class="tabs">{nav}</div></div></nav>
 </header>
 <main>
   {toc_html}
@@ -90,10 +99,10 @@ def shell(page: str, title: str, body: str, *, toc: list | None = None,
     {body}
   </article>
 </main>
-<footer>
-  <span>eqsanscli {collect.version()} · EQSANS · SNS/ORNL</span>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
   <span>Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d')} by <code>docs/generate.py</code></span>
-</footer>
+</div></footer>
 <script src="search.js"></script>
 </body>
 </html>
@@ -117,9 +126,9 @@ def commands_page() -> str:
     for c in commands:
         by_section.setdefault(c.section if c.section in SECTION_ORDER else "Other", []).append(c)
 
-    parts = ['<p class="lede">Every command the tool registers — 52 of them — with what it '
-             'does, its sub-forms and worked examples. Type <code>/help</code> in the tool for '
-             'the same reference offline.</p>']
+    parts = [f'<p class="lede">All {len(commands)} commands — what each does, its '
+             f'sub-forms and worked examples. <code>/help</code> in the tool gives the '
+             f'same reference offline.</p>']
     toc = []
     for section in SECTION_ORDER:
         group = by_section.get(section)

@@ -7,20 +7,29 @@
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
-  <nav class="tabs"><a href="index.html">Introduction</a>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v0.24.1</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
+  </div>
+  <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
 <a href="guide.html">Step-by-step guide</a>
 <a href="commands.html">Commands</a>
 <a href="parameters.html">Parameters</a>
 <a href="protocol.html">Protocol</a>
 <a href="knowledge.html" class="current">Instrument knowledge</a>
-<a href="changelog.html">Change log</a></nav>
-  <div class="search">
-    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
-           autocomplete="off" spellcheck="false">
-    <div id="results" hidden></div>
-  </div>
+<a href="changelog.html">Change log</a></div></div></nav>
 </header>
 <main>
   <nav class="toc"><div class="toc-title">On this page</div><a href="#kb-absolute-scale" class="lvl2">absolute-scale</a><a href="#kb-background-selection" class="lvl2">background-selection</a><a href="#kb-configurations" class="lvl2">configurations</a><a href="#kb-instrument-files" class="lvl2">instrument-files</a><a href="#kb-stitching" class="lvl2">stitching</a><a href="#kb-troubleshooting" class="lvl2">troubleshooting</a></nav>
@@ -239,10 +248,10 @@ outputwavelengthdependentprofile  True</code></pre>
 <p><strong>A new cycle&#x27;s files are not being picked up at all</strong> The cycle folder needs at least one dark or flood run for its anchor run to exist. <code><a href="commands.html#cmd-instrument">/instrument list</a></code> shows every cycle with its anchor run and what it holds.</p></div>
   </article>
 </main>
-<footer>
-  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
   <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
-</footer>
+</div></footer>
 <script src="search.js"></script>
 </body>
 </html>

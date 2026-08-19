@@ -7,20 +7,29 @@
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
-  <nav class="tabs"><a href="index.html">Introduction</a>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v0.24.1</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
+  </div>
+  <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
 <a href="guide.html">Step-by-step guide</a>
 <a href="commands.html">Commands</a>
 <a href="parameters.html">Parameters</a>
 <a href="protocol.html" class="current">Protocol</a>
 <a href="knowledge.html">Instrument knowledge</a>
-<a href="changelog.html">Change log</a></nav>
-  <div class="search">
-    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
-           autocomplete="off" spellcheck="false">
-    <div id="results" hidden></div>
-  </div>
+<a href="changelog.html">Change log</a></div></div></nav>
 </header>
 <main>
   <nav class="toc"><div class="toc-title">On this page</div><a href="#sec-BKG" class="lvl2">BKG — Background</a><a href="#sec-CAL" class="lvl2">CAL — Calibration files</a><a href="#sec-CAT" class="lvl2">CAT — Catalog and classification</a><a href="#sec-CFG" class="lvl2">CFG — Configuration parameters</a><a href="#sec-EMP" class="lvl2">EMP — Empty beam</a><a href="#sec-MSK" class="lvl2">MSK — Building a mask</a><a href="#sec-SCL" class="lvl2">SCL — Absolute scale</a><a href="#sec-STC" class="lvl2">STC — Stitching</a><a href="#sec-TBL" class="lvl2">TBL — Working-table completeness</a></nav>
@@ -87,10 +96,10 @@
 <section class="rule" id="rule-TBL-07"><div class="rule-head"><code class="rule-id">TBL-07</code><span class="badge sev-warning">warning</span><span class="badge enf-enforced">enforced</span><span class="enf-by"><code>sync_state_configs</code> straddle check</span><a class="anchor" href="#rule-TBL-07">#</a></div><p>All rows in one configuration resolve to the same calibration cycle. Runs spanning a cycle boundary would otherwise be reduced with one cycle&#x27;s calibration while belonging to another.</p></section>
   </article>
 </main>
-<footer>
-  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
   <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
-</footer>
+</div></footer>
 <script src="search.js"></script>
 </body>
 </html>

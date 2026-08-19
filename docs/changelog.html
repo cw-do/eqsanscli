@@ -7,20 +7,29 @@
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
-  <nav class="tabs"><a href="index.html">Introduction</a>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v0.24.1</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
+  </div>
+  <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
 <a href="guide.html">Step-by-step guide</a>
 <a href="commands.html">Commands</a>
 <a href="parameters.html">Parameters</a>
 <a href="protocol.html">Protocol</a>
 <a href="knowledge.html">Instrument knowledge</a>
-<a href="changelog.html" class="current">Change log</a></nav>
-  <div class="search">
-    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
-           autocomplete="off" spellcheck="false">
-    <div id="results" hidden></div>
-  </div>
+<a href="changelog.html" class="current">Change log</a></div></div></nav>
 </header>
 <main>
   <nav class="toc"><div class="toc-title">On this page</div><a href="#eqsanscli-change-log" class="lvl1">eqsanscli change log</a></nav>
@@ -414,10 +423,10 @@
 <ul><li><strong>Text selection:</strong> Textual captures mouse events. Use <code>Shift+click+drag</code> to select text for copy/paste in the terminal.</li><li><strong>Reserved Widget attribute names:</strong> Do NOT use <code>workers</code>, <code>app</code>, <code>screen</code>, <code>tree</code>, <code>parent</code>, <code>children</code>, etc. as <code>reactive[]</code> attribute names — they shadow inherited Widget properties and break the message-pump lifecycle.</li></ul>
   </article>
 </main>
-<footer>
-  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
   <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
-</footer>
+</div></footer>
 <script src="search.js"></script>
 </body>
 </html>

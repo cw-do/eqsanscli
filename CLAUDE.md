@@ -239,6 +239,21 @@ no internal link may be broken.
 the seven generated pages, `SKILL.md`, `knowledge/configurations.md`,
 `tests/test_docs.py`, README.md, CLAUDE.md.
 
+**Restyled to match the machine-physics page** (`cw-do.github.io/eqsans_mp`) on
+request, by reading its actual stylesheet out of `<mp_root>/doc/index.html` rather
+than guessing: the same tokens (ORNL green `#00703c`, `#0067b9` blue, the grey
+scale), the same 15px Helvetica with a mono stack for anything typed, the green
+masthead with tagline over a grey sub-navigation whose active tab carries a green
+underline, and bordered cards with grey header rows for commands and rules.
+
+Verified by rendering with headless chromium and **sampling the pixels** — worth
+doing, because reading the screenshot by eye told me the masthead was white when
+it was `rgb(0, 112, 60)` all along. The render did find two real defects: every
+command showed an empty `.py` source label, because `registered_commands()` used a
+line-based regex and `registry.py` imports most handlers in parenthesised
+multi-line form (now parsed with the AST, 57/57 resolve), and the command count in
+the page lede was hardcoded.
+
 ### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
 
 Items 5 and 6 of the structure review.

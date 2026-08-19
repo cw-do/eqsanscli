@@ -47,16 +47,30 @@ class Command:
 
 
 def registered_commands() -> dict[str, str]:
-    """command name -> handler module, from the single registry."""
+    """command name -> handler module, from the single registry.
+
+    Parsed with the AST: registry.py imports most handlers in parenthesised
+    multi-line form, which a line-based regex silently misses (every command in
+    those modules then reported no source file).
+    """
+    import ast
+
     source = _read("src", "eqsanscli", "commands", "registry.py")
-    handlers = dict(re.findall(r"from eqsanscli\.commands\.(\w+) import ([^\n]+)", source))
+    tree = ast.parse(source)
     owner = {}
-    for module, names in handlers.items():
-        for n in re.findall(r"\w+", names):
-            owner[n] = module
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                "eqsanscli.commands."):
+            module = node.module.split(".")[-1]
+            for alias in node.names:
+                owner[alias.asname or alias.name] = module
     out = {}
-    for name, handler in re.findall(r'router\.register\("([^"]+)",\s*(\w+)\)', source):
-        out[name] = owner.get(handler, "")
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "register" and len(node.args) == 2
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[1], ast.Name)):
+            out[node.args[0].value] = owner.get(node.args[1].id, "")
     return out
 
 
