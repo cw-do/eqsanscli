@@ -518,6 +518,8 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/autopilot <ipts> --continue` | Reduce only NEW runs, reuse saved calibration/configs |
 | `/autopilot --continue` | Continue from saved session in outputdir |
 | `/autopilot <ipts> --standard <name>` | Use named sample as calibration standard (default: porsil) |
+| `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
+| `/calibrate <iq_file> --applynow` | Same, and apply it to the config named in the filename, marking affected rows for re-reduction |
 | `/export script [file]` | Export standalone Python script |
 
 ### Stitching

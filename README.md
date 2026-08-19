@@ -1102,6 +1102,8 @@ preset_configs/   — Preset JSON configs + knowledge.md (LLM examples/patterns)
 SKILL.md          — AI agent documentation: both the TUI and the headless
                     JSON protocol, one command reference
 AGENT_SKILL.md    — stub; merged into SKILL.md
+docs/             — the documentation site (GitHub Pages: main branch, /docs);
+                    `python3 docs/generate.py` rebuilds it
 ```
 
 LLM-to-instruction execution pipeline:

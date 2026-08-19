@@ -19,6 +19,37 @@ what ran; fix whichever is wrong.
 Parameter names here are the drtsans-wrapper names (`eq._numqbins`); the JSON
 keys match case-insensitively (`numQBins` → stored as `numqbins`).
 
+## What each parameter is
+
+One line per parameter the tool manages. Exact semantics belong to drtsans; this
+says what the parameter is for and who sets it. `eq._name` is how it appears in a
+script written by `/export script`.
+
+| Parameter | What it is |
+|---|---|
+| `standardabsolutescale` | Factor putting the reduced intensity on an absolute scale, from a standard measured in that same configuration (SCL-02) |
+| `sampleaperturesize` | Sample aperture diameter in mm; feeds the resolution calculation |
+| `maskfilename` | Detector mask applied to every run in the configuration |
+| `sensitivityfilename` | Flood map correcting pixel-to-pixel response |
+| `darkfilename` | Dark-current run subtracted as instrumental background |
+| `beamfluxfilename` | Measured incident spectrum, used to normalise by wavelength |
+| `numqbins` | Number of bins in the 1D I(Q) |
+| `numqxqybins` | Bins per axis in the 2D I(Qx,Qy) |
+| `qbintype` | Bin spacing for I(Q): `log` or `linear` |
+| `qmin` / `qmax` | Q range kept in the 1D profile |
+| `cuttofmin` / `cuttofmax` | Time-of-flight window kept, in µs; a narrow window approximates a monochromatic beam |
+| `wavelengthstep` | Wavelength bin width in Å |
+| `sampleoffset` | Sample position offset along the beam, mm — from AgBe calibration |
+| `detectoroffset` | Detector position offset along the beam, mm — from AgBe calibration |
+| `scalecomponents.detector1` | `[x, y, z]` scale of the detector geometry — from AgBe calibration |
+| `fitinelasticincoh` | Whether to fit and remove incoherent inelastic scattering |
+| `selectminincoh` | Used only when `fitinelasticincoh` is on |
+| `incohfit_qmin` / `incohfit_qmax` | Q window that fit uses; must lie inside the configuration's range (CFG-02) |
+| `useerrorweighting` | Weight by uncertainty when binning |
+| `outputwavelengthdependentprofile` | Also write I(Q) per wavelength bin |
+| `usemaskbacktubes` | Mask the back tube bank as well |
+| `usetimeslice` / `timesliceinterval` | Split a run into time slices, and how long each slice is |
+
 ## Parameters that rarely change
 
 | Parameter | Typical | Why |

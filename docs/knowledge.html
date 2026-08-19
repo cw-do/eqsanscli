@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instrument knowledge — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
+  <nav class="tabs"><a href="index.html">Introduction</a>
+<a href="guide.html">Step-by-step guide</a>
+<a href="commands.html">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html" class="current">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></nav>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
+           autocomplete="off" spellcheck="false">
+    <div id="results" hidden></div>
+  </div>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#kb-absolute-scale" class="lvl2">absolute-scale</a><a href="#kb-background-selection" class="lvl2">background-selection</a><a href="#kb-configurations" class="lvl2">configurations</a><a href="#kb-instrument-files" class="lvl2">instrument-files</a><a href="#kb-stitching" class="lvl2">stitching</a><a href="#kb-troubleshooting" class="lvl2">troubleshooting</a></nav>
+  <article>
+    <h1 class="page-title">Instrument knowledge</h1>
+    
+    <p class="lede">Instrument physics and conventions the tool consults when it makes a decision — geometry, calibration files, backgrounds, absolute scale, stitching. Generated from the <code>knowledge/</code> folder.</p>
+<h2 id="kb-absolute-scale">absolute-scale<a class="anchor" href="#kb-absolute-scale">#</a></h2>
+<p class="summary">Calibrating I(Q) to absolute intensity with a standard sample.</p>
+<div class="kb"><h1 id="absolute-scale">Absolute scale<a class="anchor" href="#absolute-scale">#</a></h1>
+<p>Reduced intensity is put on an absolute footing by comparing a <strong>standard sample</strong> measured in the same configuration against a known reference profile.</p>
+<h2 id="procedure">Procedure<a class="anchor" href="#procedure">#</a></h2>
+<ol><li>Reduce the standard with <code>standardabsolutescale = 1.0</code>.</li><li>Compare the measured I(Q) against the reference over an overlap window, interpolating the measurement onto the reference&#x27;s Q points and taking the mean ratio (<code>services/calibration_service.py</code>, default window 0.01 ≤ Q ≤ 0.1).</li><li>Apply the resulting factor as that configuration&#x27;s <code>standardabsolutescale</code>.</li><li>Reduce the samples.</li></ol>
+<p>Autopilot does this as Steps 6–8. Manually it is <code><a href="commands.html#cmd-reduce">/reduce --sample porsil</a></code>, then <code><a href="commands.html#cmd-calibrate">/calibrate &lt;file&gt; --applynow</a></code> per configuration.</p>
+<h2 id="the-standard">The standard<a class="anchor" href="#the-standard">#</a></h2>
+<p>Porsil (also spelled porasil) is the default, auto-detected by substring. Standard names vary between cycles and users — <code>porsilb1</code>, <code>porsil b1</code>, <code>agb1</code> — so <code>--standard &lt;name&gt;</code> overrides the detection.</p>
+<p>References live in <code>absscale_reference/</code>: <code>NG3_B1_1413_4col.dat</code> (default) and <code>NG7_ORNL_B1_All_4col.dat</code>.</p>
+<h2 id="rules">Rules<a class="anchor" href="#rules">#</a></h2>
+<ul><li>Each configuration needs a standard measured <strong>in that configuration</strong> (protocol <a href="protocol.html#rule-SCL-02" class="rule-ref">SCL-02</a>). A factor from 4 m 10 Å does not apply to 2.5 m 2.5 Å.</li><li>Without a standard, output is on a <strong>relative</strong> scale. The preset&#x27;s <code>standardabsolutescale</code> is then whatever was inherited — often from another experiment — so it must not be presented as absolute (protocol <a href="protocol.html#rule-SCL-01" class="rule-ref">SCL-01</a>).</li><li>A factor far from recent values suggests a bad fit or the wrong reference (protocol <a href="protocol.html#rule-SCL-03" class="rule-ref">SCL-03</a>). Recent presets carry ≈0.19–0.23 for 4 m 10 Å; the acceptable range is <strong>TBD</strong>.</li><li>The scale factor is a config parameter, so changing it marks reduced rows <code>modified</code> — they need re-reducing, which autopilot and <code><a href="commands.html#cmd-reduce">/reduce --new</a></code> handle.</li></ul>
+<h2 id="interaction-with-stitching">Interaction with stitching<a class="anchor" href="#interaction-with-stitching">#</a></h2>
+<p>The stitch target is the lowest-Q configuration because it carries the absolute scale; other configurations are scaled onto it (protocol <a href="protocol.html#rule-STC-03" class="rule-ref">STC-03</a>). If the per-configuration absolute scales are right, the stitch scale factors come out near 1 — a large one points at the calibration, background or transmission rather than at the stitching (protocol <a href="protocol.html#rule-STC-05" class="rule-ref">STC-05</a>).</p></div>
+<h2 id="kb-background-selection">background-selection<a class="anchor" href="#kb-background-selection">#</a></h2>
+<p class="summary">What counts as a background, how it pairs with samples, and what gets no background.</p>
+<div class="kb"><h1 id="background-selection">Background selection<a class="anchor" href="#background-selection">#</a></h1>
+<p>The background is the sample environment measured <strong>without</strong> the sample: an empty cell, an empty Ti cell, a banjo cell, an empty cup. Subtracting it removes the container and environment scattering.</p>
+<p>An <strong>empty beam</strong> is not a background — it is the direct beam, used for the beam centre and for transmission normalisation (protocol <a href="protocol.html#rule-EMP-03" class="rule-ref">EMP-03</a>).</p>
+<h2 id="names-seen-in-titles">Names seen in titles<a class="anchor" href="#names-seen-in-titles">#</a></h2>
+<p>Background: <code>bkg</code>, <code>background</code>, <code>banjo</code>, <code>emptycell</code>, <code>emptyticell</code>, <code>empty ticell</code>, <code>ti-cell</code>, <code>ticell</code>. Empty beam: standalone <code>empty</code>, <code>emp</code>, <code>emt</code>, or anything followed by <code>beam</code>.</p>
+<p>Background keywords are tested first, so <code>emptyticell</code> classifies as background even though it contains &quot;empty&quot; (protocol <a href="protocol.html#rule-CAT-05" class="rule-ref">CAT-05</a>). This matters because the two roles are not interchangeable.</p>
+<p>The keyword lists are a <em>starting guess from the title</em>. A sample legitimately named <code>BkgG</code> is a sample, not a background — that is what <code><a href="commands.html#cmd-reclass">/reclass --sample BkgG sample</a></code> is for, and it respects the <code>S-</code>/<code>T-</code> prefix so the scattering and transmission runs land in the right classes.</p>
+<h2 id="pairing-rules">Pairing rules<a class="anchor" href="#pairing-rules">#</a></h2>
+<ul><li>The background run comes from the <strong>same configuration</strong> as the row it serves (protocol <a href="protocol.html#rule-BKG-01" class="rule-ref">BKG-01</a>). <code><a href="commands.html#cmd-assign">/assign bkg &lt;sample&gt;</a></code> does this by construction: it finds the named sample&#x27;s <code>S-</code> and <code>T-</code> runs per configuration and sets both <code>bkg</code> and <code>bkgtrans</code>. A per-row <code><a href="commands.html#cmd-set">/set</a></code> can break it, so prefer <code><a href="commands.html#cmd-assign">/assign bkg</a></code>.</li><li>Set <code>bkgtrans</code> whenever <code>bkg</code> is set (protocol <a href="protocol.html#rule-TBL-04" class="rule-ref">TBL-04</a>). The background needs the same transmission treatment the sample got.</li><li>One background sample per experiment unless there is a reason (protocol <a href="protocol.html#rule-BKG-03" class="rule-ref">BKG-03</a>).</li><li>A row&#x27;s background is never its own scattering run (protocol <a href="protocol.html#rule-BKG-02" class="rule-ref">BKG-02</a>).</li></ul>
+<h2 id="what-gets-no-background">What gets no background<a class="anchor" href="#what-gets-no-background">#</a></h2>
+<p>The background sample&#x27;s own rows, and empty-beam rows, get <strong>no</strong> background subtraction — their <code>bkg</code>/<code>bkgtrans</code> stay blank. Filling them with the empty-beam run (an earlier behaviour) was wrong: it subtracted a calibration measurement from a background measurement.</p>
+<p>So a table where the banjo row has empty <code>Bkg</code>/<code>BkgTr</code> columns is <strong>correct</strong>, not incomplete. This is the one case where the missing-background warning (<a href="protocol.html#rule-TBL-03" class="rule-ref">TBL-03</a>) is expected.</p>
+<h2 id="when-there-is-no-background-at-all">When there is no background at all<a class="anchor" href="#when-there-is-no-background-at-all">#</a></h2>
+<p>Some experiments deliberately measure none. Reduction proceeds — background is advisory, not blocking — but the result includes container scattering, so it should be stated rather than left implicit.</p>
+<h2 id="choosing-between-candidates">Choosing between candidates<a class="anchor" href="#choosing-between-candidates">#</a></h2>
+<p>When several background candidates exist at a configuration, the deterministic rules run out and judgement starts. Useful signals, strongest first:</p>
+<ol><li>The user named one (<code>--bkg banjo</code>, <code><a href="commands.html#cmd-assign">/assign bkg emptyticell</a></code>) — that decides it.</li><li>The cell actually used for the samples in this experiment. The sample titles often name it.</li><li>Measured close in time to the samples, at the same configuration.</li><li>Adequate counting statistics — a very short background is noisy and will inject noise into every subtracted profile.</li></ol>
+<p>If two candidates are equally plausible, say so and ask; do not pick silently.</p></div>
+<h2 id="kb-configurations">configurations<a class="anchor" href="#kb-configurations">#</a></h2>
+<p class="summary">Per-configuration reduction parameters and why those values are used.</p>
+<div class="kb"><h1 id="configuration-parameters-and-their-rationale">Configuration parameters and their rationale<a class="anchor" href="#configuration-parameters-and-their-rationale">#</a></h1>
+<p>A configuration is <code>(detector distance, wavelength, chopper frequency)</code>, written compactly: <code>4m10a</code>, <code>4m2.5a</code>, <code>2.5m2.5a</code>, <code>8m12a</code>, <code>4m2.5a30hz</code> (60 Hz is the default and omitted).</p>
+<p>Values below are the <em>typical</em> starting points and the reasoning behind them — not a substitute for the JSON presets in <code>preset_configs/</code>, which are what the tool actually applies. When a preset and this document disagree, the preset is what ran; fix whichever is wrong.</p>
+<p>Parameter names here are the drtsans-wrapper names (<code>eq._numqbins</code>); the JSON keys match case-insensitively (<code>numQBins</code> → stored as <code>numqbins</code>).</p>
+<h2 id="what-each-parameter-is">What each parameter is<a class="anchor" href="#what-each-parameter-is">#</a></h2>
+<p>One line per parameter the tool manages. Exact semantics belong to drtsans; this says what the parameter is for and who sets it. <code>eq._name</code> is how it appears in a script written by <code><a href="commands.html#cmd-export-script">/export script</a></code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>standardabsolutescale</code></td><td>Factor putting the reduced intensity on an absolute scale, from a standard measured in that same configuration (<a href="protocol.html#rule-SCL-02" class="rule-ref">SCL-02</a>)</td></tr>
+<tr><td><code>sampleaperturesize</code></td><td>Sample aperture diameter in mm; feeds the resolution calculation</td></tr>
+<tr><td><code>maskfilename</code></td><td>Detector mask applied to every run in the configuration</td></tr>
+<tr><td><code>sensitivityfilename</code></td><td>Flood map correcting pixel-to-pixel response</td></tr>
+<tr><td><code>darkfilename</code></td><td>Dark-current run subtracted as instrumental background</td></tr>
+<tr><td><code>beamfluxfilename</code></td><td>Measured incident spectrum, used to normalise by wavelength</td></tr>
+<tr><td><code>numqbins</code></td><td>Number of bins in the 1D I(Q)</td></tr>
+<tr><td><code>numqxqybins</code></td><td>Bins per axis in the 2D I(Qx,Qy)</td></tr>
+<tr><td><code>qbintype</code></td><td>Bin spacing for I(Q): <code>log</code> or <code>linear</code></td></tr>
+<tr><td><code>qmin</code> / <code>qmax</code></td><td>Q range kept in the 1D profile</td></tr>
+<tr><td><code>cuttofmin</code> / <code>cuttofmax</code></td><td>Time-of-flight window kept, in µs; a narrow window approximates a monochromatic beam</td></tr>
+<tr><td><code>wavelengthstep</code></td><td>Wavelength bin width in Å</td></tr>
+<tr><td><code>sampleoffset</code></td><td>Sample position offset along the beam, mm — from AgBe calibration</td></tr>
+<tr><td><code>detectoroffset</code></td><td>Detector position offset along the beam, mm — from AgBe calibration</td></tr>
+<tr><td><code>scalecomponents.detector1</code></td><td><code>[x, y, z]</code> scale of the detector geometry — from AgBe calibration</td></tr>
+<tr><td><code>fitinelasticincoh</code></td><td>Whether to fit and remove incoherent inelastic scattering</td></tr>
+<tr><td><code>selectminincoh</code></td><td>Used only when <code>fitinelasticincoh</code> is on</td></tr>
+<tr><td><code>incohfit_qmin</code> / <code>incohfit_qmax</code></td><td>Q window that fit uses; must lie inside the configuration&#x27;s range (<a href="protocol.html#rule-CFG-02" class="rule-ref">CFG-02</a>)</td></tr>
+<tr><td><code>useerrorweighting</code></td><td>Weight by uncertainty when binning</td></tr>
+<tr><td><code>outputwavelengthdependentprofile</code></td><td>Also write I(Q) per wavelength bin</td></tr>
+<tr><td><code>usemaskbacktubes</code></td><td>Mask the back tube bank as well</td></tr>
+<tr><td><code>usetimeslice</code> / <code>timesliceinterval</code></td><td>Split a run into time slices, and how long each slice is</td></tr>
+</tbody></table></div>
+<h2 id="parameters-that-rarely-change">Parameters that rarely change<a class="anchor" href="#parameters-that-rarely-change">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Parameter</th><th>Typical</th><th>Why</th></tr></thead><tbody>
+<tr><td><code>sampleaperturesize</code></td><td>10</td><td>default unless the experiment specifies otherwise</td></tr>
+<tr><td><code>wavelengthstep</code></td><td>0.1</td><td>used for every configuration</td></tr>
+<tr><td><code>useerrorweighting</code></td><td>True</td><td>usually on; see the 2.5 m note below</td></tr>
+<tr><td><code>qbintype</code></td><td><code>log</code></td><td>log binning for I(Q)</td></tr>
+<tr><td><code>showjson</code></td><td>False</td><td></td></tr>
+<tr><td><code>selectminincoh</code></td><td>True</td><td>only consulted when <code>fitinelasticincoh</code> is on</td></tr>
+</tbody></table></div>
+<p><code>scalecomponents</code>, <code>sampleoffset</code>, <code>detectoroffset</code>: from the cycle&#x27;s AgBe calibration — see <code>instrument-files.md</code>, never typed by hand.</p>
+<h2 id="q-range-and-binning">Q range and binning<a class="anchor" href="#q-range-and-binning">#</a></h2>
+<p><code>numqbins</code> follows counting statistics: <strong>40–60</strong>, lower for low-Q configurations, higher at short detector distances where statistics are better.</p>
+<p><code>qmin</code>/<code>qmax</code> bracket what the configuration can actually measure, usually cut conservatively inside the accessible range (protocol <a href="protocol.html#rule-CFG-01" class="rule-ref">CFG-01</a>).</p>
+<h2 id="worked-configurations">Worked configurations<a class="anchor" href="#worked-configurations">#</a></h2>
+<h3 id="4-m-10-å-low-q">4 m, 10 Å — low-Q<a class="anchor" href="#4-m-10-å-low-q">#</a></h3>
+<pre><code>numqbins   40
+qmin       0.006      typical low-Q limit for 4m10a
+qmax       0.1        typical high-Q cutoff
+cuttofmin  1000       default TOF window for this configuration
+cuttofmax  3000
+fitinelasticincoh  False
+incohfit_qmin 0.025   only used if the correction is turned on
+incohfit_qmax 0.05</code></pre>
+<p>Incoherent inelastic correction is normally <strong>off</strong> at low Q. It matters at high Q, or where incoherent background is significant.</p>
+<h3 id="25-m-25-å-high-q">2.5 m, 2.5 Å — high-Q<a class="anchor" href="#25-m-25-å-high-q">#</a></h3>
+<pre><code>numqbins   60         better statistics at short distance
+qmin       0.03       the configuration reaches 0.03 &lt; q &lt; 0.5
+qmax       0.4        cut conservatively below the limit
+cuttofmin  2000       narrow TOF window (see below)
+cuttofmax  11000
+fitinelasticincoh  False
+incohfit_qmin 0.1
+incohfit_qmax 0.30
+useerrorweighting  False
+outputwavelengthdependentprofile  True</code></pre>
+<p>The narrow TOF window is deliberate: looking at a narrow wavelength band approximates a monochromatic beam, which minimises the incoherent inelastic effect and yields a cleaner high-Q profile — at the cost of neutron counts. With that cut in place, <code>fitinelasticincoh</code> does not need to be on.</p>
+<p>The alternative is the full wavelength band with <code>cuttofmin 1000</code> / <code>cuttofmax 2000</code> as defaults <em>and</em> the incoherent inelastic correction enabled. Choose one approach or the other, not both.</p>
+<p>When a custom TOF cut is used, mark the output filename (<code>_tofcut</code>) so the profile is not mistaken for a full-band reduction (protocol <a href="protocol.html#rule-CFG-04" class="rule-ref">CFG-04</a>).</p>
+<h3 id="beyond-4-m-5-m-8-m-9-m">Beyond 4 m (5 m, 8 m, 9 m)<a class="anchor" href="#beyond-4-m-5-m-8-m-9-m">#</a></h3>
+<p>Use the 4 m flood (protocol <a href="protocol.html#rule-CAL-02" class="rule-ref">CAL-02</a>). Q range shifts lower with distance; set <code>qmin</code>/<code>qmax</code> from what the configuration reaches rather than copying 4 m values.</p>
+<h2 id="combination-experiments">Combination experiments<a class="anchor" href="#combination-experiments">#</a></h2>
+<p>A 4 m 10 Å + 2.5 m 2.5 Å pair is the common low-Q/high-Q combination, stitched into one profile afterwards (<code>stitching.md</code>). Each configuration keeps its own <code>standardabsolutescale</code> from a standard measured in that configuration (protocol <a href="protocol.html#rule-SCL-02" class="rule-ref">SCL-02</a>) — for the pair above, values near 0.2276 (4 m 10 Å, 2025-05-05) and 0.2473 × 1.078 × 0.7183 (2.5 m 2.5 Å) have been used; the multipliers there were experiment-specific corrections, not a general rule.</p>
+<h2 id="parameters-normally-left-alone">Parameters normally left alone<a class="anchor" href="#parameters-normally-left-alone">#</a></h2>
+<p><code>elasticreference*</code> / <code>elasticreferencebkgd*</code> — elastic reference corrections are not often used. <code>incohfit_factor</code>, <code>incohfit_intensityweighted</code> — only with the incoherent inelastic correction, and rarely.</p></div>
+<h2 id="kb-instrument-files">instrument-files<a class="anchor" href="#kb-instrument-files">#</a></h2>
+<p class="summary">How mask, flood, dark current, flux and the AgBe offsets are chosen for a run.</p>
+<div class="kb"><h1 id="instrument-calibration-files">Instrument calibration files<a class="anchor" href="#instrument-calibration-files">#</a></h1>
+<p>Six parameters are properties of the <strong>accelerator cycle</strong>, not of an instrument configuration: <code>maskfilename</code>, <code>sensitivityfilename</code>, <code>darkfilename</code>, <code>beamfluxfilename</code>, <code>detectoroffset</code>, <code>scalecomponents.detector1</code> (and <code>sampleoffset</code>). They are resolved from the run number at runtime by <code>services/instrument_files.py</code>.</p>
+<p><strong>Do not write current filenames into this document or into a preset.</strong> They go stale within one cycle — that is exactly how the previous knowledge file ended up naming 2025B files three cycles late. Filenames below are worked examples, labelled with their cycle.</p>
+<h2 id="where-the-files-live">Where the files live<a class="anchor" href="#where-the-files-live">#</a></h2>
+<p><code>/SNS/EQSANS/shared/NeXusFiles/EQSANS/&lt;year&gt;&lt;A|B&gt;_mp/</code> per cycle:</p>
+<div class="table-wrap"><table><thead><tr><th>Artifact</th><th>Pattern</th><th>Example (2026B)</th></tr></thead><tbody>
+<tr><td>dark current</td><td><code>EQSANS_&lt;run&gt;.nxs.h5</code></td><td><code>EQSANS_186198.nxs.h5</code></td></tr>
+<tr><td>flood / sensitivity</td><td><code>Sensitivity_patched_&lt;variant&gt;_&lt;tag&gt;_&lt;run&gt;.nxs</code></td><td><code>Sensitivity_patched_thinPMMA_4m_186200.nxs</code></td></tr>
+<tr><td>beam flux</td><td><code>bl6_flux_&lt;cycle&gt;_&lt;month&gt;_rebinned.txt</code></td><td><code>bl6_flux_2026B_aug_rebinned.txt</code></td></tr>
+<tr><td>AgBe calibration</td><td><code>agbe_calibration/**/checkpoint.json</code> + <code>calibration_report.txt</code></td><td><code>detoffset = 66.763</code></td></tr>
+<tr><td>cycle mask</td><td><code>masks/*mask.nxs</code></td><td><code>EQSANS_186104_mask.nxs</code></td></tr>
+</tbody></table></div>
+<p>The machine-physics web page (<code>https://cw-do.github.io/eqsans_mp/</code>) is <em>generated from</em> these folders by <code>&lt;mp_root&gt;/doc/generate.py</code>. The folder is the source of truth; the page is a derived view with a publish lag.</p>
+<h2 id="which-cycle-applies">Which cycle applies<a class="anchor" href="#which-cycle-applies">#</a></h2>
+<p>The newest cycle whose calibration campaign started at or before the data run — its <em>anchor run</em>, the lowest dark/flood run in the folder. The whole set then comes from that one cycle rather than being mixed (protocol <a href="protocol.html#rule-CAL-03" class="rule-ref">CAL-03</a>).</p>
+<p>Anchor runs increase strictly across every cycle from 2011B (5702) to 2026B (186198), so ordering by run number and ordering by cycle agree.</p>
+<p>A data run can fall between a cycle&#x27;s dark run and its flood runs — 186199 sits between dark 186198 and floods 186200–186202. Taking the cycle as a unit is deliberate: a flood characterises the detector, not the run, so using it for a slightly earlier run is harmless, whereas pairing this cycle&#x27;s dark with last cycle&#x27;s floods is not.</p>
+<h2 id="flood-detector-distance">Flood ↔ detector distance<a class="anchor" href="#flood-detector-distance">#</a></h2>
+<p>Floods exist at three distances. Map the measured distance by clamping into that range and taking the nearest, ties to the larger (protocol <a href="protocol.html#rule-CAL-02" class="rule-ref">CAL-02</a>):</p>
+<div class="table-wrap"><table><thead><tr><th>Measured</th><th>Flood</th></tr></thead><tbody>
+<tr><td>1.3 m</td><td><code>1o3m</code></td></tr>
+<tr><td>2.0 m, 2.5 m</td><td><code>2o5m</code></td></tr>
+<tr><td>4 m</td><td><code>4m</code></td></tr>
+<tr><td>beyond 4 m (5 m, 8 m, 9 m)</td><td><code>4m</code></td></tr>
+</tbody></table></div>
+<p>Within a cycle, prefer the <code>thinPMMA</code> variant. 2025B also carries <code>5mmPMMA</code> maps whose run numbers are <em>higher</em>, so a purely run-driven pick would silently switch variants. An undecorated distance tag beats a decorated one (<code>4m</code> over <code>4mSM</code>), then the highest run — some cycles hold several flood generations (2022A has four).</p>
+<h2 id="masks">Masks<a class="anchor" href="#masks">#</a></h2>
+<p>A mask belongs to an <strong>experiment</strong>, not a configuration or a cycle. Search order, first match wins:</p>
+<ol><li>the folder eqsanscli was started in — any <code>mask*.nxs</code></li><li><code>/SNS/EQSANS/IPTS-&lt;current&gt;/shared/</code></li><li><code>&lt;cycle&gt;_mp/masks/*mask.nxs</code> — the cycle default</li></ol>
+<p>Never another IPTS&#x27;s shared folder (protocol <a href="protocol.html#rule-CAL-04" class="rule-ref">CAL-04</a>). Matching within a folder uses the filename: the distance must agree, a matching wavelength is preferred, <code>_FS</code> breaks ties for 30 Hz. <code>2p5</code> and <code>2o5</code> both mean 2.5 Å.</p>
+<p>Worked example, IPTS-38773: <code>maskWS4m10A.nxs</code> serves <code>4m10a</code> and <code>maskWS4m2p5A_FS.nxs</code> serves <code>4m2.5a</code>. A mask naming a different distance or wavelength is not borrowed — a token-less mask (the cycle default) serves any configuration.</p>
+<p>Build one from a uniformly illuminated run (banjo, flood, empty cell) with <code><a href="commands.html#cmd-mask">/mask create &lt;run&gt;</a></code> — the run number alone locates the file, since the archive is searched for it as Mantid would. It masks three things, each measured from the run and then bounded by a convention:</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>measured</th><th>bound</th></tr></thead><tbody>
+<tr><td>beam stop</td><td>valley width between the flare walls in a horizontal cut through it</td><td><code>× 1.0 + 1 pixel</code>; with no flare, the shadow <code>× 1.2 + 1 pixel</code></td></tr>
+<tr><td>tube-end bands</td><td>where the along-tube profile falls below <strong>half the plateau</strong></td><td>floored at <strong>11 pixels</strong></td></tr>
+<tr><td>deviant tubes</td><td>tube median against a local same-pack baseline</td><td>dead below 0.3×, hot above 3×; the 5σ test only where the baseline exceeds 20 counts</td></tr>
+</tbody></table></div>
+<p>It writes <code>mask_&lt;config&gt;_&lt;run&gt;.nxs</code> into the working folder — named so the search above finds it — and prints the arithmetic behind each size.</p>
+<p>The band threshold is 0.5 and only 0.5. On every run measured so far it lands at pixel 8-11, so the 11-pixel convention is what actually applies. Outside the band a tube end still reads 15-20% below plateau (0.80 at pixel 11, 0.85 at pixel 13 on run 186621) — that residual is the sensitivity map&#x27;s job, not the mask&#x27;s, which is why the band stops where response <em>starts</em> rather than where it is complete.</p>
+<p>At long wavelength and long flight path the direct beam <strong>falls under gravity</strong>, by an amount going as the square of the wavelength, so some of it misses the stop and lands above or below it: on a 9 m 15 Å banjo a broad lobe of ~200 counts sits 60 mm below the stop against a plateau of 1. <code><a href="commands.html#cmd-mask">/mask create</a></code> finds and reports it but does not mask it unless asked (<code>--leak</code>), since covering it costs low-Q coverage — a decision for the instrument scientist, not the tool. <code>--leak</code> masks lobes <strong>below</strong> the stop, one disc each: neutrons fall, so fallen beam is below, and <code>--leak-scale</code> enlarges those discs when the peak&#x27;s faint tail matters. A bright patch above the stop is rim flare or the short-wavelength end of the band, is an arc rather than a blob, and gets a <code>--disc</code> line to copy rather than a disc drawn round it.</p>
+<p>The beam stop is measured from <strong>cross cuts</strong>, the procedure used by hand:</p>
+<ol><li>a vertical cut through the stop gives the centre of the deep valley — the centre&#x27;s y;</li><li>a horizontal cut through that y gives the centre&#x27;s x;</li><li>the <strong>horizontal</strong> valley width is the stop&#x27;s diameter.</li></ol>
+<p>A cut through the stop shows a valley between two walls of flare, and the wall&#x27;s summit is the rim: flare is brightest just clear of the stop&#x27;s edge. The width is taken from the horizontal cut alone, because vertically the direct beam that fell under gravity lands inside the shadow and makes it read narrow. Measured this way, run 186636 (9 m, 15 Å) gives an 80 mm valley against a stop the instrument scientist measures at 90 mm across, and run 186631 gives 66 mm at 4 m, where the mask made by hand for that cycle is 68 mm across — two configurations, two independent checks.</p>
+<p>Three details are load-bearing, each from a real failure:</p>
+<ul><li>The cut is anchored <strong>on the beam</strong>, not on the profile&#x27;s minimum. Outside the flare the detector plateau is <em>darker</em> than the filled-in shadow — 1 count against 9 on 186636 — so the darkest point of the cut is 77 mm away from the stop. The shadow is a local dip between two walls, not the darkest place around.</li><li>Cuts are sampled <strong>per tube and per pixel row</strong>, not binned by position: tubes sit 5.49 mm apart but their index order interleaves packs of four, so binning at the pitch aliases and moved the measured centre by 5 mm.</li><li>A wall&#x27;s summit is read as the intensity-weighted centre of its brightest bins, bounded to two bins either side. Unbounded, the vertical cut&#x27;s lower wall — the gravity-dropped beam, merged with the rim flare and far broader — pulls the centre 6 mm down the detector.</li></ul>
+<p>The mask is deliberately wider than the visibly dark disc. That disc is the umbra; around it the stop blocks part of the beam, and those pixels bias the lowest-Q bins. On run 186621 (1.3 m, 1 Å) the dark disc ends at r ≈ 30 mm where counts are still 0.30 of the surrounding level, reaching 0.88 at the 40.7 mm mask edge. <code><a href="commands.html#cmd-mask">/mask create</a></code> prints the measurement, scale and pad behind every radius.</p>
+<p>A side that rises onto the plateau and stays up is not a wall, and a run with no flare (186104 at 2.5 Å) is sized from the shadow instead: its equal-area radius or half its longest extent, grown by 1.2 to compensate a threshold that stops short of the rim. That path gives 34 mm on 186104, matching the mask made by hand for that cycle. A measured valley width is not grown that way.</p>
+<p>The shadow is still needed to seed the cuts, and is found by <strong>local</strong> contrast — the image smoothed over ~5 pixels against ~41 — so a region qualifies by being darker than its own surroundings. A global threshold cannot serve both a bright run (core 12× below plateau) and a dim one (core ~2× below plateau, while Poisson noise at a median of 4 counts puts ~9% of the detector under any cut). Among dark regions, one whose own centroid does not lie inside it is discarded: it is a <em>ring</em> of low contrast surrounding a bright complex, an artefact of the wide surround window. On run 186636 such a ring covered 3804 px over 385 × 376 mm and was otherwise chosen over the real 110 px shadow. When nothing credible is found the beam is <strong>not masked</strong> and the reason is reported; <code>--beam-center</code> and <code>--beam-radius</code> state it explicitly.</p>
+<p><strong>Detector geometry, measured from the instrument definition.</strong> 192 tubes × 256 pixels over an active face of ~1049 × 1042 mm, so a pixel is 5.49 mm across a tube and 4.09 mm along one — not square. Two consequences:</p>
+<ul><li>Tube health is judged from the <strong>median</strong> along each tube against a <strong>local</strong> baseline of same-group neighbours: a mean is moved by the broad bright halo around the beam stop at long wavelength, which once flagged 29 tubes across the centre of a 15 Å run. Dead (&lt;30% of baseline) and hot (&gt;3×) are caught at any count level; the statistical test applies only where counts support it and the deviation exceeds 25%, since 10-20% gain variation is normal and is what the sensitivity map corrects.</li><li>Front and back tubes alternate in <strong>packs of four</strong>. Physical order by x runs 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, …, consecutive <em>indices</em> are 10.94 mm apart while physical neighbours are 5.49 mm apart, and <strong>x is not monotonic in tube index</strong>. Tube comparisons are therefore made within a pack group; comparing odd-to-odd mixes the two populations and hides real outliers.</li><li>The preview carries both scales: millimetres on the bottom and left, tube and pixel index on the top and right, with tube ticks placed at the tubes&#x27; real positions. Tube labels are exact only at the ticks, since the interleave makes index non-linear in x. It is drawn with tube index ascending left to right, so the millimetre axis descends: tube 0 sits at +x on this detector. The view is mirrored, not the coordinates — <code>--disc</code> and <code>--beam-center</code> stay in Mantid&#x27;s frame.</li><li>A circle drawn in index space is <strong>not</strong> a circle on the detector. For run 186104&#x27;s beam stop it agreed with the true disc only 87%, covering a region 82.6 × 69.5 mm. The beam stop is masked in millimetres against the real pixel positions. <code>--beam-pad</code> keeps the machine-physics tool&#x27;s units — pixels along a tube, ~4.09 mm — and is converted to millimetres internally; <code>--beam-scale</code> multiplies the fitted radius. Pixel index <em>is</em> linear in y, so the tube-end bands stay in index space.</li></ul>
+<p>The same mask is often reusable across detector distances, so a single <code>mask_4m.nxs</code> in the working folder is a legitimate setup — it just cannot be <em>assumed</em>, which is why an unmatched configuration warns rather than guessing.</p>
+<h2 id="offsets-and-scale-components">Offsets and scale components<a class="anchor" href="#offsets-and-scale-components">#</a></h2>
+<p><code>detoffset</code>, <code>scalecomp</code> and <code>samoffset</code> come from the cycle&#x27;s AgBe calibration, determined at the start of the cycle by the instrument scientist. <code>scalecomp</code> is the <code>detector1</code> array <code>[x, y, z]</code> where <code>y = scale_all × scale_y</code>.</p>
+<p>Worked examples: 2026B <code>scalecomp = [1.004251, 1.057915, 1]</code>, <code>detoffset = 66.763</code>, <code>samoffset = 285.0</code>. 2026A <code>[1.003571, 1.052902, 1]</code>, <code>detoffset = 77.244</code>. Historical, from <code>202502_agbe/34965/banjo</code>: <code>scalecomp = [1.002, 1.0728155533894388, 1]</code>, <code>detoffset = 84.38081</code>, <code>samoffset = 300</code> (banjo rack, ti-rack).</p>
+<p><code>samoffset</code> depends on the sample rack in use, so it is not purely a cycle property — check it when the rack changes.</p>
+<p>No AgBe calibration exists before cycle 2026A. Older data reduces without these values rather than with invented ones (protocol <a href="protocol.html#rule-CAL-05" class="rule-ref">CAL-05</a>).</p></div>
+<h2 id="kb-stitching">stitching<a class="anchor" href="#kb-stitching">#</a></h2>
+<p class="summary">Combining I(Q) from several configurations into one profile.</p>
+<div class="kb"><h1 id="stitching">Stitching<a class="anchor" href="#stitching">#</a></h1>
+<p>A sample measured at several configurations yields several I(Q) files covering different Q ranges. Stitching scales them onto a common target and merges them into one <code>merged_&lt;sample&gt;_*_Iq.txt</code>.</p>
+<h2 id="ordering-and-target">Ordering and target<a class="anchor" href="#ordering-and-target">#</a></h2>
+<p>Profiles are ordered <strong>low-Q first</strong>, which for standard configurations means descending detector distance then descending wavelength (<code>4m10a</code> before <code>2.5m2.5a</code>).</p>
+<p>The normalisation target is the lowest-Q configuration, because it carries the absolute scale (protocol <a href="protocol.html#rule-STC-03" class="rule-ref">STC-03</a>). Priority when picking automatically: <code>4m10a</code>, then any 8 m, then <code>4m2.5a</code>, then <code>2.5m2.5a</code>, else the first. If a configuration was calibrated against a standard in this session, that one is preferred as the target.</p>
+<h2 id="overlap-regions">Overlap regions<a class="anchor" href="#overlap-regions">#</a></h2>
+<p>Each adjacent pair needs a Q window where both profiles have data, containing at least two points of the target (protocol <a href="protocol.html#rule-STC-02" class="rule-ref">STC-02</a>). The scale factor is the ratio of summed intensities over that window.</p>
+<p>Too narrow a window gives a noisy factor; too wide includes Q where one configuration is unreliable (near its own limits). Autopilot starts from a centred 6-point window and widens through 8, 10, 14, 20 points if stitching fails.</p>
+<p><code><a href="commands.html#cmd-stitch">/stitch smart</a></code> additionally scores overlap quality and can drop a configuration whose Q range is redundant — worth reviewing rather than accepting blindly, since a &quot;redundant&quot; configuration is sometimes the better-measured one.</p>
+<h2 id="frame-skipping-30-hz">Frame skipping (30 Hz)<a class="anchor" href="#frame-skipping-30-hz">#</a></h2>
+<p>At 30 Hz each run produces two profiles, <code>frame_0</code> (low-Q, long wavelength) and <code>frame_1</code> (high-Q, short wavelength). These stitch to <strong>each other</strong>, and a 30 Hz sample is grouped separately from the same sample&#x27;s 60 Hz data — never mixed (protocol <a href="protocol.html#rule-STC-04" class="rule-ref">STC-04</a>).</p>
+<h2 id="reading-the-result">Reading the result<a class="anchor" href="#reading-the-result">#</a></h2>
+<p>Scale factors near 1 mean the configurations agree. A large factor is a signal about the <em>reduction</em>, not the stitching: suspect the absolute scale, the background, or the transmission for one of the configurations (protocol <a href="protocol.html#rule-STC-05" class="rule-ref">STC-05</a>).</p>
+<p>A visible step or kink at an overlap usually means one configuration&#x27;s background subtraction is off, or the overlap window sits where one profile is already unreliable.</p>
+<h2 id="what-stitching-does-not-fix">What stitching does not fix<a class="anchor" href="#what-stitching-does-not-fix">#</a></h2>
+<p>Stitching scales profiles onto each other. It cannot repair a wrong background, a missing transmission, or a bad absolute scale — those produce a smooth-looking merged curve that is quantitatively wrong. Review the per-configuration profiles before merging.</p></div>
+<h2 id="kb-troubleshooting">troubleshooting<a class="anchor" href="#kb-troubleshooting">#</a></h2>
+<p class="summary">Failure signatures seen in practice, their cause, and the fix.</p>
+<div class="kb"><h1 id="troubleshooting">Troubleshooting<a class="anchor" href="#troubleshooting">#</a></h1>
+<p>Signatures observed in real sessions. Add to this file when a new failure mode costs someone time — that is what makes it worth keeping.</p>
+<h2 id="reduction-refuses-before-starting">Reduction refuses before starting<a class="anchor" href="#reduction-refuses-before-starting">#</a></h2>
+<p><strong>&quot;N of M selected row(s) cannot be reduced … no empty beam&quot;</strong> The rows have no empty-beam run, which supplies the beam centre (protocol <a href="protocol.html#rule-EMP-01" class="rule-ref">EMP-01</a>). Usually the empty-beam run exists but was classified as a transmission from its title. Fix: <code><a href="commands.html#cmd-reclass">/reclass &lt;run&gt; empty</a></code> then <code><a href="commands.html#cmd-matchruns">/matchruns</a></code>. If the table is already reduced and you do not want a rebuild, <code><a href="commands.html#cmd-set">/set --config &lt;id&gt; emp &lt;run&gt;</a></code>.</p>
+<p><strong>&quot;Working table is empty&quot;</strong> <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> has not run for this table. If you expected rows, check <code><a href="commands.html#cmd-table">/table list</a></code> — they may be in another table.</p>
+<h2 id="reduction-runs-but-a-row-fails">Reduction runs but a row fails<a class="anchor" href="#reduction-runs-but-a-row-fails">#</a></h2>
+<p><strong>Permission error on a mask or calibration file</strong> A path pointing into another IPTS&#x27;s shared folder (protocol <a href="protocol.html#rule-CAL-04" class="rule-ref">CAL-04</a>). Presets used to carry these. Fix: <code><a href="commands.html#cmd-instrument">/instrument apply</a></code> to re-resolve, or <code><a href="commands.html#cmd-instrument">/instrument check</a></code> to list every unreadable file.</p>
+<p><strong>File not found for flood / dark / flux</strong> The cycle folder changed or the preset is stale. <code><a href="commands.html#cmd-instrument">/instrument show</a></code> reports what is resolved and from which cycle; <code><a href="commands.html#cmd-instrument">/instrument check</a></code> verifies existence.</p>
+<p><strong>drtsans error with no obvious cause</strong> The per-row <code>.out</code> and <code>.err</code> files sit next to the reduction JSON in the output directory, and the JSON itself records exactly what was passed. Check the JSON first — a wrong path or a null where a value is required is visible there.</p>
+<h2 id="output-looks-wrong">Output looks wrong<a class="anchor" href="#output-looks-wrong">#</a></h2>
+<p><strong>Intensity off by a constant factor</strong> Absolute scale. Either no standard was measured (output is relative, protocol <a href="protocol.html#rule-SCL-01" class="rule-ref">SCL-01</a>) or the factor came from a different configuration (<a href="protocol.html#rule-SCL-02" class="rule-ref">SCL-02</a>). <code><a href="commands.html#cmd-show-config">/show config &lt;id&gt;</a></code> shows <code>standardabsolutescale</code> and its source.</p>
+<p><strong>A step or kink at a stitch overlap</strong> One configuration&#x27;s background or transmission is off, or the overlap window sits where a profile is unreliable. Inspect the per-configuration profiles before the merged one (<code>stitching.md</code>).</p>
+<p><strong>Container scattering still present</strong> No background, or a background from the wrong configuration (protocol <a href="protocol.html#rule-BKG-01" class="rule-ref">BKG-01</a>). <code><a href="commands.html#cmd-show-table">/show table</a></code> — a blank <code>Bkg</code> column is expected only for the background sample itself and for empty-beam rows (<a href="protocol.html#rule-EMP-03" class="rule-ref">EMP-03</a>).</p>
+<p><strong>Noise injected across every profile</strong> A background with poor counting statistics propagates into everything subtracted from it. Check the background run&#x27;s duration.</p>
+<h2 id="table-looks-wrong">Table looks wrong<a class="anchor" href="#table-looks-wrong">#</a></h2>
+<p><strong>A sample is missing from the table entirely</strong> Its runs are classified <code>ignore</code>, or its title matched a background/empty keyword and it was grouped elsewhere. <code><a href="commands.html#cmd-show">/show catalog</a></code> shows the <code>Class</code> column; <code><a href="commands.html#cmd-reclass">/reclass --sample &lt;name&gt; sample</a></code> restores a mis-keyworded sample, respecting the <code>S-</code>/<code>T-</code> prefix.</p>
+<p><strong>Rows appear at a configuration that does not exist</strong> Config IDs come from ONCat <code>detector_distance</code> / <code>wavelength</code>, so a run whose title disagrees with its metadata lands where the metadata says (protocol <a href="protocol.html#rule-CAT-06" class="rule-ref">CAT-06</a>). Trust the metadata.</p>
+<p><strong>Runs spanning a cycle boundary</strong> <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> warns that a configuration&#x27;s runs straddle two calibration cycles (protocol <a href="protocol.html#rule-TBL-07" class="rule-ref">TBL-07</a>). All rows use the earlier cycle. Split the later runs into their own table if they need the newer calibration.</p>
+<h2 id="calibration-files-not-updating">Calibration files not updating<a class="anchor" href="#calibration-files-not-updating">#</a></h2>
+<p><strong>Still using last cycle&#x27;s flood after a new cycle is published</strong> Values the user set with <code><a href="commands.html#cmd-set-config">/set config</a></code> are never overwritten automatically (protocol <a href="protocol.html#rule-CFG-03" class="rule-ref">CFG-03</a>), so a hand-set path sticks. <code><a href="commands.html#cmd-instrument">/instrument show</a></code> marks these &quot;yours, kept&quot;; <code><a href="commands.html#cmd-instrument">/instrument apply --force</a></code> overrides them.</p>
+<p><strong>A new cycle&#x27;s files are not being picked up at all</strong> The cycle folder needs at least one dark or flood run for its anchor run to exist. <code><a href="commands.html#cmd-instrument">/instrument list</a></code> shows every cycle with its anchor run and what it holds.</p></div>
+  </article>
+</main>
+<footer>
+  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+</footer>
+<script src="search.js"></script>
+</body>
+</html>

@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commands — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
+  <nav class="tabs"><a href="index.html">Introduction</a>
+<a href="guide.html">Step-by-step guide</a>
+<a href="commands.html" class="current">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></nav>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
+           autocomplete="off" spellcheck="false">
+    <div id="results" hidden></div>
+  </div>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#catalog-loading" class="lvl2">Catalog &amp; Loading</a><a href="#cmd-list-ipts" class="lvl3">/list ipts</a><a href="#cmd-load" class="lvl3">/load</a><a href="#cmd-refresh-catalog" class="lvl3">/refresh catalog</a><a href="#cmd-show" class="lvl3">/show</a><a href="#cmd-show-preset" class="lvl3">/show preset</a><a href="#cmd-show-presets" class="lvl3">/show presets</a><a href="#working-table" class="lvl2">Working Table</a><a href="#cmd-matchruns" class="lvl3">/matchruns</a><a href="#cmd-reclass" class="lvl3">/reclass</a><a href="#cmd-remove" class="lvl3">/remove</a><a href="#cmd-set" class="lvl3">/set</a><a href="#cmd-show-table" class="lvl3">/show table</a><a href="#multiple-working-tables" class="lvl2">Multiple working tables</a><a href="#cmd-list-tables" class="lvl3">/list tables</a><a href="#cmd-move" class="lvl3">/move</a><a href="#cmd-table" class="lvl3">/table</a><a href="#configuration" class="lvl2">Configuration</a><a href="#cmd-apply-preset" class="lvl3">/apply preset</a><a href="#cmd-config" class="lvl3">/config</a><a href="#cmd-instrument" class="lvl3">/instrument</a><a href="#cmd-list-configs" class="lvl3">/list configs</a><a href="#cmd-set-config" class="lvl3">/set config</a><a href="#cmd-show-config" class="lvl3">/show config</a><a href="#masks" class="lvl2">Masks</a><a href="#cmd-mask" class="lvl3">/mask</a><a href="#reduction" class="lvl2">Reduction</a><a href="#cmd-autopilot" class="lvl3">/autopilot</a><a href="#cmd-calibrate" class="lvl3">/calibrate</a><a href="#cmd-export-script" class="lvl3">/export script</a><a href="#cmd-reduce" class="lvl3">/reduce</a><a href="#stitching" class="lvl2">Stitching</a><a href="#cmd-stitch" class="lvl3">/stitch</a><a href="#data-plotting" class="lvl2">Data &amp; Plotting</a><a href="#cmd-confirm" class="lvl3">/confirm</a><a href="#cmd-list-iq" class="lvl3">/list iq</a><a href="#cmd-list-iqxqy" class="lvl3">/list iqxqy</a><a href="#cmd-plot" class="lvl3">/plot</a><a href="#cmd-share" class="lvl3">/share</a><a href="#cmd-zipnsend" class="lvl3">/zipnsend</a><a href="#session" class="lvl2">Session</a><a href="#cmd-continue" class="lvl3">/continue</a><a href="#cmd-save" class="lvl3">/save</a><a href="#cmd-session" class="lvl3">/session</a><a href="#notes-and-comparison" class="lvl2">Notes and comparison</a><a href="#cmd-compare" class="lvl3">/compare</a><a href="#cmd-note" class="lvl3">/note</a><a href="#settings-and-shell" class="lvl2">Settings and shell</a><a href="#cmd-cat" class="lvl3">/cat</a><a href="#cmd-head" class="lvl3">/head</a><a href="#cmd-ls" class="lvl3">/ls</a><a href="#cmd-models" class="lvl3">/models</a><a href="#cmd-pwd" class="lvl3">/pwd</a><a href="#cmd-settings" class="lvl3">/settings</a><a href="#cmd-tail" class="lvl3">/tail</a><a href="#the-tool-itself" class="lvl2">The tool itself</a><a href="#cmd-exit" class="lvl3">/exit</a><a href="#cmd-guide" class="lvl3">/guide</a><a href="#cmd-help" class="lvl3">/help</a><a href="#cmd-list" class="lvl3">/list</a><a href="#cmd-version" class="lvl3">/version</a><a href="#other" class="lvl2">Other</a><a href="#cmd-assign" class="lvl3">/assign</a><a href="#cmd-cd" class="lvl3">/cd</a><a href="#cmd-cp" class="lvl3">/cp</a><a href="#cmd-mkdir" class="lvl3">/mkdir</a><a href="#cmd-mv" class="lvl3">/mv</a><a href="#cmd-refresh" class="lvl3">/refresh</a><a href="#cmd-rm" class="lvl3">/rm</a><a href="#cmd-sh" class="lvl3">/sh</a></nav>
+  <article>
+    <h1 class="page-title">Commands</h1>
+    
+    <p class="lede">Every command the tool registers — 52 of them — with what it does, its sub-forms and worked examples. Type <code>/help</code> in the tool for the same reference offline.</p>
+<h2 id="catalog-loading">Catalog & Loading<a class="anchor" href="#catalog-loading">#</a></h2>
+<section class="cmd" id="cmd-list-ipts">
+<h3>/list ipts<a class="anchor" href="#cmd-list-ipts">#</a><span class="src">.py</span></h3>
+<p class="summary">List all EQSANS experiments</p>
+</section>
+<section class="cmd" id="cmd-load">
+<h3>/load<a class="anchor" href="#cmd-load">#</a><span class="src">.py</span></h3>
+<p class="summary">Fetch experiment catalog from ONCat (REPLACES current catalog)</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/load ipts</code></td><td>Fetch experiment catalog from ONCat (REPLACES current catalog)</td></tr>
+<tr><td><code>/load table</code></td><td>Load table or list saved tables</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-refresh-catalog">
+<h3>/refresh catalog<a class="anchor" href="#cmd-refresh-catalog">#</a><span class="src">.py</span></h3>
+<p class="summary">Re-fetch current IPTS catalog while preserving <code>/reclass</code> overrides; reports new runs</p>
+</section>
+<section class="cmd" id="cmd-show">
+<h3>/show<a class="anchor" href="#cmd-show">#</a><span class="src">.py</span></h3>
+<p class="summary">Display all runs with metadata</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/show catalog</code></td><td>Display all runs with metadata</td></tr>
+<tr><td><code>/show ipts</code></td><td>Show current IPTS number</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-show-preset">
+<h3>/show preset<a class="anchor" href="#cmd-show-preset">#</a><span class="src">.py</span></h3>
+<p class="summary">Display all runs with metadata</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/show catalog</code></td><td>Display all runs with metadata</td></tr>
+<tr><td><code>/show ipts</code></td><td>Show current IPTS number</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-show-presets">
+<h3>/show presets<a class="anchor" href="#cmd-show-presets">#</a><span class="src">.py</span></h3>
+<p class="summary">Display all runs with metadata</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/show catalog</code></td><td>Display all runs with metadata</td></tr>
+<tr><td><code>/show ipts</code></td><td>Show current IPTS number</td></tr>
+</tbody></table></div>
+</section>
+<h2 id="working-table">Working Table<a class="anchor" href="#working-table">#</a></h2>
+<section class="cmd" id="cmd-matchruns">
+<h3>/matchruns<a class="anchor" href="#cmd-matchruns">#</a><span class="src">matching.py</span></h3>
+<p class="summary">Auto-match trans/bkg/empty runs using <code>run_class</code> from catalog. REBUILDS table</p>
+<pre class="example"><code>/matchruns</code></pre>
+</section>
+<section class="cmd" id="cmd-reclass">
+<h3>/reclass<a class="anchor" href="#cmd-reclass">#</a><span class="src">.py</span></h3>
+<p class="summary">Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n)</p>
+<pre class="example"><code>/reclass 186517 empty
+/reclass --sample BkgG sample</code></pre>
+</section>
+<section class="cmd" id="cmd-remove">
+<h3>/remove<a class="anchor" href="#cmd-remove">#</a><span class="src">matching.py</span></h3>
+<p class="summary">Remove rows</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/remove all</code></td><td>Remove all except named sample</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-set">
+<h3>/set<a class="anchor" href="#cmd-set">#</a><span class="src">matching.py</span></h3>
+<p class="summary">Set a field: trans, bkg, bkgtrans, emp, thickness</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/set drtsans</code></td><td>Set drtsans version: default, dev, qa</td></tr>
+<tr><td><code>/set outputdir</code></td><td>Set output directory (propagates to all configs)</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/set 3 trans 186520
+/set --sample porsil thickness 0.1
+/set --config 4m10a emp 186517</code></pre>
+</section>
+<section class="cmd" id="cmd-show-table">
+<h3>/show table<a class="anchor" href="#cmd-show-table">#</a><span class="src">.py</span></h3>
+<p class="summary">Display full working table</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/show catalog</code></td><td>Display all runs with metadata</td></tr>
+<tr><td><code>/show ipts</code></td><td>Show current IPTS number</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/show table
+/show table --sample porsil</code></pre>
+</section>
+<h2 id="multiple-working-tables">Multiple working tables<a class="anchor" href="#multiple-working-tables">#</a></h2>
+<section class="cmd" id="cmd-list-tables">
+<h3>/list tables<a class="anchor" href="#cmd-list-tables">#</a><span class="src">.py</span></h3>
+<p class="summary">Saved tables on disk, newest first</p>
+</section>
+<section class="cmd" id="cmd-move">
+<h3>/move<a class="anchor" href="#cmd-move">#</a><span class="src">tables.py</span></h3>
+<p class="summary">Move rows out of the active table into another</p>
+</section>
+<section class="cmd" id="cmd-table">
+<h3>/table<a class="anchor" href="#cmd-table">#</a><span class="src">tables.py</span></h3>
+<p class="summary">Show the active table</p>
+</section>
+<h2 id="configuration">Configuration<a class="anchor" href="#configuration">#</a></h2>
+<section class="cmd" id="cmd-apply-preset">
+<h3>/apply preset<a class="anchor" href="#cmd-apply-preset">#</a><span class="src">.py</span></h3>
+<p class="summary">Auto-match closest preset to each config</p>
+</section>
+<section class="cmd" id="cmd-config">
+<h3>/config<a class="anchor" href="#cmd-config">#</a><span class="src">.py</span></h3>
+<p class="summary">Copy a config to a new name (editable independently). <code>&lt;dst&gt;</code> must contain <code>&lt;src&gt;</code>&#x27;s config ID</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/config clone</code></td><td>Copy a config to a new name (editable independently). <code>&lt;dst&gt;</code> must contain <code>&lt;src&gt;</code>&#x27;s config ID</td></tr>
+<tr><td><code>/config list</code></td><td>List configs in the table + stored extras (clones)</td></tr>
+<tr><td><code>/config rows</code></td><td>List rows referencing <code>&lt;id&gt;</code></td></tr>
+</tbody></table></div>
+<pre class="example"><code>/config list
+/config clone 4m10a 4m10a_thin</code></pre>
+</section>
+<section class="cmd" id="cmd-instrument">
+<h3>/instrument<a class="anchor" href="#cmd-instrument">#</a><span class="src">instrument.py</span></h3>
+<p class="summary">Re-resolve now; <code>--force</code> overrides <code>/set config</code> values</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/instrument apply</code></td><td>Re-resolve now; <code>--force</code> overrides <code>/set config</code> values</td></tr>
+<tr><td><code>/instrument check</code></td><td>Verify referenced calibration files still exist</td></tr>
+<tr><td><code>/instrument list</code></td><td>Cycle inventory and what a given run resolves to</td></tr>
+<tr><td><code>/instrument off</code></td><td>Disable/enable automatic resolution</td></tr>
+<tr><td><code>/instrument on</code></td><td>Disable/enable automatic resolution</td></tr>
+<tr><td><code>/instrument pin</code></td><td>Freeze to one cycle (reproducing old work) / release</td></tr>
+<tr><td><code>/instrument show</code></td><td>Calibration set per config: dark, flood, flux, detoffset, scalecomp, samoffset + source cycle</td></tr>
+<tr><td><code>/instrument unpin</code></td><td>Freeze to one cycle (reproducing old work) / release</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/instrument show
+/instrument apply
+/instrument check</code></pre>
+<details><summary>Full in-CLI help</summary><pre class="usage"><code>Usage: /instrument &lt;subcommand&gt;
+  /instrument show               — what each config resolves to (default)
+  /instrument list [run]         — cycle inventory + what a run would pick
+  /instrument apply [--force]    — resolve now and write into the configs
+                                   --force also overwrites your own /set config edits
+  /instrument pin &lt;cycle&gt;        — always use one cycle (e.g. 2026A) regardless of run
+  /instrument unpin              — back to run-number based selection
+  /instrument off | on           — disable/enable automatic resolution at /matchruns
+  /instrument check              — verify every referenced file still exists</code></pre></details>
+</section>
+<section class="cmd" id="cmd-list-configs">
+<h3>/list configs<a class="anchor" href="#cmd-list-configs">#</a><span class="src">.py</span></h3>
+<p class="summary">List configs in the table + stored extras (clones)</p>
+</section>
+<section class="cmd" id="cmd-set-config">
+<h3>/set config<a class="anchor" href="#cmd-set-config">#</a><span class="src">.py</span></h3>
+<p class="summary">Set a config parameter</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/set drtsans</code></td><td>Set drtsans version: default, dev, qa</td></tr>
+<tr><td><code>/set outputdir</code></td><td>Set output directory (propagates to all configs)</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/set config 4m10a qmin 0.005
+/set config 4m10a maskfilename /path/to/mask.nxs</code></pre>
+</section>
+<section class="cmd" id="cmd-show-config">
+<h3>/show config<a class="anchor" href="#cmd-show-config">#</a><span class="src">.py</span></h3>
+<p class="summary">Show all parameters for a config</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/show catalog</code></td><td>Display all runs with metadata</td></tr>
+<tr><td><code>/show ipts</code></td><td>Show current IPTS number</td></tr>
+</tbody></table></div>
+</section>
+<h2 id="masks">Masks<a class="anchor" href="#masks">#</a></h2>
+<section class="cmd" id="cmd-mask">
+<h3>/mask<a class="anchor" href="#cmd-mask">#</a><span class="src">mask.py</span></h3>
+<p class="summary">Build a mask from that run&#x27;s own detector image</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/mask create</code></td><td>Build a mask from that run&#x27;s own detector image</td></tr>
+<tr><td><code>/mask list</code></td><td>Masks discoverable from here</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/mask create 186636 --dry-run
+/mask create 186636 --leak
+/mask list</code></pre>
+<details><summary>Full in-CLI help</summary><pre class="usage"><code>/mask create &lt;run&gt; [options]   build a mask from a run&#x27;s own detector image
+/mask list                     masks discoverable from here
+
+Use a uniformly illuminated run — banjo, flood or empty cell — and check the
+_compare.png it writes. Three things are masked: the beam stop, the
+low-response bands at both tube ends, and deviant tubes. The run number
+alone is enough; the archive is searched for it, so /load ipts is not needed.
+
+Common
+  --dry-run              report and preview only, write no mask file
+  --leak                 also mask direct beam that fell past the stop under
+                         gravity (always reported; masked only if you ask)
+  --tubes &lt;a,b,c&gt;        mask these tubes as well — auto-detection is
+                         whole-tube, so a dead segment averages out
+  --disc &lt;x&gt;,&lt;y&gt;,&lt;r&gt;     mask a disc, in mm. Repeatable; adds to the rest
+
+Beam stop  — sized from a horizontal cut through it: the valley between
+the flare walls is the stop&#x27;s diameter. Runs with no flare are sized from the
+shadow instead. Every mask prints the measurement, scale and pad behind its
+radius, and the mask is meant to be wider than the visibly dark disc — the
+ring outside that is penumbra, where the stop still blocks part of the beam.
+  --beam-scale &lt;f&gt;       grow the measured radius (default 1.0 measured,
+                         1.2 from a shadow); --beam-pad &lt;f&gt; adds y-pixels
+  --beam-center &lt;x&gt;,&lt;y&gt;  state the centre in mm, skipping detection
+  --beam-radius &lt;mm&gt;     state the radius in mm, used verbatim
+  --no-beam              do not mask the beam stop
+  --leak-scale &lt;f&gt;       grow the leak discs (implies --leak); 1.3-1.5 takes
+                         the faint tail below the broad peak
+
+Tube ends and tubes
+  --top &lt;n&gt; / --bottom &lt;n&gt;  how MANY pixels to mask at each end, not indices:
+                         --bottom 11 masks pixels 0-10. Default: measured —
+                         where response falls below half the plateau — but
+                         never below the 11-pixel EQSANS convention, which in
+                         practice is what applies. An explicit value wins, so
+                         --top 0 --bottom 0 turns the bands off. --bottom is
+                         the low-index end — the machine-physics mask tool
+                         names these the other way round.
+  --tube-sigma &lt;f&gt;       flag tubes more readily, lower is looser (default 5)
+  --no-tubes             skip tube detection
+
+Elsewhere
+  --ipts &lt;n&gt;             skip the archive search, or disambiguate
+  --outdir &lt;dir&gt;         where to write (default: here, which is what makes
+                         the mask discoverable)
+
+Coordinates are millimetres from the detector centre, +y up, face
+x -525..525 and y -521..521 — so --disc 13,-55,48 is 13 mm to one side and
+55 mm BELOW centre. Not pixels: tube index is not a spatial coordinate. The
+preview carries mm on the bottom and left, tube and pixel index on the top
+and right, so either can be read straight off it.
+
+Examples
+  /mask create 186104 --dry-run               look before writing
+  /mask create 186636 --leak                  add the gravity-dropped beam
+  /mask create 186104 --tubes 146             add a known-bad tube
+  /mask create 186104 --beam-radius 30        state the stop yourself
+  /mask create 186636 --disc 13,-55,60        one disc, your own size
+
+If it looks wrong, open the _compare.png:
+  beam mask off-centre   run too dim — use a brighter one, or --beam-center
+  beam mask too small    no flare walls, so the shadow was used — --beam-radius
+  a bad tube missed      name it with --tubes; segments average out
+
+Writes mask_&lt;config&gt;_&lt;run&gt;.nxs, a _compare.png and a .params.json into the
+current folder. The configuration in the name is what lets /matchruns and
+/instrument find the mask on their own. Needs drtsans, like /reduce.</code></pre></details>
+</section>
+<h2 id="reduction">Reduction<a class="anchor" href="#reduction">#</a></h2>
+<section class="cmd" id="cmd-autopilot">
+<h3>/autopilot<a class="anchor" href="#cmd-autopilot">#</a><span class="src">autopilot.py</span></h3>
+<p class="summary">Full automated pipeline (see Quick Path above for all options)</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/autopilot current</code></td><td>Use current IPTS/catalog from session (preserves <code>/reclass</code>)</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/autopilot 38681
+/autopilot 38681 --bkg emptyticell --exclude Y5 --thickness 0.15</code></pre>
+<details><summary>Full in-CLI help</summary><pre class="usage"><code>Usage: /autopilot &lt;ipts_number&gt; [options]
+  /autopilot 35884                              — Full automated reduction
+  /autopilot current                            — Use current IPTS/catalog from session
+  /autopilot 35884 --continue                   — Reduce only NEW runs (reuse saved calibration)
+  /autopilot --continue                         — Continue from saved session in outputdir
+  /autopilot current --from 5                   — Start from step 5 (skip catalog/match/presets)
+  /autopilot 35884 --standard porsilb1          — Use porsilb1 as calibration standard
+  /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples
+  /autopilot 35884 --exclude Y5                 — Reduce all except Y5
+  /autopilot 35884 --thickness 0.2              — Set thickness to 0.2 cm
+  /autopilot 35884 --bkg banjo                  — Use banjo as background
+  /autopilot 35884 --config 8m12a               — Reduce only 8m12a config
+  /autopilot 35884 --exclude Y5 --bkg emptyticell --thickness 0.15  — Combined
+  /autopilot 35884 --force                      — Re-reduce all (ignore done status)
+  /autopilot 35884 --fresh                      — Force reload of catalog + re-match table (ignore in-memory state)
+
+Autopilot steps (13 total):
+   1. Load catalog from ONCat
+   2. Match runs (build working table: trans/bkg/empty assignments)
+   3. Verify assignments
+   4. Apply presets to each configuration
+   5. Set output directory
+   6. Reduce standard sample (porsil, scale=1.0)
+   7. Calibrate absolute scale factors from standard
+   8. Apply scale factors to each config
+   9. Reduce all sample runs
+  10. Build stitch table
+  11. Smart overlap analysis
+  12. Stitch profiles
+  13. Plot results
+
+--from N: skip steps 1..(N-1) and start at step N. Requires catalog + working
+  table already in session (e.g. from prior /load ipts + /matchruns + /apply preset).
+  Examples:
+    --from 5  — skip load/match/verify/presets; set outputdir and proceed to porsil
+                (use when match table + configs are already set up the way you want)
+    --from 6  — skip outputdir too; jump straight to porsil reduction
+    --from 9  — skip standard/calibrate/apply-scale; reduce samples with existing scales
+    --from 10 — only stitch and plot (reductions are already done)
+    --from 13 — only plot
+  Cannot be combined with --continue.</code></pre></details>
+</section>
+<section class="cmd" id="cmd-calibrate">
+<h3>/calibrate<a class="anchor" href="#cmd-calibrate">#</a><span class="src">calibrate.py</span></h3>
+<p class="summary">Fit a measured standard against the reference and report the absolute scale factor</p>
+<pre class="example"><code>/calibrate porsil_4m10a_Iq.dat --applynow</code></pre>
+</section>
+<section class="cmd" id="cmd-export-script">
+<h3>/export script<a class="anchor" href="#cmd-export-script">#</a><span class="src">export.py</span></h3>
+<p class="summary">Export standalone Python script</p>
+<pre class="example"><code>/export script
+/export script my_reduction.py</code></pre>
+</section>
+<section class="cmd" id="cmd-reduce">
+<h3>/reduce<a class="anchor" href="#cmd-reduce">#</a><span class="src">reduction.py</span></h3>
+<p class="summary">Reduce selected rows</p>
+<pre class="example"><code>/reduce all
+/reduce --sample porsil
+/reduce 1-5</code></pre>
+</section>
+<h2 id="stitching">Stitching<a class="anchor" href="#stitching">#</a></h2>
+<section class="cmd" id="cmd-stitch">
+<h3>/stitch<a class="anchor" href="#cmd-stitch">#</a><span class="src">stitch.py</span></h3>
+<p class="summary">Build stitch table from reduced files</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/stitch build</code></td><td>Build stitch table from reduced files</td></tr>
+<tr><td><code>/stitch removeconfig</code></td><td>Remove a config from group(s)</td></tr>
+<tr><td><code>/stitch removerow</code></td><td>Remove stitch group(s)</td></tr>
+<tr><td><code>/stitch reorder</code></td><td>Reorder configs in group(s)</td></tr>
+<tr><td><code>/stitch run</code></td><td>Execute stitching</td></tr>
+<tr><td><code>/stitch set</code></td><td>Set normalization target</td></tr>
+<tr><td><code>/stitch show</code></td><td>Display stitch table</td></tr>
+<tr><td><code>/stitch smart</code></td><td>Auto-analyze and stitch (recommended)</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/stitch smart
+/stitch build
+/stitch run</code></pre>
+</section>
+<h2 id="data-plotting">Data & Plotting<a class="anchor" href="#data-plotting">#</a></h2>
+<section class="cmd" id="cmd-confirm">
+<h3>/confirm<a class="anchor" href="#cmd-confirm">#</a><span class="src">export.py</span></h3>
+<p class="summary">Confirm IPTS data reduction complete (--comment)</p>
+</section>
+<section class="cmd" id="cmd-list-iq">
+<h3>/list iq<a class="anchor" href="#cmd-list-iq">#</a><span class="src">data.py</span></h3>
+<p class="summary">List reduced I(Q) files</p>
+</section>
+<section class="cmd" id="cmd-list-iqxqy">
+<h3>/list iqxqy<a class="anchor" href="#cmd-list-iqxqy">#</a><span class="src">data.py</span></h3>
+<p class="summary">List reduced 2D I(Qx,Qy) files</p>
+</section>
+<section class="cmd" id="cmd-plot">
+<h3>/plot<a class="anchor" href="#cmd-plot">#</a><span class="src">data.py</span></h3>
+<p class="summary">Plot data</p>
+<pre class="example"><code>/plot *_Iq.dat --save all.png --loglog</code></pre>
+</section>
+<section class="cmd" id="cmd-share">
+<h3>/share<a class="anchor" href="#cmd-share">#</a><span class="src">share.py</span></h3>
+<p class="summary">Upload files, get 24h URL</p>
+<pre class="example"><code>/share *_Iq.dat</code></pre>
+</section>
+<section class="cmd" id="cmd-zipnsend">
+<h3>/zipnsend<a class="anchor" href="#cmd-zipnsend">#</a><span class="src">export.py</span></h3>
+<p class="summary">Zip files and email (--pattern, --dir, --subject)</p>
+</section>
+<h2 id="session">Session<a class="anchor" href="#session">#</a></h2>
+<section class="cmd" id="cmd-continue">
+<h3>/continue<a class="anchor" href="#cmd-continue">#</a><span class="src">.py</span></h3>
+<p class="summary">Resume previous session (cwd autosave, or the last one recorded anywhere)</p>
+</section>
+<section class="cmd" id="cmd-save">
+<h3>/save<a class="anchor" href="#cmd-save">#</a><span class="src">.py</span></h3>
+<p class="summary">Save working table to disk</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/save table</code></td><td>Save working table to disk</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-session">
+<h3>/session<a class="anchor" href="#cmd-session">#</a><span class="src">.py</span></h3>
+<p class="summary">Saved sessions, newest first, with date and IPTS</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/session list</code></td><td>Saved sessions, newest first, with date and IPTS</td></tr>
+<tr><td><code>/session load</code></td><td>Load named session</td></tr>
+<tr><td><code>/session save</code></td><td>Save session (name optional)</td></tr>
+</tbody></table></div>
+</section>
+<h2 id="notes-and-comparison">Notes and comparison<a class="anchor" href="#notes-and-comparison">#</a></h2>
+<section class="cmd" id="cmd-compare">
+<h3>/compare<a class="anchor" href="#cmd-compare">#</a><span class="src">.py</span></h3>
+<p class="summary">Side-by-side parameter diff of two configs or presets</p>
+</section>
+<section class="cmd" id="cmd-note">
+<h3>/note<a class="anchor" href="#cmd-note">#</a><span class="src">note.py</span></h3>
+<p class="summary">Append to <code>NOTE.md</code> in the output directory</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/note add</code></td><td>Append to <code>NOTE.md</code> in the output directory</td></tr>
+<tr><td><code>/note show</code></td><td>Last N entries</td></tr>
+</tbody></table></div>
+<details><summary>Full in-CLI help</summary><pre class="usage"><code>Usage:
+  /note add &quot;text&quot;     — add a manual note (timestamped)
+  /note show [N]       — show last N entries (default 30)
+  /note path           — show the NOTE.md file path
+  /note clear          — delete NOTE.md (asks first)</code></pre></details>
+</section>
+<h2 id="settings-and-shell">Settings and shell<a class="anchor" href="#settings-and-shell">#</a></h2>
+<section class="cmd" id="cmd-cat">
+<h3>/cat<a class="anchor" href="#cmd-cat">#</a><span class="src">.py</span></h3>
+<p class="summary">Read-only filesystem access</p>
+</section>
+<section class="cmd" id="cmd-head">
+<h3>/head<a class="anchor" href="#cmd-head">#</a><span class="src">.py</span></h3>
+<p class="summary">Read-only filesystem access</p>
+</section>
+<section class="cmd" id="cmd-ls">
+<h3>/ls<a class="anchor" href="#cmd-ls">#</a><span class="src">.py</span></h3>
+<p class="summary">Read-only filesystem access</p>
+</section>
+<section class="cmd" id="cmd-models">
+<h3>/models<a class="anchor" href="#cmd-models">#</a><span class="src">models.py</span></h3>
+<p class="summary">LLM models available for natural-language translation</p>
+</section>
+<section class="cmd" id="cmd-pwd">
+<h3>/pwd<a class="anchor" href="#cmd-pwd">#</a><span class="src">.py</span></h3>
+<p class="summary">Read-only filesystem access</p>
+</section>
+<section class="cmd" id="cmd-settings">
+<h3>/settings<a class="anchor" href="#cmd-settings">#</a><span class="src">settings.py</span></h3>
+<p class="summary">All current settings</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/settings multiprocessing</code></td><td>Parallel job count (1-4)</td></tr>
+</tbody></table></div>
+</section>
+<section class="cmd" id="cmd-tail">
+<h3>/tail<a class="anchor" href="#cmd-tail">#</a><span class="src">.py</span></h3>
+<p class="summary">Read-only filesystem access</p>
+</section>
+<h2 id="the-tool-itself">The tool itself<a class="anchor" href="#the-tool-itself">#</a></h2>
+<section class="cmd" id="cmd-exit">
+<h3>/exit<a class="anchor" href="#cmd-exit">#</a><span class="src">app.py</span></h3>
+<p class="summary">Leave the tool (<code>/quit</code>, <code>/q</code>).</p>
+</section>
+<section class="cmd" id="cmd-guide">
+<h3>/guide<a class="anchor" href="#cmd-guide">#</a><span class="src">app.py</span></h3>
+<p class="summary">Built-in walkthrough of a typical reduction.</p>
+</section>
+<section class="cmd" id="cmd-help">
+<h3>/help<a class="anchor" href="#cmd-help">#</a><span class="src">app.py</span></h3>
+<p class="summary">Command reference inside the tool; <code>/help &lt;command&gt;</code> for one command.</p>
+</section>
+<section class="cmd" id="cmd-list">
+<h3>/list<a class="anchor" href="#cmd-list">#</a><span class="src">app.py</span></h3>
+<p class="summary">Usage stub — see <code>/list iq</code>, <code>/list ipts</code>, <code>/list tables</code>.</p>
+</section>
+<section class="cmd" id="cmd-version">
+<h3>/version<a class="anchor" href="#cmd-version">#</a><span class="src">app.py</span></h3>
+<p class="summary">Which build is running.</p>
+</section>
+<h2 id="other">Other<a class="anchor" href="#other">#</a></h2>
+<section class="cmd" id="cmd-assign">
+<h3>/assign<a class="anchor" href="#cmd-assign">#</a><span class="src">matching.py</span></h3>
+<p class="summary">&quot;Updated N rows&quot; (brief confirmation)</p>
+<div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>/assign bkg</code></td><td>Set background for ALL rows (config-aware, sets bkg+bkgtrans)</td></tr>
+</tbody></table></div>
+<pre class="example"><code>/assign bkg emptyticell</code></pre>
+</section>
+<section class="cmd" id="cmd-cd">
+<h3>/cd<a class="anchor" href="#cmd-cd">#</a><span class="src">.py</span></h3>
+<p class="summary">Change the working directory (filesystem passthrough).</p>
+</section>
+<section class="cmd" id="cmd-cp">
+<h3>/cp<a class="anchor" href="#cmd-cp">#</a><span class="src">.py</span></h3>
+<p class="summary">Copy a file (filesystem passthrough).</p>
+</section>
+<section class="cmd" id="cmd-mkdir">
+<h3>/mkdir<a class="anchor" href="#cmd-mkdir">#</a><span class="src">.py</span></h3>
+<p class="summary">Create a directory (filesystem passthrough).</p>
+</section>
+<section class="cmd" id="cmd-mv">
+<h3>/mv<a class="anchor" href="#cmd-mv">#</a><span class="src">.py</span></h3>
+<p class="summary">Move a file (filesystem passthrough).</p>
+</section>
+<section class="cmd" id="cmd-refresh">
+<h3>/refresh<a class="anchor" href="#cmd-refresh">#</a><span class="src">.py</span></h3>
+<p class="summary">Re-fetch the current IPTS catalog, keeping /reclass overrides.</p>
+</section>
+<section class="cmd" id="cmd-rm">
+<h3>/rm<a class="anchor" href="#cmd-rm">#</a><span class="src">.py</span></h3>
+<p class="summary">Remove a file (filesystem passthrough).</p>
+</section>
+<section class="cmd" id="cmd-sh">
+<h3>/sh<a class="anchor" href="#cmd-sh">#</a><span class="src">.py</span></h3>
+<p class="summary">Run a shell command.</p>
+</section>
+  </article>
+</main>
+<footer>
+  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+</footer>
+<script src="search.js"></script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Step-by-step guide — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
+  <nav class="tabs"><a href="index.html">Introduction</a>
+<a href="guide.html" class="current">Step-by-step guide</a>
+<a href="commands.html">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></nav>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
+           autocomplete="off" spellcheck="false">
+    <div id="results" hidden></div>
+  </div>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#1-load-the-catalog" class="lvl2">1 · Load the catalog</a><a href="#2-match-the-runs" class="lvl2">2 · Match the runs</a><a href="#3-check-the-table" class="lvl2">3 · Check the table</a><a href="#4-set-the-output-directory" class="lvl2">4 · Set the output directory</a><a href="#5-calibrate-the-absolute-scale" class="lvl2">5 · Calibrate the absolute scale</a><a href="#6-reduce" class="lvl2">6 · Reduce</a><a href="#7-stitch-the-configurations" class="lvl2">7 · Stitch the configurations</a><a href="#8-look-at-it" class="lvl2">8 · Look at it</a><a href="#what-to-do-when-something-looks-wrong" class="lvl2">What to do when something looks wrong</a></nav>
+  <article>
+    <h1 class="page-title">Step-by-step guide</h1>
+    <p class="lede">One experiment from raw runs to a stitched I(Q), with what to check at each step.</p>
+    <p>This is one experiment from raw runs to a stitched, absolutely-scaled I(Q). Each step says what to expect and what to do when it reports a problem.</p>
+<p>If the experiment is routine, <a href="commands.html#cmd-autopilot"><code><a href="commands.html#cmd-autopilot">/autopilot</a></code></a> does all of it in one command — read this anyway once, because it is the same sequence and you will want to know which step failed when one does.</p>
+<h2 id="1-load-the-catalog">1 · Load the catalog<a class="anchor" href="#1-load-the-catalog">#</a></h2>
+<pre><code>/load ipts 38681</code></pre>
+<p>Fetches every run in the experiment from ONCat with its title, detector distance, wavelength, frequency, counts and duration, and classifies each one from its title: scattering, transmission, background, empty beam.</p>
+<pre><code>/show catalog</code></pre>
+<p>Read the <strong>Class</strong> column. <code>S</code> scattering, <code>T</code> transmission, <code>BkgS</code>/<code>BkgT</code> background, <code>EmpT</code> empty beam, <code>N</code> ignored. Classification is what everything downstream pairs on, so fix it here rather than assigning runs by hand later:</p>
+<pre><code>/reclass 186517 empty          # this run is the empty beam
+/reclass 186531,186532 scatt   # these are samples, whatever the title says</code></pre>
+<h2 id="2-match-the-runs">2 · Match the runs<a class="anchor" href="#2-match-the-runs">#</a></h2>
+<pre><code>/matchruns</code></pre>
+<p>Builds the working table: one row per scattering run, each paired with its transmission, background, background transmission and empty beam <strong>from its own configuration</strong>. In the same pass it applies the JSON preset for each configuration and resolves the cycle&#x27;s calibration files by run number.</p>
+<p>Expect a summary like:</p>
+<pre><code>Matched 50 scattering runs across 2 configurations.
+  Configurations: 4m10a, 2.5m2.5a
+  Transmission matched: 48/50
+  Background matched: 50/50
+  Empty beam matched: 45/50
+  Presets auto-applied: 4m10a, 2.5m2.5a
+  Instrument files (machine physics): 2026B — sensitivity, dark, flux, offsets</code></pre>
+<p>Anything short of N/N needs attention before reducing. A row with no empty beam cannot reduce at all — the empty beam supplies both the beam centre and the transmission reference.</p>
+<pre><code>/set --config 4m10a emp 186517     # give a whole configuration its empty beam
+/assign bkg emptyticell            # background by sample name, config-aware
+/set 3 trans 186520                # one row, one field
+/remove --sample test              # drop rows you do not want</code></pre>
+<h2 id="3-check-the-table">3 · Check the table<a class="anchor" href="#3-check-the-table">#</a></h2>
+<pre><code>/show table</code></pre>
+<p>Every row should have all five fields filled. Dashes mean unmatched. The <code>Status</code> column starts as <code>ready</code>, becomes <code>done</code> after a successful reduction, and flips to <code>modified</code> when you change something that invalidates the result — which is how a re-run knows what to redo.</p>
+<h2 id="4-set-the-output-directory">4 · Set the output directory<a class="anchor" href="#4-set-the-output-directory">#</a></h2>
+<pre><code>/set outputdir /SNS/EQSANS/IPTS-38681/shared/output/</code></pre>
+<p>Everything — reduced files, the merged I(Q), plots, <code>NOTE.md</code> — lands here.</p>
+<h2 id="5-calibrate-the-absolute-scale">5 · Calibrate the absolute scale<a class="anchor" href="#5-calibrate-the-absolute-scale">#</a></h2>
+<p>If the experiment measured a standard (usually porsil), reduce it first with a scale of 1, then fit it against the reference:</p>
+<pre><code>/set config 4m10a standardabsolutescale 1.0
+/reduce --sample porsil
+/calibrate porsil_4m10a_Iq.dat --applynow</code></pre>
+<p><code>--applynow</code> reads the configuration out of the filename, applies the fitted factor to that configuration, and marks the affected rows for re-reduction. Repeat per configuration: <strong>a scale factor belongs to the configuration it was measured in</strong> and must not be borrowed from another.</p>
+<p>With no standard in the experiment, the preset&#x27;s <code>standardabsolutescale</code> is used and the result is scaled but not independently verified.</p>
+<h2 id="6-reduce">6 · Reduce<a class="anchor" href="#6-reduce">#</a></h2>
+<pre><code>/reduce all</code></pre>
+<p>Each row is reduced through drtsans, writing <code>{sample}_{config}_Iq.dat</code>, the 2D <code>_Iqxqy.dat</code>, and the JSON that drove it. Failures are reported per row with the reason; fix and re-run just those with <code><a href="commands.html#cmd-reduce">/reduce --new</a></code>.</p>
+<h2 id="7-stitch-the-configurations">7 · Stitch the configurations<a class="anchor" href="#7-stitch-the-configurations">#</a></h2>
+<pre><code>/stitch smart</code></pre>
+<p>Groups each sample&#x27;s configurations low-Q to high-Q, picks overlap windows — preset ranges for known configuration pairs, computed ones otherwise — scales each profile onto the target and writes <code>merged_{sample}_..._Iq.txt</code>. The report shows the scale factor applied to each profile; a factor far from 1 means the absolute scale or the overlap window deserves a look.</p>
+<h2 id="8-look-at-it">8 · Look at it<a class="anchor" href="#8-look-at-it">#</a></h2>
+<pre><code>/plot merged_*.txt --save stitched.png --loglog
+/list iq</code></pre>
+<p>Then hand it over:</p>
+<pre><code>/share merged_*.txt              # upload, get a 24-hour link
+/zipnsend someone@ornl.gov       # zip and email
+/confirm                         # record the experiment as reduced</code></pre>
+<h2 id="what-to-do-when-something-looks-wrong">What to do when something looks wrong<a class="anchor" href="#what-to-do-when-something-looks-wrong">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead><tbody>
+<tr><td>Rows cannot reduce, &quot;no empty beam&quot;</td><td>the empty-beam run was never classified as one</td><td><code><a href="commands.html#cmd-reclass">/reclass &lt;run&gt; empty</a></code> then <code><a href="commands.html#cmd-matchruns">/matchruns</a></code></td></tr>
+<tr><td>Background from the wrong configuration</td><td>assigned per-row by hand</td><td><code><a href="commands.html#cmd-assign">/assign bkg &lt;sample&gt;</a></code> — it matches configuration for you</td></tr>
+<tr><td>Absolute scale looks wrong by a constant</td><td>scale factor from another configuration</td><td>re-run <code><a href="commands.html#cmd-calibrate">/calibrate</a></code> for that configuration</td></tr>
+<tr><td>Stitched curves do not meet</td><td>overlap window or target</td><td><code><a href="commands.html#cmd-stitch">/stitch smart</a></code>, or set the overlap by hand</td></tr>
+<tr><td>Parameters look stale after a new cycle</td><td>session predates the calibration update</td><td><code><a href="commands.html#cmd-instrument">/instrument apply</a></code></td></tr>
+</tbody></table></div>
+<p>The <a href="protocol.html">protocol</a> lists what a trustworthy reduction has to satisfy, and which of those the tool checks for you.</p>
+  </article>
+</main>
+<footer>
+  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+</footer>
+<script src="search.js"></script>
+</body>
+</html>

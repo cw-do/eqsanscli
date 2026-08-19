@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Introduction — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="index.html">eqsans<strong>cli</strong></a>
+  <nav class="tabs"><a href="index.html" class="current">Introduction</a>
+<a href="guide.html">Step-by-step guide</a>
+<a href="commands.html">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></nav>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search commands, parameters, rules…  (press /)"
+           autocomplete="off" spellcheck="false">
+    <div id="results" hidden></div>
+  </div>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#what-it-is" class="lvl2">What it is</a><a href="#getting-started" class="lvl2">Getting started</a><a href="#the-shortest-possible-reduction" class="lvl2">The shortest possible reduction</a><a href="#how-it-decides-things" class="lvl2">How it decides things</a><a href="#finding-things" class="lvl2">Finding things</a></nav>
+  <article>
+    <h1 class="page-title">Introduction</h1>
+    <p class="lede">An interactive tool for reducing EQSANS data — catalog, match, reduce, stitch and plot, without hand-writing a reduction script.</p>
+    <h2 id="what-it-is">What it is<a class="anchor" href="#what-it-is">#</a></h2>
+<p><strong>eqsanscli</strong> reduces EQSANS small-angle neutron scattering data at SNS/ORNL. You give it an experiment number; it fetches the catalog from ONCat, works out which runs go together, applies the right parameters for each instrument configuration, runs the reduction through drtsans, stitches the configurations into one I(Q) and plots the result.</p>
+<p>The tedious parts it takes over:</p>
+<ul><li><strong>Pairing runs.</strong> Every scattering run needs its transmission, its background, that background&#x27;s transmission, and an empty beam <em>from the same configuration</em>. Doing that by hand across 50 runs and 3 configurations is where mistakes come from.</li><li><strong>Getting the calibration right.</strong> Dark current, sensitivity, beam flux and the AgBe offsets change every accelerator cycle. The tool reads them from the machine-physics folders by run number, so a preset written last cycle does not quietly reduce this cycle&#x27;s data with last cycle&#x27;s flood.</li><li><strong>Writing the script.</strong> <code><a href="commands.html#cmd-export-script">/export script</a></code> produces a standalone Python file that reproduces exactly what was run — the same reduction, without the tool.</li></ul>
+<h2 id="getting-started">Getting started<a class="anchor" href="#getting-started">#</a></h2>
+<pre class="lang-bash"><code>ssh analysis.sns.gov
+cd /SNS/EQSANS/shared/script/eqsanstools-cli
+source .venv/bin/activate
+python -m eqsanscli</code></pre>
+<p>Commands are typed at the <code>eqsans&gt;</code> prompt and all begin with <code>/</code>. Anything typed without a <code>/</code> is sent to a language model that translates it into commands — convenient, but explicit commands are what to use when it matters.</p>
+<h2 id="the-shortest-possible-reduction">The shortest possible reduction<a class="anchor" href="#the-shortest-possible-reduction">#</a></h2>
+<pre><code>/load ipts 38681          # fetch the catalog
+/matchruns                # pair every scattering run, apply presets and calibration
+/show table               # check what it decided
+/reduce all               # run the reductions
+/stitch smart             # combine configurations into one I(Q)
+/plot merged_*.txt        # look at the result</code></pre>
+<p>Or, when the experiment is routine, the same thing in one command:</p>
+<pre><code>/autopilot 38681</code></pre>
+<p>The <a href="guide.html">step-by-step guide</a> walks the same path with the output you should expect at each stage, and what to do when a step reports a problem.</p>
+<h2 id="how-it-decides-things">How it decides things<a class="anchor" href="#how-it-decides-things">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Answer</th><th>Where</th></tr></thead><tbody>
+<tr><td>Which runs pair together?</td><td>classification from the run title, then matching on configuration</td><td><a href="protocol.html#sec-CAT">protocol</a></td></tr>
+<tr><td>Which calibration files?</td><td>the newest machine-physics cycle at or before the run</td><td><a href="knowledge.html#kb-instrument-files">knowledge</a></td></tr>
+<tr><td>Which parameters?</td><td>drtsans defaults &lt; JSON preset &lt; machine physics &lt; your <code><a href="commands.html#cmd-set-config">/set config</a></code></td><td><a href="parameters.html">parameters</a></td></tr>
+<tr><td>What must be true before reducing?</td><td>48 numbered rules, 38 of them checked by code</td><td><a href="protocol.html">protocol</a></td></tr>
+</tbody></table></div>
+<p>Every number the tool produces comes with its derivation — how a beam-stop radius was measured, which cycle a flood came from, why a row cannot reduce. If you find one that does not explain itself, that is a bug worth reporting.</p>
+<h2 id="finding-things">Finding things<a class="anchor" href="#finding-things">#</a></h2>
+<p>The search box at the top of every page covers commands, parameters, protocol rules and section headings. Press &lt;kbd&gt;/&lt;/kbd&gt; from anywhere to jump into it.</p>
+<ul><li><a href="commands.html">Commands</a> — all 52, with sub-forms and examples</li><li><a href="parameters.html">Parameters</a> — what each reduction parameter is, and how it reaches the exported script as <code>eq._name</code></li><li><a href="protocol.html">Protocol</a> — the rules a trustworthy reduction satisfies</li><li><a href="knowledge.html">Instrument knowledge</a> — detector geometry, calibration files, backgrounds, absolute scale, stitching</li></ul>
+  </article>
+</main>
+<footer>
+  <span>eqsanscli 0.24.1 · EQSANS · SNS/ORNL</span>
+  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+</footer>
+<script src="search.js"></script>
+</body>
+</html>

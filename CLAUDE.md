@@ -42,6 +42,10 @@ preset_configs/       — Preset JSON configs for known instrument configuration
   hand-edit them in presets.
 - `app.py` has a `_render_data` method with hardcoded column lists per data type — update when adding columns.
 - Session state auto-saves after every command. `catalog_data` is stored as list-of-dicts.
+- `docs/` is a generated documentation site (GitHub Pages, main branch `/docs`).
+  `python3 docs/generate.py` rebuilds it; reference pages are generated from the
+  code, prose lives in `docs/pages/*.md`. See `docs/README.md` for which source
+  owns what, and regenerate in the same commit as a change that affects it.
 - `SKILL.md` is the **single** agent-facing document, covering both the TUI and
   the headless JSON protocol. `AGENT_SKILL.md` is a stub pointing at it —
   the two copies had drifted in both directions before they were merged.
@@ -194,6 +198,47 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-08-19: a documentation site under `docs/` (no version bump)
+
+Asked for a hostable information page: introduction, how to use it, a manual of
+every command with examples, a searchable reference, a page for the configuration
+parameters and how they reach the exported script, and a step-by-step guide.
+
+**Seven pages, generated.** `python3 docs/generate.py` writes static HTML into
+`docs/`, servable by GitHub Pages from the main branch `/docs` folder with no
+workflow and no build step. System python3, no dependencies — `docs/md.py` is a
+small Markdown renderer because no such library exists on the analysis machines.
+
+**The reference pages are built from the code**, which is the point: commands from
+`commands/registry.py` (the list), `SKILL.md` tables (one-liners) and each
+module's `_USAGE` (full help); parameters from the `EQVar` mapping in
+`script_exporter.py`, `knowledge/configurations.md` (descriptions) and the presets
+(values); rules from `services/protocol.py`. Only the introduction, the
+step-by-step guide and the parameters preamble are hand-written, under
+`docs/pages/`.
+
+**Search** is a prebuilt JSON index (239 entries: commands, parameters, rules,
+knowledge topics, headings) with a client-side filter — no CDN, works offline,
+`/` focuses it. Rule ids and `/command` mentions auto-link, but only to anchors
+that exist, so a mention of an undocumented command renders as plain code rather
+than a dead link.
+
+**Found while building it, each fixed at the source rather than in the
+generator:** `/calibrate` was missing from `SKILL.md`'s tables (documented only in
+prose, so the drift test could not see it); the 26 managed parameters had no
+one-line descriptions anywhere, now a table in `knowledge/configurations.md`; and
+the front-end commands (`/help`, `/exit`, `/version`, `/list`, `/guide`) were
+absent from every reference because they are not in `registry.py`.
+
+`tests/test_docs.py` grows to 9 checks: the generator must run, every page must be
+written, every command and parameter must reach the site with a description, and
+no internal link may be broken.
+
+**Files changed:** `docs/generate.py`, `docs/collect.py`, `docs/md.py`,
+`docs/site.css`, `docs/search.js`, `docs/pages/*.md`, `docs/README.md` (all new),
+the seven generated pages, `SKILL.md`, `knowledge/configurations.md`,
+`tests/test_docs.py`, README.md, CLAUDE.md.
+
 ### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
 
 Items 5 and 6 of the structure review.
@@ -343,26 +388,4 @@ paragraph is now a three-row table of what is measured and what bounds it.
 
 **Files changed:** README.md, `knowledge/instrument-files.md`, SKILL.md,
 AGENT_SKILL.md, `tests/test_mask.py` (+1, 67 total).
-
-### 2026-08-18 (v0.24.1): say where the tube-end bands came from
-
-Asked: are the top/bottom bands a threshold or just a default? Both, and the
-answer was only in the code: `find_edge_bands` walks the mean along-tube profile
-in from each end while it sits **below half the plateau** (`DEFAULT_BAND_DROP`),
-then `build_plan` floors the result at 11 pixels (`DEFAULT_MIN_BAND`, the
-`MASKED_PIXELS = '1-11,246-256'` convention).
-
-**The floor is what applies in practice.** Measured now on four real runs, the
-profile crosses half the plateau at pixel 8-11 — 186621 gives 9/8, 186104 9/8,
-186631 10/8, 186636 11/10 — so every one of them ends up at 11/11. The
-measurement only takes over on a run whose ends fall off further than usual.
-
-`MaskPlan.how_banded()` now reports which happened, next to the beam radius
-derivation added in 0.23.1, and `.params.json` records `bands_measured` and
-`band_source`. Reads: *"tube-end bands: response falls below half the plateau by
-pixel 9 / 8, raised to the 11-pixel EQSANS convention"*.
-
-**Files changed:** `services/mask_service.py` (`how_banded`, `measured_bottom`,
-`measured_top`, `band_source`), `commands/mask.py` (report line, params, help),
-`tests/test_mask.py` (+2, 66 total), README, `knowledge/instrument-files.md`.
 
