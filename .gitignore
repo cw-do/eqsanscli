@@ -34,3 +34,7 @@ Thumbs.db
 # Planning docs (not part of the application)
 PLANNING.md
 AGENT.md
+
+# Local working material, not part of the tool
+tutorial-video/
+session-ses_*.md
