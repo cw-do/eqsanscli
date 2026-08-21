@@ -1,3 +1,6 @@
+> **Prefer to watch?** Twelve short screencasts walk through the whole tool — see
+> the [video tutorials](tutorials.html): an end-to-end overview, then one clip per task.
+
 ## What it is
 
 **eqsanscli** reduces EQSANS small-angle neutron scattering data at SNS/ORNL. You

@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.24.1</div>
+          data reduction tool &middot; v0.24.2</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -25,6 +25,7 @@
   </div>
   <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html" class="current">Introduction</a>
 <a href="guide.html">Step-by-step guide</a>
+<a href="tutorials.html">Video tutorials</a>
 <a href="commands.html">Commands</a>
 <a href="parameters.html">Parameters</a>
 <a href="protocol.html">Protocol</a>
@@ -36,7 +37,8 @@
   <article>
     <h1 class="page-title">Introduction</h1>
     <p class="lede">An interactive tool for reducing EQSANS data — catalog, match, reduce, stitch and plot, without hand-writing a reduction script.</p>
-    <h2 id="what-it-is">What it is<a class="anchor" href="#what-it-is">#</a></h2>
+    <blockquote><p><strong>Prefer to watch?</strong> Twelve short screencasts walk through the whole tool — see the <a href="tutorials.html">video tutorials</a>: an end-to-end overview, then one clip per task.</p></blockquote>
+<h2 id="what-it-is">What it is<a class="anchor" href="#what-it-is">#</a></h2>
 <p><strong>eqsanscli</strong> reduces EQSANS small-angle neutron scattering data at SNS/ORNL. You give it an experiment number; it fetches the catalog from ONCat, works out which runs go together, applies the right parameters for each instrument configuration, runs the reduction through drtsans, stitches the configurations into one I(Q) and plots the result.</p>
 <p>The tedious parts it takes over:</p>
 <ul><li><strong>Pairing runs.</strong> Every scattering run needs its transmission, its background, that background&#x27;s transmission, and an empty beam <em>from the same configuration</em>. Doing that by hand across 50 runs and 3 configurations is where mistakes come from.</li><li><strong>Getting the calibration right.</strong> Dark current, sensitivity, beam flux and the AgBe offsets change every accelerator cycle. The tool reads them from the machine-physics folders by run number, so a preset written last cycle does not quietly reduce this cycle&#x27;s data with last cycle&#x27;s flood.</li><li><strong>Writing the script.</strong> <code><a href="commands.html#cmd-export-script">/export script</a></code> produces a standalone Python file that reproduces exactly what was run — the same reduction, without the tool.</li></ul>
@@ -71,7 +73,7 @@ python -m eqsanscli</code></pre>
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-08-21 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

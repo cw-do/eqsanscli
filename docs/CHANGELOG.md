@@ -7,6 +7,25 @@ the version it shipped in.
 
 ---
 
+### 2026-08-21 (v0.24.2): the documentation site gains a video index
+
+Twelve screencasts of the real tool reducing one live experiment (IPTS-38603)
+are now published on YouTube, and the site links them. A new **Video tutorials**
+page (`docs/pages/tutorials.md`) embeds the 3-minute overview in its playlist
+context and lists all twelve — the overview plus eleven task clips — each row
+linking to its own video (`watch?v=<id>&list=<playlist>`), with commands in the
+tables linking through to the command reference.
+
+The overview is a live `<iframe>` embed rather than a click-through poster: the
+embed was confirmed to play over an http(s) origin, so the earlier Error 153 was
+only the `file://` origin of a local preview, not a permissions block. The index
+page, guide and home page cross-link the videos.
+
+**Files changed:** `docs/pages/tutorials.md` (new), `docs/generate.py`
+(`tutorials_page`, playlist/overview IDs), `docs/site.css` (`.video-frame`),
+`docs/pages/index.md`, `docs/pages/guide.md`, `docs/README.md`,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-18 (v0.24.1): say where the tube-end bands came from
 
 Asked: are the top/bottom bands a threshold or just a default? Both, and the

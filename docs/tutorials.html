@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video tutorials — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v0.24.2</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
+  </div>
+  <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
+<a href="guide.html">Step-by-step guide</a>
+<a href="tutorials.html" class="current">Video tutorials</a>
+<a href="commands.html">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></div></div></nav>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#start-with-the-overview" class="lvl2">Start with the overview</a><a href="#one-task-at-a-time" class="lvl2">One task at a time</a></nav>
+  <article>
+    <h1 class="page-title">Video tutorials</h1>
+    <p class="lede">Twelve short screencasts of the real tool reducing one live experiment — watch the overview, then dip into any single task.</p>
+    <div class="video-frame"><iframe src="https://www.youtube.com/embed/8acMTzVWoGU?list=PLa6AxzTbd0qI&amp;rel=0" title="EQSANSCLI — the tutorial series" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div><p class="video-frame-cap">Start with the 3-minute overview, or <a href="https://youtube.com/playlist?list=PLa6AxzTbd0qI&amp;si=CxaD7iJVhCTF13sM" target="_blank" rel="noopener">open the full playlist on YouTube &#8599;</a>.</p><p>Every clip is the real terminal tool, driven live against one experiment — IPTS&amp;#8209;38603 — from raw counts to a shared, absolute-scale curve. Watch the overview once end to end, then jump to any single task. Commands in the tables link through to their full reference on the <a href="commands.html">Commands</a> page.</p>
+<h2 id="start-with-the-overview">Start with the overview<a class="anchor" href="#start-with-the-overview">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Video</th><th>What it covers</th><th>Length</th></tr></thead><tbody>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=8acMTzVWoGU&amp;list=PLa6AxzTbd0qI">The complete reduction, start to finish</a></strong></td><td>Load the catalog, verify the run classes, match the working table, reduce (or export a runnable script), and stitch the configurations — then <code><a href="commands.html#cmd-autopilot">/autopilot</a></code> runs the whole thirteen-step pipeline in a single command.</td><td>3:07</td></tr>
+</tbody></table></div>
+<h2 id="one-task-at-a-time">One task at a time<a class="anchor" href="#one-task-at-a-time">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Video</th><th>What it covers</th><th>Length</th></tr></thead><tbody>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=wOkLcJjeH0o&amp;list=PLa6AxzTbd0qI">Just ask: natural-language control</a></strong></td><td>Type a request in plain English; the assistant shows the slash command it picked and runs it — <code><a href="commands.html#cmd-load">/load</a></code>, <code><a href="commands.html#cmd-reclass">/reclass</a></code>, <code><a href="commands.html#cmd-matchruns">/matchruns</a></code>, even <code><a href="commands.html#cmd-autopilot">/autopilot</a></code>.</td><td>1:30</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=bZKJBk-zlEw&amp;list=PLa6AxzTbd0qI">Get the run classes right</a></strong></td><td>Read the Class column — empty, background, transmission, sample — and fix mistakes with <code><a href="commands.html#cmd-reclass">/reclass</a></code> by range, by list, or by whole sample.</td><td>1:18</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=wYPZIy9FN4w&amp;list=PLa6AxzTbd0qI">Where every number comes from</a></strong></td><td>Presets and the four-layer parameter model behind <code><a href="commands.html#cmd-show-config">/show config</a></code> — drtsans default, preset, machine-physics file, and your own override, with which one wins.</td><td>1:30</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=WS-nt1dmiL4&amp;list=PLa6AxzTbd0qI">Calibration files, resolved for you</a></strong></td><td><code><a href="commands.html#cmd-instrument">/instrument</a></code> resolves sensitivity, dark current, beam flux and the detector offset per run and cycle — inspect them, pin a cycle, or take over by hand.</td><td>1:18</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=hxUabXguyrQ&amp;list=PLa6AxzTbd0qI">Put I(Q) on an absolute scale</a></strong></td><td><code><a href="commands.html#cmd-calibrate">/calibrate</a></code> a porsil standard against a primary reference (NG3 / NG7) to find the scale factor and apply it to the configuration.</td><td>1:19</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=5fcSuZ36e8Q&amp;list=PLa6AxzTbd0qI">Build a detector mask — and check it</a></strong></td><td><code><a href="commands.html#cmd-mask">/mask create</a></code> from a run&#x27;s own image, then read the raw-vs-overlay plot: the beam stop, the dim tube-end bands, and any dead tubes.</td><td>1:25</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=d52A2lhJlLo&amp;list=PLa6AxzTbd0qI">Reduce your way, safely</a></strong></td><td>Scope <code><a href="commands.html#cmd-reduce">/reduce</a></code> — everything, one sample, or only what&#x27;s new — the empty-beam preflight that refuses bad rows, and run-now-in-parallel versus <code><a href="commands.html#cmd-export-script">/export script</a></code>.</td><td>1:16</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=w7QWOMBZ09o&amp;list=PLa6AxzTbd0qI">Stitch the configurations together</a></strong></td><td><code><a href="commands.html#cmd-stitch">/stitch</a></code> build and smart overlap analysis, manual control of the overlap window and configuration order, then merge into one curve per sample.</td><td>1:25</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=iCa7bt0_beI&amp;list=PLa6AxzTbd0qI">See, find, and share your results</a></strong></td><td><code><a href="commands.html#cmd-plot">/plot</a></code> any curve from the prompt, <code><a href="commands.html#cmd-list-iq">/list iq</a></code> your reduced files, and hand results off — a short share link, a zipped email, or a reduction-complete confirmation.</td><td>1:11</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=vlA-EklNncE&amp;list=PLa6AxzTbd0qI">Autopilot, your way</a></strong></td><td>The <code><a href="commands.html#cmd-autopilot">/autopilot</a></code> control surface — setup, filter and resume flags, plus <code>--from</code> to re-enter at any of the thirteen steps.</td><td>1:17</td></tr>
+<tr><td><strong><a href="https://www.youtube.com/watch?v=5NdCHzWO3ls&amp;list=PLa6AxzTbd0qI">Pick up where you left off</a></strong></td><td><code><a href="commands.html#cmd-session">/session save</a></code> and <code><a href="commands.html#cmd-continue">/continue</a></code> so a multi-day reduction never loses its setup, and <code>--continue</code> to fold in newly collected runs without redoing the work.</td><td>1:12</td></tr>
+</tbody></table></div>
+<p>All twelve are on the <a href="https://youtube.com/playlist?list=PLa6AxzTbd0qI&amp;si=CxaD7iJVhCTF13sM">YouTube playlist</a>. They pair with the written <a href="guide.html">step-by-step guide</a> and the full <a href="commands.html">command reference</a>.</p>
+  </article>
+</main>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
+  <span>Generated 2026-08-21 by <code>docs/generate.py</code></span>
+</div></footer>
+<script src="search.js"></script>
+</body>
+</html>

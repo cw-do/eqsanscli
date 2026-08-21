@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.24.1</div>
+          data reduction tool &middot; v0.24.2</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -25,6 +25,7 @@
   </div>
   <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
 <a href="guide.html" class="current">Step-by-step guide</a>
+<a href="tutorials.html">Video tutorials</a>
 <a href="commands.html">Commands</a>
 <a href="parameters.html">Parameters</a>
 <a href="protocol.html">Protocol</a>
@@ -38,6 +39,7 @@
     <p class="lede">One experiment from raw runs to a stitched I(Q), with what to check at each step.</p>
     <p>This is one experiment from raw runs to a stitched, absolutely-scaled I(Q). Each step says what to expect and what to do when it reports a problem.</p>
 <p>If the experiment is routine, <a href="commands.html#cmd-autopilot"><code><a href="commands.html#cmd-autopilot">/autopilot</a></code></a> does all of it in one command — read this anyway once, because it is the same sequence and you will want to know which step failed when one does.</p>
+<p>Prefer to watch first? The <a href="tutorials.html">video tutorials</a> cover this whole walkthrough end to end, plus a short clip for each task below.</p>
 <h2 id="1-load-the-catalog">1 · Load the catalog<a class="anchor" href="#1-load-the-catalog">#</a></h2>
 <pre><code>/load ipts 38681</code></pre>
 <p>Fetches every run in the experiment from ONCat with its title, detector distance, wavelength, frequency, counts and duration, and classifies each one from its title: scattering, transmission, background, empty beam.</p>
@@ -100,7 +102,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-08-19 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-08-21 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

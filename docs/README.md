@@ -28,6 +28,7 @@ System python3, no dependencies. Commit the regenerated `*.html` and
 | `knowledge.html` | the `knowledge/` documents |
 | `changelog.html` | `docs/CHANGELOG.md` |
 | `index.html`, `guide.html`, the parameters preamble | **hand-written**, in `docs/pages/*.md` |
+| `tutorials.html` (the video index) | **hand-written**, in `docs/pages/tutorials.md` (each row links to one video); the embedded overview player + playlist/video IDs live in `generate.py` (`tutorials_page`, `PLAYLIST_ID`, `OVERVIEW_ID`) |
 
 So: to change a command's description edit `SKILL.md`, to change what a parameter
 means edit `knowledge/configurations.md`, and to change the introduction or the

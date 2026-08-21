@@ -5,6 +5,9 @@ If the experiment is routine, [`/autopilot`](commands.html#cmd-autopilot) does a
 of it in one command — read this anyway once, because it is the same sequence and
 you will want to know which step failed when one does.
 
+Prefer to watch first? The [video tutorials](tutorials.html) cover this whole
+walkthrough end to end, plus a short clip for each task below.
+
 ## 1 · Load the catalog
 
 ```

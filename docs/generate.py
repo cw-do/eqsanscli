@@ -29,6 +29,7 @@ import md  # noqa: E402
 PAGES = [
     ("index.html", "Introduction"),
     ("guide.html", "Step-by-step guide"),
+    ("tutorials.html", "Video tutorials"),
     ("commands.html", "Commands"),
     ("parameters.html", "Parameters"),
     ("protocol.html", "Protocol"),
@@ -118,6 +119,44 @@ def page_from_markdown(filename: str, page: str, title: str, lede: str = "") -> 
         if lvl <= 3:
             record(text, page, anchor, "page", title)
     return shell(page, title, body, toc=headings, lede=lede)
+
+
+PLAYLIST_ID = "PLa6AxzTbd0qI"
+PLAYLIST_URL = f"https://youtube.com/playlist?list={PLAYLIST_ID}&amp;si=CxaD7iJVhCTF13sM"
+# The overview video, embedded in the playlist so the player's next/prev walk the
+# whole series. Confirmed to play over an http(s) origin — the earlier Error 153
+# was only the file:// origin of a local preview, not a permissions block.
+OVERVIEW_ID = "8acMTzVWoGU"
+OVERVIEW_EMBED = f"https://www.youtube.com/embed/{OVERVIEW_ID}?list={PLAYLIST_ID}&amp;rel=0"
+
+
+def tutorials_page() -> str:
+    """The hand-written video index (pages/tutorials.md) with the overview video
+    embedded above it. The prose and the linked table are Markdown; only the
+    player is raw HTML the Markdown renderer can't express."""
+    source = open(os.path.join(HERE, "pages", "tutorials.md")).read()
+    body, headings = md.render(source, link_commands=True)
+    for lvl, text, anchor in headings:
+        if lvl <= 3:
+            record(text, "tutorials.html", anchor, "page", "Video tutorials")
+    # A live embed of the overview video within the playlist context; the player's
+    # own controls walk the remaining eleven. A responsive 16:9 wrapper keeps it
+    # from overflowing the column on narrow screens (see .video-frame in site.css).
+    player = (
+        '<div class="video-frame">'
+        f'<iframe src="{OVERVIEW_EMBED}" title="EQSANSCLI — the tutorial series" '
+        'loading="lazy" allow="accelerometer; autoplay; clipboard-write; '
+        'encrypted-media; gyroscope; picture-in-picture; web-share" '
+        'referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>'
+        '</div>'
+        '<p class="video-frame-cap">Start with the 3-minute overview, or '
+        f'<a href="{PLAYLIST_URL}" target="_blank" rel="noopener">open the full '
+        'playlist on YouTube &#8599;</a>.</p>'
+    )
+    return shell(
+        "tutorials.html", "Video tutorials", player + body, toc=headings,
+        lede="Twelve short screencasts of the real tool reducing one live "
+             "experiment — watch the overview, then dip into any single task.")
 
 
 def commands_page() -> str:
@@ -316,6 +355,7 @@ def main() -> None:
         "guide.md", "guide.html", "Step-by-step guide",
         "One experiment from raw runs to a stitched I(Q), with what to check at "
         "each step.")))
+    written.append(("tutorials.html", tutorials_page()))
     written.append(("commands.html", commands_page()))
     written.append(("parameters.html", parameters_page()))
     written.append(("protocol.html", protocol_page()))
