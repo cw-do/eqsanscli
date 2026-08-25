@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.25.0 | 2026-08-24 | `/matchruns` matches a displacement series (`_d0`, `_d2`, …) to its single transmission — the `_dX` suffix is ignored, and a config with one transmission assigns it to every sample (warns "matched by configuration"). `/set <row> trans,emp <run>` sets several run fields at once (`,`/`+`, run fields only). |
 | 0.20.1 | 2026-08-18 | Fix: `/mask create` crashed without `--dry-run` — a local named `state` shadowed the SessionState parameter. Coordinate system documented. |
 | 0.20.0 | 2026-08-18 | Beam mask is a plain disc again; gravity leaks are reported and masked only on `--leak`, as one disc per lobe. Replaces 0.19.0's capsule. |
 | 0.19.0 | 2026-08-18 | The beam mask covers direct beam that fell under gravity: a capsule spanning the vertical streak, not just the shadow. |
@@ -197,6 +198,45 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-24: transmission for a displacement series, and combined `/set` (v0.25.0)
+
+Two gaps found during real-IPTS reduction (IPTS-37828, runs 187233–187242: one
+transmission `T-70.30PBD_0.25phr` and a scattering series `S-…_d0, _d2, … _d16`,
+all 4m 2.5Afs 3mmsa, `_dX` = sample displacement).
+
+**1 — `/matchruns` missed the transmission.** Matching is by sample name, and the
+`_dX` suffix made every scattering name differ from the transmission's. Two
+additions, both deterministic (no LLM):
+- **Displacement-aware base match.** `_match_base()` strips a trailing temperature
+  *and* any `_d<number>` token, so `poly_d0`, `poly_d16` and `T-poly` all key on
+  `poly`. Only the numeric `_dN` convention is stripped — `_d2o` and other
+  non-numeric `d` tokens are left alone (the `(?=_|$)` lookahead needs the digits
+  to end the token), so D2O-like names don't collapse together.
+- **Sole-transmission-per-config fallback.** If names still don't match and a
+  configuration holds exactly one plain transmission run, it can only be that one
+  — assign it, and warn that it "matched by configuration" so the user verifies.
+  Guarded: two transmissions in a config → no guess.
+
+The base match handles the real 187233 case cleanly (no warning); the fallback is
+the safety net for series whose names share nothing.
+
+**2 — one run as both transmission and empty beam, in one command.**
+`/set <row> trans,emp <run>` now accepts several run fields separated by `,` or
+`+` (run fields only — trans/bkg/bkgtrans/emp; mixing in thickness/sample/cfg is
+refused rather than guessed). Clearing (`none`) works across the set too. Note
+this makes it easy to set `trans == emp`, which **TBL-06** flags as an error
+(transmission ÷ empty beam ≈ 1); the rule is unchanged and the capability is a
+deliberate manual override, not the matcher's default.
+
+`tests/test_matching.py` (11 checks): the displacement series resolves, the
+fallback fires and is guarded, `_d2o` is protected, and the combined `/set` sets
+both fields / rejects special-field mixes / clears / leaves single-field behaviour
+untouched. 209 tests.
+
+**Files changed:** `services/matching_service.py`, `commands/matching.py`,
+`services/llm_handler.py`, `tests/test_matching.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-19: a documentation site under `docs/` (no version bump)
 
@@ -374,33 +414,4 @@ derivation not just the answer, measure against real runs before believing it.
 `knowledge/protocol.md` (+11 rules), `tests/test_knowledge.py` (+3, 23),
 `tests/test_instrument_files.py` (live test de-hardcoded).
 
-### 2026-08-18: every threshold documented (no version bump — docs only)
-
-Follow-up to the band question: *"is measured threshold 0.8? or 0.85??"* — no,
-**0.5**. The 0.80/0.85 were response *levels* at pixels 11 and 13, printed in the
-same table as the threshold, which is exactly how documentation causes confusion.
-
-**README gains a *What sets each size* section**: one row per measured quantity —
-beam stop with and without flare, beam centre, tube-end bands, dead/hot/marginal
-tubes, leak discs — giving what it is measured from, the number, the bound applied
-after, and the flag that overrides it. Below it, a table of the named constants
-with their values, and the reason for the two that are not self-explanatory (the
-1.2 growth on the no-flare path, the 11-pixel floor).
-
-The band item now shows the walk itself on run 186621 — 0.29 at pixel 8, 0.52 at
-9, 0.72, 0.80, 0.83, 0.85 — so the threshold and the response levels cannot be
-mistaken for each other again, and says why the band stops where response *starts*
-rather than where it is complete: the residual 15-20% is the sensitivity map's
-job.
-
-`test_documented_thresholds` asserts all twelve constants against the table.
-Writing it caught the table naming `FLARE_CONTRAST`, which v0.22.0 deleted when
-cross cuts replaced the ring fit.
-
-Also fixed: a `knowledge/instrument-files.md` edit in v0.24.1 silently did nothing
-because its target text spanned a line break, and the script did not assert. The
-paragraph is now a three-row table of what is measured and what bounds it.
-
-**Files changed:** README.md, `knowledge/instrument-files.md`, SKILL.md,
-AGENT_SKILL.md, `tests/test_mask.py` (+1, 67 total).
 

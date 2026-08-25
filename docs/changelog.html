@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.24.2</div>
+          data reduction tool &middot; v0.25.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -40,6 +40,13 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-18-every-threshold-documented-no-version-bump-docs-only">2026-08-18: every threshold documented (no version bump — docs only)<a class="anchor" href="#2026-08-18-every-threshold-documented-no-version-bump-docs-only">#</a></h3>
+<p>Follow-up to the band question: <em>&quot;is measured threshold 0.8? or 0.85??&quot;</em> — no, <strong>0.5</strong>. The 0.80/0.85 were response <em>levels</em> at pixels 11 and 13, printed in the same table as the threshold, which is exactly how documentation causes confusion.</p>
+<p>**README gains a <em>What sets each size</em> section**: one row per measured quantity — beam stop with and without flare, beam centre, tube-end bands, dead/hot/marginal tubes, leak discs — giving what it is measured from, the number, the bound applied after, and the flag that overrides it. Below it, a table of the named constants with their values, and the reason for the two that are not self-explanatory (the 1.2 growth on the no-flare path, the 11-pixel floor).</p>
+<p>The band item now shows the walk itself on run 186621 — 0.29 at pixel 8, 0.52 at 9, 0.72, 0.80, 0.83, 0.85 — so the threshold and the response levels cannot be mistaken for each other again, and says why the band stops where response <em>starts</em> rather than where it is complete: the residual 15-20% is the sensitivity map&#x27;s job.</p>
+<p><code>test_documented_thresholds</code> asserts all twelve constants against the table. Writing it caught the table naming <code>FLARE_CONTRAST</code>, which v0.22.0 deleted when cross cuts replaced the ring fit.</p>
+<p>Also fixed: a <code>knowledge/instrument-files.md</code> edit in v0.24.1 silently did nothing because its target text spanned a line break, and the script did not assert. The paragraph is now a three-row table of what is measured and what bounds it.</p>
+<p><strong>Files changed:</strong> README.md, <code>knowledge/instrument-files.md</code>, SKILL.md, AGENT_SKILL.md, <code>tests/test_mask.py</code> (+1, 67 total).</p>
 <h3 id="2026-08-21-v0242-the-documentation-site-gains-a-video-index">2026-08-21 (v0.24.2): the documentation site gains a video index<a class="anchor" href="#2026-08-21-v0242-the-documentation-site-gains-a-video-index">#</a></h3>
 <p>Twelve screencasts of the real tool reducing one live experiment (IPTS-38603) are now published on YouTube, and the site links them. A new <strong>Video tutorials</strong> page (<code>docs/pages/tutorials.md</code>) embeds the 3-minute overview in its playlist context and lists all twelve — the overview plus eleven task clips — each row linking to its own video (<code>watch?v=&lt;id&gt;&amp;list=&lt;playlist&gt;</code>), with commands in the tables linking through to the command reference.</p>
 <p>The overview is a live <code>&lt;iframe&gt;</code> embed rather than a click-through poster: the embed was confirmed to play over an http(s) origin, so the earlier Error 153 was only the <code>file://</code> origin of a local preview, not a permissions block. The index page, guide and home page cross-link the videos.</p>
@@ -430,7 +437,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-08-21 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-08-25 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

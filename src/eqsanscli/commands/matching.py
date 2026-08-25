@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
@@ -226,6 +227,101 @@ SETTABLE_FIELDS = {
 }
 
 
+# Run-assignment fields — the only ones that may be combined in one /set, because
+# they all take the same value semantics (a run-number string, or a clear).
+_RUN_FIELDS = frozenset({
+    "transmission_run", "background_scatt", "background_trans", "empty_beam",
+})
+
+# attr name → canonical short label, for echoing back what was set.
+_FIELD_SHORT = {
+    "transmission_run": "trans",
+    "background_scatt": "bkg",
+    "background_trans": "bkgtrans",
+    "empty_beam": "emp",
+    "thickness": "thickness",
+    "sample_name": "sample",
+    "configuration_override": "cfg",
+}
+
+
+def _resolve_fields(field_token: str) -> tuple[list[str], str]:
+    """Resolve a field token to a list of attr names.
+
+    A token may name several fields with ``,`` or ``+`` (e.g. ``trans,emp``) so a
+    single run can be assigned to both at once. Returns (attr_names, bad_name);
+    bad_name is the first unrecognized field, or "" on success.
+    """
+    parts = [p for p in re.split(r"[,+]", field_token.lower()) if p]
+    attrs: list[str] = []
+    for p in parts:
+        if p not in SETTABLE_FIELDS:
+            return [], p
+        attr = SETTABLE_FIELDS[p]
+        if attr not in attrs:
+            attrs.append(attr)
+    return attrs, ""
+
+
+def _apply_field_set(
+    target_rows: list, attr_names: list[str], value_str: str, state,
+) -> tuple[bool, str, str]:
+    """Set one or more fields on the given rows.
+
+    Returns (ok, display_value, error). Combining fields is only allowed for the
+    run-assignment fields (they share value semantics); mixing in thickness /
+    sample / cfg is rejected with guidance rather than guessed.
+    """
+    clearing = value_str.strip().lower() in ("none", "null", '""', "''", "")
+
+    if len(attr_names) > 1:
+        non_run = [_FIELD_SHORT[a] for a in attr_names if a not in _RUN_FIELDS]
+        if non_run:
+            return False, "", (
+                f"Cannot combine {', '.join(non_run)} with other fields — only run "
+                f"assignments (trans, bkg, bkgtrans, emp) can be set together. "
+                f"Set {', '.join(non_run)} on its own."
+            )
+
+    if clearing:
+        for a in attr_names:
+            if a == "thickness":
+                return False, "", "Cannot clear thickness — set a numeric value."
+            if a == "sample_name":
+                return False, "", "Cannot clear sample_name — provide a non-empty name."
+        for r in target_rows:
+            for a in attr_names:
+                r.set_field(a, "")
+        return True, "(cleared)", ""
+
+    # Single special-field forms keep their dedicated parsing/validation.
+    if attr_names == ["thickness"]:
+        try:
+            pv = float(value_str)
+        except ValueError:
+            return False, "", f"Invalid thickness value: {value_str}"
+        for r in target_rows:
+            r.set_field("thickness", pv)
+        return True, str(pv), ""
+    if attr_names == ["configuration_override"]:
+        ok, resolved, err = _validate_config_target(value_str, state, target_rows)
+        if not ok:
+            return False, "", err
+        for r in target_rows:
+            r.set_field("configuration_override", resolved)
+        return True, resolved, ""
+
+    # Run fields (and sample_name) — plain string value applied to every attr.
+    for r in target_rows:
+        for a in attr_names:
+            r.set_field(a, value_str)
+    return True, value_str, ""
+
+
+def _field_label(attr_names: list[str]) -> str:
+    return "+".join(_FIELD_SHORT.get(a, a) for a in attr_names)
+
+
 def _validate_config_target(value: str, state, rows: list | None = None) -> tuple[bool, str, str]:
     """Validate that `value` names a config the given rows may reference.
 
@@ -338,6 +434,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         /set 167942 trans 167931
         /set 167942 bkg 167940
         /set 167942 emp 167929
+        /set 167942 trans,emp 167931    ← one run as both transmission AND empty beam
         /set 167942 bkg none            ← clears background
         /set 167942 trans "111, 112"    ← multi-run for combined statistics
         /set 167942 thickness 0.1
@@ -424,13 +521,13 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         field_name = args[2].lower()
         value_str = " ".join(args[3:])
 
-        if field_name not in SETTABLE_FIELDS:
+        attr_names, bad = _resolve_fields(field_name)
+        if bad:
             return CommandResult(
                 success=False,
-                message=f"Unknown field: {field_name}. Valid fields: {', '.join(SETTABLE_FIELDS.keys())}",
+                message=f"Unknown field: {bad}. Valid fields: {', '.join(SETTABLE_FIELDS.keys())}",
             )
 
-        attr_name = SETTABLE_FIELDS[field_name]
         table = state.current_table
 
         if by_config:
@@ -452,40 +549,17 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
                 message=_no_match_message(table, pattern, by_config=by_config),
             )
 
-        if value_str.lower() in ("none", "null", '""', "''", ""):
-            if attr_name == "thickness":
-                return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
-            if attr_name == "sample_name":
-                return CommandResult(success=False, message="Cannot clear sample_name — provide a non-empty name.")
-            for row in matching_rows:
-                row.set_field(attr_name, "")
-            if attr_name == "configuration_override":
-                return CommandResult(
-                    success=True,
-                    message=f"Cleared config override for {len(matching_rows)} row(s) matching "
-                    f"{selector} {pattern} — rows now use their physics-derived config.",
-                )
+        ok, display, err = _apply_field_set(matching_rows, attr_names, value_str, state)
+        if not ok:
+            return CommandResult(success=False, message=err)
+
+        label = _field_label(attr_names)
+        if display == "(cleared)":
             return CommandResult(
                 success=True,
-                message=f"Cleared {field_name} for {len(matching_rows)} row(s) matching "
+                message=f"Cleared {label} for {len(matching_rows)} row(s) matching "
                 f"{selector} {pattern}.",
             )
-
-        if attr_name == "thickness":
-            try:
-                parsed_value: str | float = float(value_str)
-            except ValueError:
-                return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
-        elif attr_name == "configuration_override":
-            ok, resolved, err = _validate_config_target(value_str, state, matching_rows)
-            if not ok:
-                return CommandResult(success=False, message=err)
-            parsed_value = resolved
-        else:
-            parsed_value = value_str
-
-        for row in matching_rows:
-            row.set_field(attr_name, parsed_value)
 
         if by_config:
             detail = "  Samples: " + ", ".join(
@@ -497,7 +571,7 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             )
         return CommandResult(
             success=True,
-            message=f"Set {field_name}={parsed_value} for {len(matching_rows)} row(s) matching "
+            message=f"Set {label}={display} for {len(matching_rows)} row(s) matching "
             f"{selector} {pattern}.\n{detail}",
         )
 
@@ -514,13 +588,13 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
     field_name = args[1].lower()
     value_str = " ".join(args[2:])
 
-    if field_name not in SETTABLE_FIELDS:
+    attr_names, bad = _resolve_fields(field_name)
+    if bad:
         return CommandResult(
             success=False,
-            message=f"Unknown field: {field_name}. Valid fields: {', '.join(SETTABLE_FIELDS.keys())}",
+            message=f"Unknown field: {bad}. Valid fields: {', '.join(SETTABLE_FIELDS.keys())}",
         )
 
-    attr_name = SETTABLE_FIELDS[field_name]
     table = state.current_table
 
     indices = parse_row_selection(run_id, table)
@@ -532,41 +606,17 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
             message=f"'{run_id}' not found as row index, range, or scattering run in table '{table.name}'.",
         )
 
-    if value_str.lower() in ("none", "null", '""', "''", ""):
-        if attr_name == "thickness":
-            return CommandResult(success=False, message="Cannot clear thickness — set a numeric value.")
-        if attr_name == "sample_name":
-            return CommandResult(success=False, message="Cannot clear sample_name — provide a non-empty name.")
-        for r in target_rows:
-            r.set_field(attr_name, "")
-        label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
-        if attr_name == "configuration_override":
-            return CommandResult(
-                success=True,
-                message=f"Cleared config override for {label} — now using physics-derived config.",
-            )
-        return CommandResult(success=True, message=f"Cleared {field_name} for {label}.")
+    ok, display, err = _apply_field_set(target_rows, attr_names, value_str, state)
+    if not ok:
+        return CommandResult(success=False, message=err)
 
-    if attr_name == "thickness":
-        try:
-            parsed_value: str | float = float(value_str)
-        except ValueError:
-            return CommandResult(success=False, message=f"Invalid thickness value: {value_str}")
-    elif attr_name == "configuration_override":
-        ok, resolved, err = _validate_config_target(value_str, state, target_rows)
-        if not ok:
-            return CommandResult(success=False, message=err)
-        parsed_value = resolved
-    else:
-        parsed_value = value_str
-
-    for r in target_rows:
-        r.set_field(attr_name, parsed_value)
-
-    label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
+    field_label = _field_label(attr_names)
+    row_label = f"{len(target_rows)} row(s)" if len(target_rows) > 1 else f"run {run_id} ({target_rows[0].sample_name})"
+    if display == "(cleared)":
+        return CommandResult(success=True, message=f"Cleared {field_label} for {row_label}.")
     return CommandResult(
         success=True,
-        message=f"Set {field_name}={parsed_value} for {label}.",
+        message=f"Set {field_label}={display} for {row_label}.",
     )
 
 

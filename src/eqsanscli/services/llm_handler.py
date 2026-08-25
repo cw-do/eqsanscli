@@ -172,6 +172,7 @@ WORKING TABLE:
     OR replace /reduce --new + manual stitch with /autopilot --continue (preferred — auto-stitches/plots).
 /assign bkg <sample>            - Reassign background for ALL rows (config-aware, sets both bkg+bkgtrans) — PREFER this over per-row /set for background
 /set <row> <field> <value>      - Set row field (trans, bkg, bkgtrans, emp, thickness, sample/name). <row> = index, run number, range (1-5, 1,3,5), or all
+/set <row> trans,emp <run>      - Set several run fields at once with ',' or '+' (run fields only: trans/bkg/bkgtrans/emp). "assign <run> as both transmission and empty beam" → /set <row> trans,emp <run>
 /set <row> <field> none         - Clear a field (thickness and sample name can't be cleared)
 /set <row> sample <newname>     - Rename the sample on a row (alias: 'name'). Marks done rows as modified.
 /set --sample <name> <field> <value> - Set field for all rows whose sample name matches <name>.

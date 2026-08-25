@@ -179,6 +179,7 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 |-----------|--------|
 | All fields matched (trans, bkg, emp all N/N) | proceed |
 | Missing transmission | `/set --sample <name> trans <run>` or `/set <row> trans <run>` |
+| Displacement series (`_d0`, `_d2`, …) shares one transmission | `/matchruns` handles it: the `_dX` suffix is ignored, and a config with a single transmission assigns it to all its samples (warns that it matched by configuration) |
 | Missing background | `/assign bkg <sample_name>` — PREFERRED, handles config matching |
 | Missing empty beam | `/set <row> emp <run>`, or `/set --config <id> emp <run>` for a whole configuration |
 | Mislabeled run (title says T- but it is scattering) | `/reclass <runs> scatt`, then `/matchruns` again |
@@ -389,6 +390,7 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/show table --sample <name>` | Filter view by sample name |
 | `/assign bkg <sample>` | Set background for ALL rows (config-aware, sets bkg+bkgtrans) |
 | `/set <row> <field> <value>` | Set a field: trans, bkg, bkgtrans, emp, thickness |
+| `/set <row> trans,emp <run>` | Set several run fields at once (`,` or `+`; run fields only) |
 | `/set <row> <field> none` | Clear a field |
 | `/set --sample <name> <field> <value>` | Bulk set by sample name |
 | `/remove <row>` | Remove rows |

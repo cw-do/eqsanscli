@@ -188,6 +188,24 @@ def _classify_run_from_row(row) -> ClassifiedRun:
     )
 
 
+def _match_base(sample_name: str) -> str:
+    """Normalization key for transmission matching.
+
+    Strips a trailing temperature (``_90C``) and any sample-displacement token
+    (``_d0``, ``_d16``) so one transmission measured for a sample series matches
+    every displacement of it. A series like ``S-poly_d0``, ``S-poly_d2`` … all
+    reduce to ``poly`` and find the single ``T-poly`` transmission.
+
+    Only the displacement convention ``_d<number>`` is stripped; ``_d2o`` and
+    other non-numeric ``d`` tokens are left alone (the ``(?=_|$)`` lookahead
+    requires the digits to end the token).
+    """
+    s = re.sub(r"_?\d{2,3}C$", "", sample_name, flags=re.IGNORECASE)  # temperature
+    s = re.sub(r"_d\d+(?=_|$)", "", s, flags=re.IGNORECASE)           # displacement
+    s = re.sub(r"__+", "_", s).strip("_")
+    return s.lower()
+
+
 def _extract_sample_name(title: str) -> str:
     """Extract a clean sample name from an ONCat run title.
 
@@ -306,19 +324,29 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
         # Transmission lookup: ALL transmission-type runs indexed by sample name.
         # This ensures bkg/empty scattering runs find their T-banjo/T-empty matches.
         trans_lookup: dict[str, str] = {}
-        trans_lookup_base: dict[str, str] = {}  # fallback: strip temperature for matching
+        trans_lookup_base: dict[str, str] = {}  # fallback: temperature/displacement stripped
         for r in runs:
             if r.run_type in ("transmission", "bkg_trans", "empty_trans"):
                 trans_lookup[r.sample_name.lower()] = str(r.run_number)
-                base = re.sub(r"_?\d{2,3}C$", "", r.sample_name, flags=re.IGNORECASE).lower()
-                trans_lookup_base[base] = str(r.run_number)
+                trans_lookup_base[_match_base(r.sample_name)] = str(r.run_number)
+
+        # Last-resort fallback: a sample series measured at several displacements
+        # (S-…_d0, _d2, …) shares ONE transmission. If this config has exactly one
+        # plain transmission run, an unmatched normal scattering row can only mean
+        # that run — assign it, but record it so the user can see it was matched by
+        # configuration rather than by name.
+        sole_trans = [r for r in runs if r.run_type == "transmission"]
+        sole_trans_run = str(sole_trans[0].run_number) if len(sole_trans) == 1 else ""
+        by_config_assigned: list[str] = []
 
         for s in all_scattering:
             trans_run = trans_lookup.get(s.sample_name.lower(), "")
+            matched_by = "name"
             if not trans_run:
-                # Fallback: strip temperature, match on base name
-                s_base = re.sub(r"_?\d{2,3}C$", "", s.sample_name, flags=re.IGNORECASE).lower()
-                trans_run = trans_lookup_base.get(s_base, "")
+                # Fallback: strip temperature and displacement, match on base name
+                trans_run = trans_lookup_base.get(_match_base(s.sample_name), "")
+                if trans_run:
+                    matched_by = "base"
 
             if s.is_background or s.is_empty:
                 # Background-cell and empty-beam rows don't get an auto-assigned
@@ -328,6 +356,10 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                 row_bkg_scatt = ""
                 row_bkg_trans = ""
             else:
+                if not trans_run and sole_trans_run:
+                    trans_run = sole_trans_run
+                    matched_by = "config"
+                    by_config_assigned.append(s.sample_name)
                 row_bkg_scatt = default_bkg_scatt
                 row_bkg_trans = default_bkg_trans
 
@@ -344,6 +376,15 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                 frequency=s.frequency,
             )
             table.add_row(row)
+
+        if by_config_assigned:
+            n = len(by_config_assigned)
+            warnings.append(
+                f"[{cfg_label}] transmission {sole_trans_run} matched to {n} row(s) "
+                f"by configuration (one transmission in this config, names did not "
+                f"match): {', '.join(by_config_assigned)}.\n"
+                f"  Verify, or use /set <row> trans <run> to override."
+            )
 
     return table, warnings
 
