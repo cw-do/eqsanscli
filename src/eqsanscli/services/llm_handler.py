@@ -415,6 +415,7 @@ AUTOPILOT:
 /autopilot <ipts> --force           - Re-reduce all rows even if status is 'done' (use sparingly; user must explicitly ask "re-reduce", "force", "redo everything")
 /autopilot <ipts> --fresh           - Force a clean catalog reload + table re-match, ignoring in-memory state. Use when the user says "fresh", "from scratch", "clean run", "reload everything", "start over". Does NOT clear /set config overrides — those are still preserved.
 /autopilot current --from <N>       - Skip steps 1..(N-1) of autopilot. Steps: 1=load, 2=match, 3=verify, 4=presets, 5=outputdir, 6=reduce-standard, 7=calibrate, 8=apply-scale, 9=reduce-samples, 10-12=stitch, 13=plot
+/autopilot current --to <N>         - Stop after step N (aliases --till/--until). Steps that group stop as a block: --to 6/7 run through 8 (scale calibration); --to 10/11 run through 12 (stitch). Combine with --from for a window.
   IMPORTANT: When user says "use X as standard sample" or "use X for calibration", use --standard <X>.
     "run autopilot using porsilb1 as standard" → /autopilot current --standard porsilb1
     "use existing table, calibrate with porsil b1" → /autopilot current --standard "porsil b1"
@@ -423,6 +424,14 @@ AUTOPILOT:
     "skip catalog/match/presets, run porsil and reduce rest" → /autopilot current --from 5
     "match table and configs are done, run from output dir setup" → /autopilot current --from 5
     "everything is set up, just calibrate and reduce" → /autopilot current --from 5
+  IMPORTANT: "find/get the scale factor", "reduce porsil (the standard) and calibrate", "run until you get the scale factor" mean run autopilot through the scale-calibration block and STOP before reducing samples → --to 8. Autopilot steps 1-2 build the working table first, so this works whether or not a table already exists; it auto-detects porsil as the standard (use --standard <name> for a different one).
+    "reduce porsil and find scale factor" → /autopilot current --to 8
+    "run autopilot until you get the scalefactor" → /autopilot current --to 8
+    "just calibrate the absolute scale, don't reduce samples yet" → /autopilot current --to 8
+    "reduce porsil and calibrate for IPTS 38397" → /autopilot 38397 --to 8
+    "table's ready — just do the standard and scale factor" → /autopilot current --from 6 --to 8
+    "reduce everything but don't stitch or plot" → /autopilot current --to 9
+    "just build the match table with autopilot" → /autopilot current --to 2
 
 SETTINGS:
 /settings                       - Show current settings

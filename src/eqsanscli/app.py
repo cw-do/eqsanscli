@@ -471,14 +471,14 @@ class EQSANSApp(App):
                 data.get("thickness"), data.get("bkg_sample"), data.get("config_filter"),
                 data.get("force", False), data.get("continue_mode", False),
                 data.get("standard_sample"), data.get("from_step", 1),
-                data.get("fresh", False),
+                data.get("fresh", False), data.get("to_step"),
             )
 
     def action_cancel_job(self) -> None:
         self.cancel_job()
 
     @work(thread=True)
-    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None, force: bool = False, continue_mode: bool = False, standard_sample: str | None = None, from_step: int = 1, fresh: bool = False) -> None:
+    def run_autopilot_worker(self, ipts: int, samples: list[str] | None = None, excludes: list[str] | None = None, thickness: float | None = None, bkg_sample: str | None = None, config_filter: str | None = None, force: bool = False, continue_mode: bool = False, standard_sample: str | None = None, from_step: int = 1, fresh: bool = False, to_step: int | None = None) -> None:
         import asyncio
         from eqsanscli.services.autopilot import run_autopilot_sync
 
@@ -522,6 +522,7 @@ class EQSANSApp(App):
                 standard_sample=standard_sample,
                 from_step=from_step,
                 fresh=fresh,
+                to_step=to_step,
             )
         finally:
             loop.close()

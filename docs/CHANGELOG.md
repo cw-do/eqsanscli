@@ -7,6 +7,47 @@ the version it shipped in.
 
 ---
 
+### 2026-08-18: structure for what comes next (no version bump — docs and tests)
+
+Asked whether the knowledge and instructions are structured well enough to take
+new algorithms. Three things fixed, in the order they were hurting.
+
+**1. CLAUDE.md was 1798 lines, 1678 of them change log** (43 entries), loaded into
+every session, with the 120 lines that actually describe the project buried on
+top. History moved to `docs/CHANGELOG.md`, which nothing loads; the last five
+entries stay here. Adding an entry now means moving the oldest one out.
+
+**2. The Testing section claimed "no formal test suite"** while six suites and 176
+checks existed. It now names each suite, gives one command
+(`python3 -m pytest -q tests/`), and states the two rules that keep the suites
+honest: never pin a machine-physics value to a literal, and do pin documented
+constants.
+
+That was not hypothetical — `test_live_current_cycle_resolves_to_2026b` was
+**failing** when the whole directory ran, because machine physics re-reduced AgBe
+that afternoon and `detoffset` moved 66.763 → 66.714. A test hardcoding a cycle
+value fails on the day the resolver correctly picks up new calibration. It now
+asserts that what resolves equals what the cycle folder currently holds, within a
+plausibility range, and that the source is not a `.OLD` backup.
+
+**3. `knowledge/protocol.md` gained the `MSK` section** — 11 rules for the most
+developed algorithm in the repo, which until now answered to no authority:
+uniformly illuminated run and configuration in the filename (MSK-01), refuse
+rather than guess (MSK-02), size from the horizontal cut only (MSK-03), reach past
+the umbra (MSK-04), band floor (MSK-05), leaks reported and masked below only
+(MSK-06), tube judgement (MSK-07), read-back verification (MSK-08), millimetres
+not indices (MSK-09), plus MSK-10/11 `unenforced` as backlog. Three new
+code-agreement tests in `test_knowledge.py` check the band floor, the refusal and
+the below-only leak rule against the code.
+
+Also added to CLAUDE.md: the rule-prefix list, and an **Adding a new algorithm**
+section — pure numpy in `services/`, write the protocol rule first, report the
+derivation not just the answer, measure against real runs before believing it.
+
+**Files changed:** CLAUDE.md (1798 → 328 lines), `docs/CHANGELOG.md` (new),
+`knowledge/protocol.md` (+11 rules), `tests/test_knowledge.py` (+3, 23),
+`tests/test_instrument_files.py` (live test de-hardcoded).
+
 ### 2026-08-18: every threshold documented (no version bump — docs only)
 
 Follow-up to the band question: *"is measured threshold 0.8? or 0.85??"* — no,

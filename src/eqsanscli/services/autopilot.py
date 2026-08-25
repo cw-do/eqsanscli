@@ -339,8 +339,14 @@ def run_autopilot_sync(
     standard_sample: str | None = None,
     from_step: int = 1,
     fresh: bool = False,
+    to_step: int | None = None,
 ) -> None:
-    """Runs entirely in a thread. dispatch_sync wraps async dispatch via loop.run_until_complete."""
+    """Runs entirely in a thread. dispatch_sync wraps async dispatch via loop.run_until_complete.
+
+    ``to_step`` (from ``--to``/``--till``): the last step to run. After that step
+    completes, autopilot writes a resumable summary and stops. ``None`` = run all
+    13 steps. Combine with ``--from`` to run a window (e.g. ``--from 6 --to 8``).
+    """
 
     t0 = time.time()
 
@@ -382,11 +388,46 @@ def run_autopilot_sync(
         if not ipts:
             ipts = state.ipts
 
+    def _maybe_stop(step_completed: int) -> bool:
+        """If ``--to`` says to stop after this step, write a resumable summary,
+        save the session, and return True. Callers do ``if _maybe_stop(N): return``.
+
+        The check is ``>=`` so a target with no exact checkpoint (e.g. --to 10,
+        inside the 10–12 stitch block) stops at the next boundary rather than
+        running to the end."""
+        if to_step is None or step_completed < to_step:
+            return False
+        out_dir = os.path.abspath(state.output_directory)
+        total = time.time() - t0
+        tbl = state.current_table
+        n_reduced = sum(1 for row in tbl.rows if row.status == "done")
+        n_failed = sum(1 for row in tbl.rows if row.status == "error")
+        write(
+            f"\n[bold cyan]━━━ AUTOPILOT STOPPED (--to {to_step}) ━━━[/bold cyan]\n"
+            f"  Ran steps {from_step}–{step_completed} of 13.\n"
+            f"  IPTS-{ipts} | {n_reduced} reduced | {n_failed} failed | "
+            f"{len(tbl.configurations)} configs\n"
+            f"  Output: {out_dir}"
+        )
+        try:
+            session_path = _save_autopilot_session(state, out_dir)
+            write(
+                f"  [dim]Session saved: {session_path}[/dim]\n"
+                f"  [dim]Resume with /autopilot --from {step_completed + 1}"
+                f" (or --continue).[/dim]"
+            )
+        except Exception as e:
+            write(f"  [yellow]⚠ Failed to save autopilot session: {e}[/yellow]")
+        write(f"  Total time: {_fmt(total)}")
+        return True
+
     label_parts = []
     if continue_mode:
         label_parts.append("continue")
     if from_step > 1:
         label_parts.append(f"from step {from_step}")
+    if to_step is not None:
+        label_parts.append(f"to step {to_step}")
     if sample_filter:
         label_parts.append(f"samples: {', '.join(sample_filter)}")
     if exclude_filter:
@@ -652,6 +693,9 @@ def run_autopilot_sync(
         removed_count = rows_before - len(table.rows)
         write(f"[bold]  Config filter:[/bold] keeping only {config_filter}")
         write(f"  [green]✓[/green] Removed {removed_count} rows, {len(table.rows)} remaining\n")
+
+    if _maybe_stop(2):
+        return
 
     # === Step 3: Verify assignments — show the table ===
     if from_step >= 4:
@@ -1008,6 +1052,9 @@ def run_autopilot_sync(
                 write(f"      [dim]{', '.join(calib)}[/dim]")
         write("")
 
+    if _maybe_stop(4):
+        return
+
     # === Step 5: Set output directory ===
     output_dir = os.path.abspath(state.output_directory)
     if from_step >= 6:
@@ -1020,6 +1067,9 @@ def run_autopilot_sync(
             write(f"  [green]✓[/green] {output_dir} [dim](user-set)[/dim]\n")
         else:
             write(f"  [green]✓[/green] {output_dir}\n")
+
+    if _maybe_stop(5):
+        return
 
     # === Step 6: Reduce standard sample (scale=1.0) ===
     from eqsanscli.services.reduction_service import reduce_row
@@ -1132,6 +1182,9 @@ def run_autopilot_sync(
             write(f"      {cfg}: standardabsolutescale = {scale}")
         write(f"    [dim]To calibrate, add a {std_label} sample and re-run, or use --standard <name> to specify a different standard.[/dim]\n")
 
+    if _maybe_stop(8):
+        return
+
     # === Step 9: Reduce all non-standard samples ===
     non_porsil = [row for row in table.rows if not _is_standard_sample(row.sample_name, standard_sample)]
 
@@ -1166,6 +1219,9 @@ def run_autopilot_sync(
         return
 
     write(f"  [green]✓[/green] {n_ok} succeeded, [red]{n_fail} failed[/red]\n")
+
+    if _maybe_stop(9):
+        return
 
     # === Step 10-12: Smart Stitch ===
     configs = table.configurations
@@ -1366,6 +1422,9 @@ def run_autopilot_sync(
         write("[bold]Step 12/13:[/bold] Stitch profiles — [dim]Skipped[/dim]")
         write("    Only 1 configuration (60Hz) — stitching requires 2+ configs or 30Hz")
         write("    frame-skipping mode to merge overlapping Q-ranges.\n")
+
+    if _maybe_stop(12):
+        return
 
     # === Step 13: Plot ===
     write("[bold]Step 13/13:[/bold] Plotting results...")

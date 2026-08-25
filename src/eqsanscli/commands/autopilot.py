@@ -30,6 +30,8 @@ _USAGE = (
     "  /autopilot 35884 --continue                   — Reduce only NEW runs (reuse saved calibration)\n"
     "  /autopilot --continue                         — Continue from saved session in outputdir\n"
     "  /autopilot current --from 5                   — Start from step 5 (skip catalog/match/presets)\n"
+    "  /autopilot current --to 8                     — Stop after the scale factor is found+applied (steps 1–8)\n"
+    "  /autopilot current --from 6 --to 8            — Only the standard: reduce porsil, calibrate, apply scale\n"
     "  /autopilot 35884 --standard porsilb1          — Use porsilb1 as calibration standard\n"
     "  /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples\n"
     "  /autopilot 35884 --exclude Y5                 — Reduce all except Y5\n"
@@ -64,7 +66,16 @@ _USAGE = (
     "    --from 9  — skip standard/calibrate/apply-scale; reduce samples with existing scales\n"
     "    --from 10 — only stitch and plot (reductions are already done)\n"
     "    --from 13 — only plot\n"
-    "  Cannot be combined with --continue."
+    "  Cannot be combined with --continue.\n"
+    "\n"
+    "--to N (aliases --till, --until): stop after step N completes; write a\n"
+    "  resumable summary and save the session. Combine with --from for a window.\n"
+    "    --to 2   — just build the working table, then stop\n"
+    "    --to 8   — reduce the standard, calibrate and apply the scale factor, then\n"
+    "               stop before reducing samples (\"find the scale factor\")\n"
+    "    --to 9   — reduce everything but skip stitch + plot\n"
+    "  Grouped steps stop as a block: --to 6/7 run through 8 (scale calibration),\n"
+    "  --to 10/11 run through 12 (stitch). Resume later with --from or --continue."
 )
 
 
@@ -83,6 +94,7 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
     continue_mode = False
     standard_sample: str | None = None
     from_step: int = 1
+    to_step: int | None = None
     fresh: bool = False
 
     i = 0
@@ -136,6 +148,15 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
                 return CommandResult(success=False, message=f"--from must be between 1 and 13 (got {from_step})")
             i += 2
             continue
+        if a in ("--to", "--till", "--until") and i + 1 < len(args):
+            try:
+                to_step = int(args[i + 1])
+            except ValueError:
+                return CommandResult(success=False, message=f"Invalid step number for {a}: {args[i + 1]}")
+            if to_step < 1 or to_step > 13:
+                return CommandResult(success=False, message=f"{a} must be between 1 and 13 (got {to_step})")
+            i += 2
+            continue
         if a == "--force":
             force = True
             i += 1
@@ -144,6 +165,14 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
             fresh = True
             i += 1
             continue
+        # An unrecognised --flag is a typo, not an IPTS. Reject it rather than
+        # letting a following number ("--till 7") be silently parsed as the IPTS
+        # while the flag itself is dropped — that ran the whole pipeline once.
+        if a.startswith("-"):
+            return CommandResult(
+                success=False,
+                message=f"Unknown option: {a}\n\n{_USAGE}",
+            )
         if ipts is None:
             try:
                 ipts = int(a)
@@ -197,6 +226,12 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
             message=f"Please provide an IPTS number or use 'current'.\n\n{_USAGE}",
         )
 
+    if to_step is not None and to_step < from_step:
+        return CommandResult(
+            success=False,
+            message=f"--to {to_step} is before --from {from_step} — nothing to run.",
+        )
+
     data: dict = {"type": "start_autopilot", "ipts": ipts}
     if samples:
         data["samples"] = samples
@@ -216,6 +251,8 @@ async def handle_autopilot(args: list[str], state: SessionState) -> CommandResul
         data["standard_sample"] = standard_sample
     if from_step > 1:
         data["from_step"] = from_step
+    if to_step is not None:
+        data["to_step"] = to_step
     if fresh:
         data["fresh"] = True
 

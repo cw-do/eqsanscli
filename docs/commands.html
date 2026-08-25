@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.25.0</div>
+          data reduction tool &middot; v0.26.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -290,6 +290,8 @@ current folder. The configuration in the name is what lets /matchruns and
   /autopilot 35884 --continue                   — Reduce only NEW runs (reuse saved calibration)
   /autopilot --continue                         — Continue from saved session in outputdir
   /autopilot current --from 5                   — Start from step 5 (skip catalog/match/presets)
+  /autopilot current --to 8                     — Stop after the scale factor is found+applied (steps 1–8)
+  /autopilot current --from 6 --to 8            — Only the standard: reduce porsil, calibrate, apply scale
   /autopilot 35884 --standard porsilb1          — Use porsilb1 as calibration standard
   /autopilot 35884 --samples Bi1                — Only reduce Bi1 samples
   /autopilot 35884 --exclude Y5                 — Reduce all except Y5
@@ -324,7 +326,16 @@ Autopilot steps (13 total):
     --from 9  — skip standard/calibrate/apply-scale; reduce samples with existing scales
     --from 10 — only stitch and plot (reductions are already done)
     --from 13 — only plot
-  Cannot be combined with --continue.</code></pre></details>
+  Cannot be combined with --continue.
+
+--to N (aliases --till, --until): stop after step N completes; write a
+  resumable summary and save the session. Combine with --from for a window.
+    --to 2   — just build the working table, then stop
+    --to 8   — reduce the standard, calibrate and apply the scale factor, then
+               stop before reducing samples (&quot;find the scale factor&quot;)
+    --to 9   — reduce everything but skip stitch + plot
+  Grouped steps stop as a block: --to 6/7 run through 8 (scale calibration),
+  --to 10/11 run through 12 (stitch). Resume later with --from or --continue.</code></pre></details>
 </section>
 <section class="cmd" id="cmd-calibrate">
 <h3>/calibrate<a class="anchor" href="#cmd-calibrate">#</a><span class="src">calibrate.py</span></h3>

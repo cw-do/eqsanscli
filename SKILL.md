@@ -134,6 +134,7 @@ Options (all composable, work with `<ipts>`, `current`, and `--continue`):
 - `--force` — re-reduce all rows, ignoring done/modified status
 - `--fresh` — force a clean catalog reload + table re-match (ignores in-memory state). Does NOT clear `/set config` overrides
 - `--from <N>` — skip steps 1..(N-1) of the 13-step pipeline (requires catalog + working table already in session)
+- `--to <N>` — stop after step N (aliases `--till`, `--until`); writes a resumable summary and saves the session. Grouped steps stop as a block: `--to 6/7` run through 8 (scale calibration), `--to 10/11` run through 12 (stitch). Combine with `--from` for a window. **"reduce porsil and find the scale factor" / "run until you get the scale factor"** → `--to 8` (autopilot builds the table first if needed, then reduces the standard, calibrates, and applies the scale — stopping before it reduces samples).
 
 **Execution order:** thickness → bkg → samples → exclude → config.
 Setup (thickness, bkg) applies to the full table first, so all rows get correct
@@ -520,6 +521,8 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/autopilot <ipts> --continue` | Reduce only NEW runs, reuse saved calibration/configs |
 | `/autopilot --continue` | Continue from saved session in outputdir |
 | `/autopilot <ipts> --standard <name>` | Use named sample as calibration standard (default: porsil) |
+| `/autopilot current --from <N>` | Start at step N (skip 1..N-1); needs catalog + table in session |
+| `/autopilot current --to <N>` | Stop after step N (aliases `--till`/`--until`); `--to 8` = reduce standard + find scale factor, then stop |
 | `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
 | `/calibrate <iq_file> --applynow` | Same, and apply it to the config named in the filename, marking affected rows for re-reduction |
 | `/export script [file]` | Export standalone Python script |

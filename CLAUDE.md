@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.26.0 | 2026-08-25 | `/autopilot --to N` (aliases `--till`/`--until`) stops after step N with a resumable summary; `--to 8` = reduce the standard, calibrate and apply the scale factor, then stop ("find the scale factor"). Unknown `--flags` are now rejected instead of the following number being parsed as the IPTS (which silently ran the whole pipeline). |
 | 0.25.0 | 2026-08-24 | `/matchruns` matches a displacement series (`_d0`, `_d2`, …) to its single transmission — the `_dX` suffix is ignored, and a config with one transmission assigns it to every sample (warns "matched by configuration"). `/set <row> trans,emp <run>` sets several run fields at once (`,`/`+`, run fields only). |
 | 0.20.1 | 2026-08-18 | Fix: `/mask create` crashed without `--dry-run` — a local named `state` shadowed the SessionState parameter. Coordinate system documented. |
 | 0.20.0 | 2026-08-18 | Beam mask is a plain disc again; gravity leaks are reported and masked only on `--leak`, as one disc per lobe. Replaces 0.19.0's capsule. |
@@ -198,6 +199,42 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-25: stop autopilot at a step, and reject unknown flags (v0.26.0)
+
+Two gaps found while driving autopilot by natural language.
+
+**1 — no way to stop partway.** "reduce porsil and find scale factor" / "run
+autopilot until you get the scale factor" had no target: `--from N` sets a start
+but there was no end. Added **`--to N`** (aliases `--till`, `--until`): run
+through step N, then write a resumable summary (`--from N+1` / `--continue`) and
+save the session. `_maybe_stop(step)` is checked at the step boundaries (2, 4, 5,
+8, 9, 12); the check is `>=`, so grouped steps stop as a block — `--to 6/7` run
+through 8 (the scale-calibration block 6→7→8, which `--from` already treats
+atomically because step 6's porsil reduction has no skip guard and step 7's
+scales are volatile until step 8 persists them), and `--to 10/11` run through 12
+(stitch). So **`--to 8` is the "find the scale factor" stop**: reduce the
+standard, calibrate, apply, stop before samples. Steps 1–2 build the table first,
+so it works with or without an existing table — which is exactly the "check if
+porsil is in the table, else /matchruns, then reduce porsil + calibrate" flow the
+user described, without needing a bespoke command.
+
+**2 — an unknown flag ate the IPTS.** The failing input was `--till 7`: `--till`
+wasn't recognised, so it was dropped and the following `7` was parsed as the IPTS,
+and autopilot ran all 13 steps. Any unrecognised `--flag` is now an error, so a
+typo can never silently launch the whole pipeline.
+
+`--to` is threaded through both front ends (`app.py`, `headless.py`) and validated
+(1–13, and `--to ≥ --from`). LLM routing maps the scale-factor phrasings to
+`--to 8`. `tests/test_autopilot_tostep.py` (8 checks): the flag + aliases parse,
+out-of-range / `to<from` / unknown-flag are rejected, and the engine actually
+stops — no step-6+ commands dispatched, resume hint printed, and a full run still
+reaches step 13. 217 tests.
+
+**Files changed:** `commands/autopilot.py`, `services/autopilot.py`,
+`services/llm_handler.py`, `app.py`, `headless.py`,
+`tests/test_autopilot_tostep.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-24: transmission for a displacement series, and combined `/set` (v0.25.0)
 
@@ -372,46 +409,5 @@ the repository's documentation surface.
 
 **Files changed:** SKILL.md (merged), AGENT_SKILL.md (stub), `tests/test_docs.py`
 (new), CLAUDE.md, README.md.
-
-### 2026-08-18: structure for what comes next (no version bump — docs and tests)
-
-Asked whether the knowledge and instructions are structured well enough to take
-new algorithms. Three things fixed, in the order they were hurting.
-
-**1. CLAUDE.md was 1798 lines, 1678 of them change log** (43 entries), loaded into
-every session, with the 120 lines that actually describe the project buried on
-top. History moved to `docs/CHANGELOG.md`, which nothing loads; the last five
-entries stay here. Adding an entry now means moving the oldest one out.
-
-**2. The Testing section claimed "no formal test suite"** while six suites and 176
-checks existed. It now names each suite, gives one command
-(`python3 -m pytest -q tests/`), and states the two rules that keep the suites
-honest: never pin a machine-physics value to a literal, and do pin documented
-constants.
-
-That was not hypothetical — `test_live_current_cycle_resolves_to_2026b` was
-**failing** when the whole directory ran, because machine physics re-reduced AgBe
-that afternoon and `detoffset` moved 66.763 → 66.714. A test hardcoding a cycle
-value fails on the day the resolver correctly picks up new calibration. It now
-asserts that what resolves equals what the cycle folder currently holds, within a
-plausibility range, and that the source is not a `.OLD` backup.
-
-**3. `knowledge/protocol.md` gained the `MSK` section** — 11 rules for the most
-developed algorithm in the repo, which until now answered to no authority:
-uniformly illuminated run and configuration in the filename (MSK-01), refuse
-rather than guess (MSK-02), size from the horizontal cut only (MSK-03), reach past
-the umbra (MSK-04), band floor (MSK-05), leaks reported and masked below only
-(MSK-06), tube judgement (MSK-07), read-back verification (MSK-08), millimetres
-not indices (MSK-09), plus MSK-10/11 `unenforced` as backlog. Three new
-code-agreement tests in `test_knowledge.py` check the band floor, the refusal and
-the below-only leak rule against the code.
-
-Also added to CLAUDE.md: the rule-prefix list, and an **Adding a new algorithm**
-section — pure numpy in `services/`, write the protocol rule first, report the
-derivation not just the answer, measure against real runs before believing it.
-
-**Files changed:** CLAUDE.md (1798 → 328 lines), `docs/CHANGELOG.md` (new),
-`knowledge/protocol.md` (+11 rules), `tests/test_knowledge.py` (+3, 23),
-`tests/test_instrument_files.py` (live test de-hardcoded).
 
 

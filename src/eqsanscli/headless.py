@@ -162,6 +162,7 @@ def _run_autopilot_sync(
     standard_sample: str | None = None,
     from_step: int = 1,
     fresh: bool = False,
+    to_step: int | None = None,
     loop: asyncio.AbstractEventLoop = None,
     router: CommandRouter = None,
 ) -> dict[str, Any]:
@@ -200,6 +201,7 @@ def _run_autopilot_sync(
         standard_sample=standard_sample,
         from_step=from_step,
         fresh=fresh,
+        to_step=to_step,
     )
 
     return {
@@ -276,6 +278,7 @@ def run_headless() -> None:
                         standard_sample=result.data.get("standard_sample"),
                         from_step=result.data.get("from_step", 1),
                         fresh=result.data.get("fresh", False),
+                        to_step=result.data.get("to_step"),
                         loop=loop,
                         router=router,
                     )
