@@ -19,6 +19,19 @@ def reduce_row(
     cancel_event: threading.Event | None = None,
     drtsans_version: str = "default",
 ) -> ReductionResult:
+    # Cancelled before we started — return at once without building a JSON or
+    # spawning drtsans. In a parallel batch, the executor keeps handing queued
+    # rows to freed workers after the user cancels; this makes each such row a
+    # no-op instead of a fresh ~1s drtsans launch that is immediately killed, so
+    # a single cancel drains the whole queue at once.
+    if cancel_event is not None and cancel_event.is_set():
+        row.status = "cancelled"
+        return ReductionResult(
+            success=False, json_path="", output_file="",
+            elapsed_seconds=0.0, stdout="", stderr="Cancelled before start.",
+            return_code=-99, cancelled=True,
+        )
+
     config_params = get_config(row.configuration, user_configs)
 
     output_name = row.output_stem

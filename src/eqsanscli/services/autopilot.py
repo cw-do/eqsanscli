@@ -138,6 +138,16 @@ def _reduce_phase(
                 elapsed_times_p.append(result.elapsed_seconds)
                 if result.cancelled:
                     write(f"  [{completed}/{total}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
+
+                # One cancel stops the whole batch: drop every queued job so no
+                # freed worker launches a new drtsans, then stop waiting.
+                if cancel_event and cancel_event.is_set():
+                    not_started = [f for f in futures if f.cancel()]
+                    for f in not_started:
+                        futures[f].status = "cancelled"
+                    if not_started:
+                        write(f"  [yellow]⊘ Cancelled {len(not_started)} queued job(s)[/yellow]")
+                    break
                 elif result.success:
                     n_ok += 1
                     state.reduced_files.append(result.output_file)

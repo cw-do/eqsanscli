@@ -7,6 +7,43 @@ the version it shipped in.
 
 ---
 
+### 2026-08-18: one agent document, not two (no version bump — docs and tests)
+
+`SKILL.md` (449 lines, TUI-oriented) and `AGENT_SKILL.md` (698, headless) were
+two hand-maintained copies of the same command reference. They had **drifted in
+both directions**: `/refresh catalog`, `/reclass`, `/stitch reorder` and
+`/set drtsans` existed only in one, `/list iqxqy`, `/session list`, `/settings`
+and the shell commands only in the other. Neither was a superset, so neither
+could be generated from the other.
+
+**Merged into `SKILL.md`** (816 lines, from 1147): one command reference, one
+workflow, both front ends — the TUI and the headless JSON protocol — under *Two
+ways to drive it*. `AGENT_SKILL.md` is now a stub pointing at it, kept so old
+references land somewhere correct rather than on half a document.
+
+Corrected while merging: the headless copy still called `/apply preset auto`
+**"MANDATORY, DO NOT SKIP"**, which has been wrong since v0.10.0 — `/matchruns`
+applies the matching preset and then resolves the machine-physics files itself.
+That step is now *verify, do not repeat*, and warns that `--force` overwrites user
+edits.
+
+**12 registered commands were documented nowhere** (`/table`, `/move`,
+`/list tables`, `/note`, `/compare`, `/models`, `/tail` and the write-shell ones).
+The first six gained sections; the write-capable shell commands are called out as
+deliberately outside the agent workflow.
+
+**`tests/test_docs.py` (new, 5 checks)** makes the drift a test failure: every
+command in `registry.py` must appear in `SKILL.md`, the stub must stay a stub,
+both front ends must be covered, and the preset-is-mandatory claim must not come
+back.
+
+`AGENT.md` — the original build prompt, which still describes `/show <ipts>` for
+what is now `/load ipts` — was left alone: it is gitignored, so it is not part of
+the repository's documentation surface.
+
+**Files changed:** SKILL.md (merged), AGENT_SKILL.md (stub), `tests/test_docs.py`
+(new), CLAUDE.md, README.md.
+
 ### 2026-08-18: structure for what comes next (no version bump — docs and tests)
 
 Asked whether the knowledge and instructions are structured well enough to take

@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.26.0</div>
+          data reduction tool &middot; v0.27.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -40,6 +40,14 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-18-one-agent-document-not-two-no-version-bump-docs-and-tests">2026-08-18: one agent document, not two (no version bump — docs and tests)<a class="anchor" href="#2026-08-18-one-agent-document-not-two-no-version-bump-docs-and-tests">#</a></h3>
+<p><code>SKILL.md</code> (449 lines, TUI-oriented) and <code>AGENT_SKILL.md</code> (698, headless) were two hand-maintained copies of the same command reference. They had <strong>drifted in both directions</strong>: <code><a href="commands.html#cmd-refresh-catalog">/refresh catalog</a></code>, <code><a href="commands.html#cmd-reclass">/reclass</a></code>, <code><a href="commands.html#cmd-stitch">/stitch reorder</a></code> and <code><a href="commands.html#cmd-set">/set drtsans</a></code> existed only in one, <code><a href="commands.html#cmd-list-iqxqy">/list iqxqy</a></code>, <code><a href="commands.html#cmd-session">/session list</a></code>, <code><a href="commands.html#cmd-settings">/settings</a></code> and the shell commands only in the other. Neither was a superset, so neither could be generated from the other.</p>
+<p><strong>Merged into <code>SKILL.md</code></strong> (816 lines, from 1147): one command reference, one workflow, both front ends — the TUI and the headless JSON protocol — under <em>Two ways to drive it</em>. <code>AGENT_SKILL.md</code> is now a stub pointing at it, kept so old references land somewhere correct rather than on half a document.</p>
+<p>Corrected while merging: the headless copy still called <code><a href="commands.html#cmd-apply-preset">/apply preset auto</a></code> <strong>&quot;MANDATORY, DO NOT SKIP&quot;</strong>, which has been wrong since v0.10.0 — <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> applies the matching preset and then resolves the machine-physics files itself. That step is now <em>verify, do not repeat</em>, and warns that <code>--force</code> overwrites user edits.</p>
+<p><strong>12 registered commands were documented nowhere</strong> (<code><a href="commands.html#cmd-table">/table</a></code>, <code><a href="commands.html#cmd-move">/move</a></code>, <code><a href="commands.html#cmd-list-tables">/list tables</a></code>, <code><a href="commands.html#cmd-note">/note</a></code>, <code><a href="commands.html#cmd-compare">/compare</a></code>, <code><a href="commands.html#cmd-models">/models</a></code>, <code><a href="commands.html#cmd-tail">/tail</a></code> and the write-shell ones). The first six gained sections; the write-capable shell commands are called out as deliberately outside the agent workflow.</p>
+<p><strong><code>tests/test_docs.py</code> (new, 5 checks)</strong> makes the drift a test failure: every command in <code>registry.py</code> must appear in <code>SKILL.md</code>, the stub must stay a stub, both front ends must be covered, and the preset-is-mandatory claim must not come back.</p>
+<p><code>AGENT.md</code> — the original build prompt, which still describes <code><a href="commands.html#cmd-show">/show &lt;ipts&gt;</a></code> for what is now <code><a href="commands.html#cmd-load">/load ipts</a></code> — was left alone: it is gitignored, so it is not part of the repository&#x27;s documentation surface.</p>
+<p><strong>Files changed:</strong> SKILL.md (merged), AGENT_SKILL.md (stub), <code>tests/test_docs.py</code> (new), CLAUDE.md, README.md.</p>
 <h3 id="2026-08-18-structure-for-what-comes-next-no-version-bump-docs-and-tests">2026-08-18: structure for what comes next (no version bump — docs and tests)<a class="anchor" href="#2026-08-18-structure-for-what-comes-next-no-version-bump-docs-and-tests">#</a></h3>
 <p>Asked whether the knowledge and instructions are structured well enough to take new algorithms. Three things fixed, in the order they were hurting.</p>
 <p><strong>1. CLAUDE.md was 1798 lines, 1678 of them change log</strong> (43 entries), loaded into every session, with the 120 lines that actually describe the project buried on top. History moved to <code>docs/CHANGELOG.md</code>, which nothing loads; the last five entries stay here. Adding an entry now means moving the oldest one out.</p>
@@ -445,7 +453,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-08-25 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-08-28 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

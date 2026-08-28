@@ -381,6 +381,19 @@ class EQSANSApp(App):
                             f"  [dim][{completed_count}/{total}][/dim] [yellow]⊘[/yellow] "
                             f"[bold]{row.sample_name}[/bold] ({row.configuration}) — cancelled"
                         )
+
+                    # One cancel click stops the whole batch: drop every queued
+                    # job so no freed worker starts a new drtsans, and stop
+                    # waiting. In-flight jobs are killed by the shared event.
+                    if self._cancel_event.is_set():
+                        not_started = [f for f in futures if f.cancel()]
+                        for f in not_started:
+                            skipped = futures[f]
+                            skipped[1].status = "cancelled"
+                        n_cancelled += len(not_started)
+                        if not_started:
+                            write(f"  [yellow]⊘ Cancelled {len(not_started)} queued job(s)[/yellow]")
+                        break
                     elif result.success:
                         n_success += 1
                         state.reduced_files.append(result.output_file)
