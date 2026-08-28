@@ -127,9 +127,14 @@ CATALOG:
 
 WORKING TABLE:
 /show table                     - Show working table
-/show table --sample <name>     - Show only rows matching sample name (read-only filter, no deletion)
+/show table --rows <spec>       - Show only rows in an index range/list (50-100, 1,3,5, or a run number); read-only
+/show table --name <text>       - Show only rows whose sample name CONTAINS <text> (case-insensitive substring); read-only
+/show table --sample <pat>      - Show only rows matching sample name exactly, or as a glob with * (e.g. *0.25phr*); read-only
+  Filters combine (AND): "rows 50-100 that are 0.25phr" → /show table --rows 50-100 --name 0.25phr
   CRITICAL — "show me" means DISPLAY, never delete. "show me emptycupbob from the table",
   "display only banjo runs", "what does the X row look like" → /show table --sample X.
+  Prefer --name for a loose "contains" match ("show rows containing 0.25phr" → /show table --name 0.25phr);
+  use --rows for index ranges ("show rows 50 to 100" → /show table --rows 50-100).
   /remove is ONLY for explicit deletion words: delete, remove, drop, get rid of.
   CRITICAL — CONFIGURATION MATCHING when looking a run up from the catalog: every run belongs to
   one configuration. A transmission or empty beam assigned to a row MUST come from the SAME

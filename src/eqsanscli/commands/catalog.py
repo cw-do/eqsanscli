@@ -50,7 +50,7 @@ async def handle_show(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Usage: /show <target>\n"
             "  /show catalog              — Display loaded catalog\n"
-            "  /show table                — Show working table\n"
+            "  /show table                — Show working table (--rows 50-100, --name 0.25phr)\n"
             "  /show config 4m10a         — Show config parameters\n"
             "  /show outputdir            — Show output directory\n"
             "  /show ipts                 — Show current IPTS\n"
@@ -474,12 +474,27 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
     )
 
 
-async def handle_show_table(args: list[str], state: SessionState) -> CommandResult:
-    """Handle /show table [--sample <name>] — display current working table.
+_SHOW_TABLE_USAGE = (
+    "Usage: /show table [filters] — display the working table (read-only).\n"
+    "  --rows <spec>    rows by index: 50-100, 1,3,5, or a run number\n"
+    "  --name <text>    rows whose sample name CONTAINS <text> (case-insensitive)\n"
+    "  --sample <pat>   rows whose sample name matches <pat> exactly, or as a glob\n"
+    "                   with * (e.g. *0.25phr*). --name is the easy 'contains' form.\n"
+    "  Filters combine (AND): /show table --rows 50-100 --name 0.25phr"
+)
 
-    With --sample, filters to rows whose sample_name contains <name> (case-insensitive).
-    This is read-only — no rows are removed.
+
+async def handle_show_table(args: list[str], state: SessionState) -> CommandResult:
+    """Handle /show table [--rows <spec>] [--name <text>] [--sample <pat>].
+
+    Read-only view of the working table, optionally filtered. Filters combine:
+      --rows    index/range/run-number selection (parse_row_selection)
+      --name    case-insensitive substring of the sample name
+      --sample  exact match, or glob when the pattern contains '*'
+    No rows are removed from the table.
     """
+    from eqsanscli.services.reduction_service import parse_row_selection
+
     table = state.current_table
     if not table.rows:
         return CommandResult(
@@ -487,20 +502,53 @@ async def handle_show_table(args: list[str], state: SessionState) -> CommandResu
             message=f"Working table '{table.name}' is empty. Use /load ipts <number> then /matchruns.",
         )
 
-    sample_filter = None
-    if args and args[0].lower() == "--sample" and len(args) >= 2:
-        sample_filter = " ".join(args[1:])
+    rows_spec: str | None = None
+    name_substr: str | None = None
+    sample_pat: str | None = None
+
+    i = 0
+    while i < len(args):
+        a = args[i].lower()
+        if a in ("--rows", "--row", "--index", "--idx", "--range") and i + 1 < len(args):
+            rows_spec = args[i + 1]
+            i += 2
+        elif a in ("--name", "--contains") and i + 1 < len(args):
+            name_substr = args[i + 1]
+            i += 2
+        elif a == "--sample" and i + 1 < len(args):
+            sample_pat = args[i + 1]
+            i += 2
+        else:
+            return CommandResult(
+                success=False,
+                message=f"Unrecognized argument: {args[i]}\n\n{_SHOW_TABLE_USAGE}",
+            )
 
     rows = build_working_table_display(state)
+    applied: list[str] = []
 
-    if sample_filter:
-        rows = [r for r in rows if sample_matches(sample_filter, r["Sample"])]
+    if rows_spec is not None:
+        selected = set(parse_row_selection(rows_spec, table))
+        rows = [r for r in rows if int(r["Idx"]) in selected]
+        applied.append(f"rows {rows_spec}")
+
+    if name_substr is not None:
+        needle = name_substr.lower()
+        rows = [r for r in rows if needle in r["Sample"].lower()]
+        applied.append(f"name contains '{name_substr}'")
+
+    if sample_pat is not None:
+        rows = [r for r in rows if sample_matches(sample_pat, r["Sample"])]
+        applied.append(f"sample '{sample_pat}'")
+
+    if applied:
+        filt = ", ".join(applied)
         if not rows:
             return CommandResult(
                 success=True,
-                message=f"No rows matching sample '{args[1]}' in table '{table.name}'.",
+                message=f"No rows in table '{table.name}' matching {filt}.",
             )
-        label = f"Working Table: {table.name} — {len(rows)} row(s) matching '{args[1]}'"
+        label = f"Working Table: {table.name} — {len(rows)} of {len(table.rows)} row(s) [{filt}]"
     else:
         label = f"Working Table: {table.name} ({len(table.rows)} rows)"
 

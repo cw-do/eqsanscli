@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.28.0 | 2026-08-28 | `/show table` gains filters that combine (AND): `--rows <spec>` (index range/list/run number, e.g. `50-100`), `--name <text>` (case-insensitive substring of the sample name, e.g. `0.25phr`), and `--sample <pat>` (exact or glob with `*`). Unknown args are rejected with usage. Read-only — no rows removed. |
 | 0.27.1 | 2026-08-28 | Long sample names (and run titles) in the working/stitch tables now wrap onto more lines instead of being ellipsis-truncated: every free-text column gets `overflow="fold"`. Rich's default column overflow is `ellipsis`; the run columns only looked like they wrapped because their cell text carries an embedded newline. |
 | 0.27.0 | 2026-08-28 | Cancel stops the whole parallel batch on one click. `reduce_row` now returns at once when the cancel event is already set — before, a freed worker launched the next queued drtsans (killed ~1s later) so a single click drained a 15-job batch only slowly, job by job. The executor loop also drops queued futures on cancel. Both front ends (`/reduce`, autopilot). |
 | 0.26.0 | 2026-08-25 | `/autopilot --to N` (aliases `--till`/`--until`) stops after step N with a resumable summary; `--to 8` = reduce the standard, calibrate and apply the scale factor, then stop ("find the scale factor"). Unknown `--flags` are now rejected instead of the following number being parsed as the IPTS (which silently ran the whole pipeline). |
@@ -201,6 +202,33 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-28: /show table filters — rows, name, sample (v0.28.0)
+
+Asked for `/show table --rows 50-100` and `/show table --name 0.25phr` (rows whose
+sample name contains `0.25phr`). `/show table` previously took only `--sample`,
+which is an *exact* match (or glob with `*`), so `--sample 0.25phr` matched
+nothing — you had to type `--sample *0.25phr*`.
+
+Three filters, composable (AND):
+- **`--rows <spec>`** (aliases `--row`/`--index`/`--idx`/`--range`) — index range,
+  list, or run number, via the existing `parse_row_selection` (`50-100`, `1,3,5`).
+- **`--name <text>`** (alias `--contains`) — case-insensitive **substring** of the
+  sample name, the easy "contains" form the user wanted.
+- **`--sample <pat>`** — kept as-is: exact, or glob when it contains `*`.
+
+Unrecognised arguments are now rejected with usage rather than silently ignored
+(the parser walks tokens instead of only checking `args[0]`). Read-only — no rows
+are removed; the label shows which filters ran and "N of M row(s)". LLM routing
+maps "rows 50 to 100" → `--rows`, "containing 0.25phr" → `--name`.
+
+`tests/test_show_table.py` (10 checks): substring vs glob vs exact, range/list,
+filters combining, no-match message, unknown-flag rejection, empty table. 233
+tests.
+
+**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
+`tests/test_show_table.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-28: long names wrap in the tables, not truncate (v0.27.1)
 
@@ -335,62 +363,4 @@ untouched. 209 tests.
 **Files changed:** `services/matching_service.py`, `commands/matching.py`,
 `services/llm_handler.py`, `tests/test_matching.py` (new), SKILL.md, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
-
-### 2026-08-19: a documentation site under `docs/` (no version bump)
-
-Asked for a hostable information page: introduction, how to use it, a manual of
-every command with examples, a searchable reference, a page for the configuration
-parameters and how they reach the exported script, and a step-by-step guide.
-
-**Seven pages, generated.** `python3 docs/generate.py` writes static HTML into
-`docs/`, servable by GitHub Pages from the main branch `/docs` folder with no
-workflow and no build step. System python3, no dependencies — `docs/md.py` is a
-small Markdown renderer because no such library exists on the analysis machines.
-
-**The reference pages are built from the code**, which is the point: commands from
-`commands/registry.py` (the list), `SKILL.md` tables (one-liners) and each
-module's `_USAGE` (full help); parameters from the `EQVar` mapping in
-`script_exporter.py`, `knowledge/configurations.md` (descriptions) and the presets
-(values); rules from `services/protocol.py`. Only the introduction, the
-step-by-step guide and the parameters preamble are hand-written, under
-`docs/pages/`.
-
-**Search** is a prebuilt JSON index (239 entries: commands, parameters, rules,
-knowledge topics, headings) with a client-side filter — no CDN, works offline,
-`/` focuses it. Rule ids and `/command` mentions auto-link, but only to anchors
-that exist, so a mention of an undocumented command renders as plain code rather
-than a dead link.
-
-**Found while building it, each fixed at the source rather than in the
-generator:** `/calibrate` was missing from `SKILL.md`'s tables (documented only in
-prose, so the drift test could not see it); the 26 managed parameters had no
-one-line descriptions anywhere, now a table in `knowledge/configurations.md`; and
-the front-end commands (`/help`, `/exit`, `/version`, `/list`, `/guide`) were
-absent from every reference because they are not in `registry.py`.
-
-`tests/test_docs.py` grows to 9 checks: the generator must run, every page must be
-written, every command and parameter must reach the site with a description, and
-no internal link may be broken.
-
-**Files changed:** `docs/generate.py`, `docs/collect.py`, `docs/md.py`,
-`docs/site.css`, `docs/search.js`, `docs/pages/*.md`, `docs/README.md` (all new),
-the seven generated pages, `SKILL.md`, `knowledge/configurations.md`,
-`tests/test_docs.py`, README.md, CLAUDE.md.
-
-**Restyled to match the machine-physics page** (`cw-do.github.io/eqsans_mp`) on
-request, by reading its actual stylesheet out of `<mp_root>/doc/index.html` rather
-than guessing: the same tokens (ORNL green `#00703c`, `#0067b9` blue, the grey
-scale), the same 15px Helvetica with a mono stack for anything typed, the green
-masthead with tagline over a grey sub-navigation whose active tab carries a green
-underline, and bordered cards with grey header rows for commands and rules.
-
-Verified by rendering with headless chromium and **sampling the pixels** — worth
-doing, because reading the screenshot by eye told me the masthead was white when
-it was `rgb(0, 112, 60)` all along. The render did find two real defects: every
-command showed an empty `.py` source label, because `registered_commands()` used a
-line-based regex and `registry.py` imports most handlers in parenthesised
-multi-line form (now parsed with the AST, 57/57 resolve), and the command count in
-the page lede was hardcoded.
-
-
 

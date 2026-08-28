@@ -388,7 +388,9 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog. REBUILDS table |
 | `/matchruns --update` | Append new scattering runs only; preserves status=done rows. Use after `/refresh catalog` |
 | `/show table` | Display full working table |
-| `/show table --sample <name>` | Filter view by sample name |
+| `/show table --rows <spec>` | Filter view by index/range (e.g. `50-100`, `1,3,5`) |
+| `/show table --name <text>` | Filter to rows whose sample name contains `<text>` (case-insensitive) |
+| `/show table --sample <pat>` | Filter by sample name, exact or glob with `*` (e.g. `*0.25phr*`) |
 | `/assign bkg <sample>` | Set background for ALL rows (config-aware, sets bkg+bkgtrans) |
 | `/set <row> <field> <value>` | Set a field: trans, bkg, bkgtrans, emp, thickness |
 | `/set <row> trans,emp <run>` | Set several run fields at once (`,` or `+`; run fields only) |

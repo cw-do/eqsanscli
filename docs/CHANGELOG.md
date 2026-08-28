@@ -7,6 +7,62 @@ the version it shipped in.
 
 ---
 
+### 2026-08-19: a documentation site under `docs/` (no version bump)
+
+Asked for a hostable information page: introduction, how to use it, a manual of
+every command with examples, a searchable reference, a page for the configuration
+parameters and how they reach the exported script, and a step-by-step guide.
+
+**Seven pages, generated.** `python3 docs/generate.py` writes static HTML into
+`docs/`, servable by GitHub Pages from the main branch `/docs` folder with no
+workflow and no build step. System python3, no dependencies — `docs/md.py` is a
+small Markdown renderer because no such library exists on the analysis machines.
+
+**The reference pages are built from the code**, which is the point: commands from
+`commands/registry.py` (the list), `SKILL.md` tables (one-liners) and each
+module's `_USAGE` (full help); parameters from the `EQVar` mapping in
+`script_exporter.py`, `knowledge/configurations.md` (descriptions) and the presets
+(values); rules from `services/protocol.py`. Only the introduction, the
+step-by-step guide and the parameters preamble are hand-written, under
+`docs/pages/`.
+
+**Search** is a prebuilt JSON index (239 entries: commands, parameters, rules,
+knowledge topics, headings) with a client-side filter — no CDN, works offline,
+`/` focuses it. Rule ids and `/command` mentions auto-link, but only to anchors
+that exist, so a mention of an undocumented command renders as plain code rather
+than a dead link.
+
+**Found while building it, each fixed at the source rather than in the
+generator:** `/calibrate` was missing from `SKILL.md`'s tables (documented only in
+prose, so the drift test could not see it); the 26 managed parameters had no
+one-line descriptions anywhere, now a table in `knowledge/configurations.md`; and
+the front-end commands (`/help`, `/exit`, `/version`, `/list`, `/guide`) were
+absent from every reference because they are not in `registry.py`.
+
+`tests/test_docs.py` grows to 9 checks: the generator must run, every page must be
+written, every command and parameter must reach the site with a description, and
+no internal link may be broken.
+
+**Files changed:** `docs/generate.py`, `docs/collect.py`, `docs/md.py`,
+`docs/site.css`, `docs/search.js`, `docs/pages/*.md`, `docs/README.md` (all new),
+the seven generated pages, `SKILL.md`, `knowledge/configurations.md`,
+`tests/test_docs.py`, README.md, CLAUDE.md.
+
+**Restyled to match the machine-physics page** (`cw-do.github.io/eqsans_mp`) on
+request, by reading its actual stylesheet out of `<mp_root>/doc/index.html` rather
+than guessing: the same tokens (ORNL green `#00703c`, `#0067b9` blue, the grey
+scale), the same 15px Helvetica with a mono stack for anything typed, the green
+masthead with tagline over a grey sub-navigation whose active tab carries a green
+underline, and bordered cards with grey header rows for commands and rules.
+
+Verified by rendering with headless chromium and **sampling the pixels** — worth
+doing, because reading the screenshot by eye told me the masthead was white when
+it was `rgb(0, 112, 60)` all along. The render did find two real defects: every
+command showed an empty `.py` source label, because `registered_commands()` used a
+line-based regex and `registry.py` imports most handlers in parenthesised
+multi-line form (now parsed with the AST, 57/57 resolve), and the command count in
+the page lede was hardcoded.
+
 ### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
 
 Items 5 and 6 of the structure review.
