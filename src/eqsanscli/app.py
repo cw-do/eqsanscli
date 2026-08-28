@@ -573,14 +573,18 @@ class EQSANSApp(App):
 
         # Column order: Idx, Sample, Config, then run numbers, Status
         table.add_column("Idx", justify="right", style="bold", width=4)
-        table.add_column("Sample", justify="left", min_width=14)
-        table.add_column("Config", justify="left", style="cyan", min_width=10)
-        table.add_column("Scatt", justify="left", min_width=10)
-        table.add_column("Trans", justify="left", min_width=10)
+        # overflow="fold" so a long sample name / cloned-config id wraps onto
+        # more lines instead of being ellipsis-truncated. The run columns already
+        # wrap because their cell text carries an embedded newline; a plain-text
+        # cell like Sample would otherwise ellipsize under the default.
+        table.add_column("Sample", justify="left", min_width=14, overflow="fold")
+        table.add_column("Config", justify="left", style="cyan", min_width=10, overflow="fold")
+        table.add_column("Scatt", justify="left", min_width=10, overflow="fold")
+        table.add_column("Trans", justify="left", min_width=10, overflow="fold")
         table.add_column("Thick", justify="right", width=5)
-        table.add_column("Bkg", justify="left", min_width=10)
-        table.add_column("BkgTr", justify="left", min_width=10)
-        table.add_column("Empty", justify="left", min_width=10)
+        table.add_column("Bkg", justify="left", min_width=10, overflow="fold")
+        table.add_column("BkgTr", justify="left", min_width=10, overflow="fold")
+        table.add_column("Empty", justify="left", min_width=10, overflow="fold")
         table.add_column("Status", justify="left", style="green", width=8)
 
         columns = ["Idx", "Sample", "Config", "Scatt", "Trans", "Thick", "Bkg", "BkgTr", "Empty", "Status"]
@@ -644,7 +648,7 @@ class EQSANSApp(App):
     def _render_stitch_table(self, log: RichLog, groups: list[dict]) -> None:
         table = Table(title="Stitch Table", show_lines=True, padding=(0, 1))
         table.add_column("Idx", justify="right", style="bold", width=4)
-        table.add_column("Sample", style="bold", min_width=16)
+        table.add_column("Sample", style="bold", min_width=16, overflow="fold")
         table.add_column("Configs", min_width=20)
         table.add_column("Files", min_width=30)
         table.add_column("Overlap Q", min_width=20)

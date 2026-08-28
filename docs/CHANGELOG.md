@@ -7,6 +7,48 @@ the version it shipped in.
 
 ---
 
+### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
+
+Items 5 and 6 of the structure review.
+
+**5 — `mask_service.py` split three ways**, by AST line spans so nothing was
+retyped: `detector.py` (243 lines) holds geometry and image primitives — reshaping
+with its ordering self-check, real pixel positions, local contrast, the cross cuts
+and valley finding; `run_files.py` (70) holds archive lookup, which was never
+mask-specific; `mask_service.py` (1041, from 1304) keeps mask **policy** plus the
+Mantid read/write and the preview.
+
+No facade and no re-exports: names have one home, and the ~40 call sites in
+`commands/mask.py` and the tests were retargeted. The seam is where a second
+algorithm will need it — anything that reads a detector image now builds on
+`detector.py` rather than importing from a mask module.
+
+**6 — `services/protocol.py`.** `knowledge/protocol.md` was prose to the code:
+nothing parsed it, so "13 unenforced" was a number no build could act on. The
+module parses all 48 rules into `Rule` objects and holds validators for the ones
+decidable from session state alone — **TBL-04** (background needs its own
+transmission), **TBL-06** (one run, one role per configuration), **BKG-01**
+(background from the row's own configuration), **BKG-02** (a row is not its own
+background), **CFG-01** (qmin < qmax). Those five moved from `unenforced` to
+`enforced (services/protocol.py)` in the document. Backlog: 15 → 10, and
+`unenforced_rules()` now lists it from code.
+
+`tests/test_protocol.py` (13 checks) keeps the two sides honest in both
+directions: a rule with a validator must be marked enforced by this file, and a
+rule the document says this file enforces must have a validator. Plus one test per
+validator on the violation it describes, and one asserting a raising validator
+never breaks its caller.
+
+**Deliberately not wired to a command.** `/review` stays deferred, as asked — this
+is the library it will use. Note that `check()` running clean does not mean the
+protocol is satisfied, only the mechanical part of it; the remaining ten rules
+need a run's metadata, the reduced output, or a judgement.
+
+**Files changed:** `services/detector.py`, `services/run_files.py`,
+`services/protocol.py` (all new), `services/mask_service.py`,
+`commands/mask.py`, `knowledge/protocol.md`, `tests/test_protocol.py` (new),
+`tests/test_mask.py`, `tests/test_knowledge.py`, CLAUDE.md. 194 tests.
+
 ### 2026-08-18: one agent document, not two (no version bump — docs and tests)
 
 `SKILL.md` (449 lines, TUI-oriented) and `AGENT_SKILL.md` (698, headless) were

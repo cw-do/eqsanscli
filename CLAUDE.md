@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.27.1 | 2026-08-28 | Long sample names (and run titles) in the working/stitch tables now wrap onto more lines instead of being ellipsis-truncated: every free-text column gets `overflow="fold"`. Rich's default column overflow is `ellipsis`; the run columns only looked like they wrapped because their cell text carries an embedded newline. |
 | 0.27.0 | 2026-08-28 | Cancel stops the whole parallel batch on one click. `reduce_row` now returns at once when the cancel event is already set — before, a freed worker launched the next queued drtsans (killed ~1s later) so a single click drained a 15-job batch only slowly, job by job. The executor loop also drops queued futures on cancel. Both front ends (`/reduce`, autopilot). |
 | 0.26.0 | 2026-08-25 | `/autopilot --to N` (aliases `--till`/`--until`) stops after step N with a resumable summary; `--to 8` = reduce the standard, calibrate and apply the scale factor, then stop ("find the scale factor"). Unknown `--flags` are now rejected instead of the following number being parsed as the IPTS (which silently ran the whole pipeline). |
 | 0.25.0 | 2026-08-24 | `/matchruns` matches a displacement series (`_d0`, `_d2`, …) to its single transmission — the `_dX` suffix is ignored, and a config with one transmission assigns it to every sample (warns "matched by configuration"). `/set <row> trans,emp <run>` sets several run fields at once (`,`/`+`, run fields only). |
@@ -200,6 +201,31 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-28: long names wrap in the tables, not truncate (v0.27.1)
+
+Reported: in the reduction (working) table a long sample name showed clipped —
+`70.30PBD_0.25…`. The run-number columns wrapped fine, so the fix should make the
+sample column behave the same.
+
+**Cause.** Rich `Table` columns default to `overflow="ellipsis"`, so a plain-text
+cell that outgrows its allotted width is truncated with `…`. The run-number
+columns only *looked* like they wrapped because `_run_cell` puts the title on a
+second line with an embedded `\n`; even they clipped a long no-space title token
+(`S-70.30PBD…`) at a narrow width.
+
+**Fix.** `overflow="fold"` on every free-text column of the working table (Sample,
+Config, and the five run columns) and the stitch table's Sample. Fold wraps the
+full text onto more lines — breaking mid-token when there is no space — so nothing
+is ever hidden. The fixed-width numeric/status columns (Idx, Thick, Status) keep
+the default; they are short and must not wrap.
+
+`tests/test_table_display.py` (3 checks) drives the real render methods with a
+stub log and asserts the free-text columns fold and none of them ellipsize. 223
+tests.
+
+**Files changed:** `app.py`, `tests/test_table_display.py` (new), CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-28: one cancel stops the whole parallel batch (v0.27.0)
 
@@ -366,46 +392,5 @@ line-based regex and `registry.py` imports most handlers in parenthesised
 multi-line form (now parsed with the AST, 57/57 resolve), and the command count in
 the page lede was hardcoded.
 
-### 2026-08-18: an algorithm layer, and the protocol made executable (no version bump)
-
-Items 5 and 6 of the structure review.
-
-**5 — `mask_service.py` split three ways**, by AST line spans so nothing was
-retyped: `detector.py` (243 lines) holds geometry and image primitives — reshaping
-with its ordering self-check, real pixel positions, local contrast, the cross cuts
-and valley finding; `run_files.py` (70) holds archive lookup, which was never
-mask-specific; `mask_service.py` (1041, from 1304) keeps mask **policy** plus the
-Mantid read/write and the preview.
-
-No facade and no re-exports: names have one home, and the ~40 call sites in
-`commands/mask.py` and the tests were retargeted. The seam is where a second
-algorithm will need it — anything that reads a detector image now builds on
-`detector.py` rather than importing from a mask module.
-
-**6 — `services/protocol.py`.** `knowledge/protocol.md` was prose to the code:
-nothing parsed it, so "13 unenforced" was a number no build could act on. The
-module parses all 48 rules into `Rule` objects and holds validators for the ones
-decidable from session state alone — **TBL-04** (background needs its own
-transmission), **TBL-06** (one run, one role per configuration), **BKG-01**
-(background from the row's own configuration), **BKG-02** (a row is not its own
-background), **CFG-01** (qmin < qmax). Those five moved from `unenforced` to
-`enforced (services/protocol.py)` in the document. Backlog: 15 → 10, and
-`unenforced_rules()` now lists it from code.
-
-`tests/test_protocol.py` (13 checks) keeps the two sides honest in both
-directions: a rule with a validator must be marked enforced by this file, and a
-rule the document says this file enforces must have a validator. Plus one test per
-validator on the violation it describes, and one asserting a raising validator
-never breaks its caller.
-
-**Deliberately not wired to a command.** `/review` stays deferred, as asked — this
-is the library it will use. Note that `check()` running clean does not mean the
-protocol is satisfied, only the mechanical part of it; the remaining ten rules
-need a run's metadata, the reduced output, or a judgement.
-
-**Files changed:** `services/detector.py`, `services/run_files.py`,
-`services/protocol.py` (all new), `services/mask_service.py`,
-`commands/mask.py`, `knowledge/protocol.md`, `tests/test_protocol.py` (new),
-`tests/test_mask.py`, `tests/test_knowledge.py`, CLAUDE.md. 194 tests.
 
 
