@@ -29,6 +29,7 @@ import md  # noqa: E402
 PAGES = [
     ("index.html", "Introduction"),
     ("guide.html", "Step-by-step guide"),
+    ("script-reduction.html", "Script reduction"),
     ("tutorials.html", "Video tutorials"),
     ("commands.html", "Commands"),
     ("parameters.html", "Parameters"),
@@ -355,6 +356,10 @@ def main() -> None:
         "guide.md", "guide.html", "Step-by-step guide",
         "One experiment from raw runs to a stitched I(Q), with what to check at "
         "each step.")))
+    written.append(("script-reduction.html", page_from_markdown(
+        "script-reduction.md", "script-reduction.html", "Script reduction",
+        "Reduce EQSANS data by hand with a Python template and drtsans — the "
+        "wrapper this tool automates.")))
     written.append(("tutorials.html", tutorials_page()))
     written.append(("commands.html", commands_page()))
     written.append(("parameters.html", parameters_page()))

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Script reduction — eqsanscli</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header>
+  <div class="masthead">
+    <div class="bar">
+      <div class="brand">
+        <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
+        <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
+          data reduction tool &middot; v0.28.0</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search commands, parameters, rules  (/)"
+               autocomplete="off" spellcheck="false">
+        <div id="results" hidden></div>
+      </div>
+    </div>
+  </div>
+  <nav class="subnav"><div class="bar"><div class="tabs"><a href="index.html">Introduction</a>
+<a href="guide.html">Step-by-step guide</a>
+<a href="script-reduction.html" class="current">Script reduction</a>
+<a href="tutorials.html">Video tutorials</a>
+<a href="commands.html">Commands</a>
+<a href="parameters.html">Parameters</a>
+<a href="protocol.html">Protocol</a>
+<a href="knowledge.html">Instrument knowledge</a>
+<a href="changelog.html">Change log</a></div></div></nav>
+</header>
+<main>
+  <nav class="toc"><div class="toc-title">On this page</div><a href="#1-get-onto-the-analysis-cluster" class="lvl2">1 · Get onto the analysis cluster</a><a href="#2-copy-and-edit-a-template" class="lvl2">2 · Copy and edit a template</a><a href="#3-describe-one-reduction-with-eqvar" class="lvl2">3 · Describe one reduction with EQVar</a><a href="#the-runs" class="lvl3">The runs</a><a href="#the-sample" class="lvl3">The sample</a><a href="#output-and-binning" class="lvl3">Output and binning</a><a href="#masking-and-calibration" class="lvl3">Masking and calibration</a><a href="#inelastic-incoherent-correction" class="lvl3">Inelastic / incoherent correction</a><a href="#4-run-it" class="lvl2">4 · Run it</a><a href="#5-read-the-output" class="lvl2">5 · Read the output</a><a href="#6-stitch-configurations" class="lvl2">6 · Stitch configurations</a><a href="#generate-a-starter-script-automatically" class="lvl2">Generate a starter script automatically</a><a href="#more" class="lvl2">More</a></nav>
+  <article>
+    <h1 class="page-title">Script reduction</h1>
+    <p class="lede">Reduce EQSANS data by hand with a Python template and drtsans — the wrapper this tool automates.</p>
+    <p>This is the older, manual way to reduce EQSANS data: you edit a Python template and run it through <code>drtsans</code>. It is the layer this tool automates — the same <code>EQVar</code> / <code>reduceNow</code> wrapper the CLI drives, and exactly what <a href="commands.html#cmd-export-script"><code><a href="commands.html#cmd-export-script">/export script</a></code></a> writes out. Use it when you want full control, need to reproduce a reduction without the tool, or are following the legacy <a href="https://sites.google.com/view/eqsans/script-reduction">EQSANS site</a>.</p>
+<blockquote><p><strong>Not sure which to use?</strong> The <a href="guide.html">step-by-step guide</a> does all of this from the interactive tool, with the run pairing, calibration lookup and stitching handled for you. Reach for a script when you want to see and change every line — or feed the tool&#x27;s <a href="commands.html#cmd-export-script"><code><a href="commands.html#cmd-export-script">/export script</a></code></a> output back in here as a starting point.</p></blockquote>
+<h2 id="1-get-onto-the-analysis-cluster">1 · Get onto the analysis cluster<a class="anchor" href="#1-get-onto-the-analysis-cluster">#</a></h2>
+<p>Sign in to <a href="https://analysis.sns.gov">analysis.sns.gov</a> with your XCAMS/UCAMS credentials — the same login as the IPTS system — and open a terminal. Work in the experiment&#x27;s shared folder:</p>
+<pre><code>cd /SNS/EQSANS/IPTS-#####/shared/</code></pre>
+<p>Pull in the EQSANS reduction tools (note the space after the dot):</p>
+<pre><code>. /SNS/EQSANS/shared/usertools/eqsans_setup.sh</code></pre>
+<p>That puts the template scripts and helpers on your path. The wrapper itself lives in <code>/SNS/EQSANS/shared/script/eqsanstools</code>.</p>
+<h2 id="2-copy-and-edit-a-template">2 · Copy and edit a template<a class="anchor" href="#2-copy-and-edit-a-template">#</a></h2>
+<p>Start from <code>reduce_template.py</code> (or <code>reduce_template2.py</code>) and edit it with <code>gedit</code> or <code>pluma</code>. Look up run numbers at <a href="https://oncat.ornl.gov">oncat.ornl.gov</a>, or ask your local contact for a template already pointed at the current cycle&#x27;s calibration files.</p>
+<p>The template&#x27;s header carries the machine-physics files for the cycle — the sensitivity (flood), dark current, beam flux and the detector/sample offsets. <strong>These change every accelerator cycle</strong>, so check them with your local contact before you trust a template written for an earlier one:</p>
+<pre class="lang-python"><code>MP_DIR   = &quot;/SNS/EQSANS/shared/NeXusFiles/EQSANS/2025B_mp/&quot;
+FLOOD_4m = MP_DIR + &quot;Sensitivity_patched_thinPMMA_4m_167517.nxs&quot;
+DARK_FILE = MP_DIR + &quot;EQSANS_167516.nxs.h5&quot;
+FLUX_FILE = MP_DIR + &quot;bl6_flux_2025B_Aug_rebinned_4m.txt&quot;</code></pre>
+<h2 id="3-describe-one-reduction-with-eqvar">3 · Describe one reduction with EQVar<a class="anchor" href="#3-describe-one-reduction-with-eqvar">#</a></h2>
+<p>Every reduced curve is one <code>EQVar</code> object: you set its runs and parameters, then hand it to <code>reduceNow</code>. A minimal sample looks like:</p>
+<pre class="lang-python"><code>from eqsans_drtsans_script import EQVar, reduceNow
+
+eq = EQVar()
+eq._outputdir = &#x27;/SNS/EQSANS/IPTS-12345/shared/output/&#x27;
+eq._ipts      = 12345
+eq._thickness = 0.1                 # sample thickness, cm
+eq._samscatt  = &#x27;10003&#x27;             # sample scattering run
+eq._samtrans  = &#x27;20003&#x27;             # sample transmission run
+eq._bkgscatt  = &#x27;10001&#x27;             # background scattering run
+eq._bkgtrans  = &#x27;10002&#x27;             # background transmission run
+eq._empty     = &#x27;10000&#x27;             # empty beam (beam centre + transmission ref)
+eq._maskfilename = &#x27;/SNS/EQSANS/IPTS-12345/shared/useThisMask.nxs&#x27;
+eq._numqbins  = 80
+eq._filename  = &#x27;sample1&#x27;           # output name base
+reduceNow(eq)</code></pre>
+<p>A production template loops this over a list of runs, setting one <code>EQVar</code> per configuration per sample — see <code>reduce_template.py</code> for the worked pattern.</p>
+<h3 id="the-runs">The runs<a class="anchor" href="#the-runs">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>Attribute</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>_samscatt</code></td><td>Sample scattering run number</td></tr>
+<tr><td><code>_samtrans</code></td><td>Sample transmission run number</td></tr>
+<tr><td><code>_bkgscatt</code></td><td>Background (blocked/solvent) scattering run</td></tr>
+<tr><td><code>_bkgtrans</code></td><td>Background transmission run</td></tr>
+<tr><td><code>_empty</code></td><td>Empty-beam run — supplies the beam centre and the transmission reference</td></tr>
+<tr><td><code>_beamcenter</code></td><td>Beam-centre run, if measured separately from the empty beam</td></tr>
+<tr><td><code>_filterbytimestart</code> / <code>_filterbytimestop</code></td><td>Reduce only a time window of the run</td></tr>
+</tbody></table></div>
+<h3 id="the-sample">The sample<a class="anchor" href="#the-sample">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>Attribute</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>_ipts</code></td><td>IPTS number</td></tr>
+<tr><td><code>_thickness</code></td><td>Sample thickness, cm</td></tr>
+<tr><td><code>_filename</code></td><td>Output filename base (e.g. <code>sample1</code>)</td></tr>
+<tr><td><code>_instrumentname</code></td><td><code>EQSANS</code></td></tr>
+</tbody></table></div>
+<h3 id="output-and-binning">Output and binning<a class="anchor" href="#output-and-binning">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>Attribute</th><th>What it is</th><th>Typical</th></tr></thead><tbody>
+<tr><td><code>_outputdir</code></td><td>Output folder</td><td>—</td></tr>
+<tr><td><code>_numqbins</code></td><td>Number of Q bins</td><td>40–80</td></tr>
+<tr><td><code>_qbintype</code></td><td><code>linear</code> or <code>log</code></td><td><code>log</code></td></tr>
+<tr><td><code>_qmin</code> / <code>_qmax</code></td><td>Output Q range</td><td><code>0.006</code> / <code>0.1</code></td></tr>
+<tr><td><code>_wavelengthstep</code></td><td>Wavelength bin, Å</td><td><code>0.1</code></td></tr>
+<tr><td><code>_cuttofmin</code> / <code>_cuttofmax</code></td><td>TOF cutoffs, µs</td><td><code>1000</code> / <code>3000</code></td></tr>
+<tr><td><code>_sampleaperturesize</code></td><td>Sample aperture, mm</td><td><code>10</code></td></tr>
+<tr><td><code>_standardabsolutescale</code></td><td>Absolute-scale factor (from a standard)</td><td>—</td></tr>
+</tbody></table></div>
+<h3 id="masking-and-calibration">Masking and calibration<a class="anchor" href="#masking-and-calibration">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>Attribute</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>_maskfilename</code></td><td>Full path to a mask <code>.nxs</code></td></tr>
+<tr><td><code>_usedefaultmask</code></td><td>Use the instrument-managed default mask</td></tr>
+<tr><td><code>_sensitivityfilename</code></td><td>Sensitivity (flood) file — cycle-specific</td></tr>
+<tr><td><code>_darkfilename</code></td><td>Dark-current file — cycle-specific</td></tr>
+<tr><td><code>_beamfluxfilename</code></td><td>Beam-flux file — cycle-specific</td></tr>
+<tr><td><code>_sampleoffset</code> / <code>_detectoroffset</code></td><td>Geometry offsets — cycle-specific</td></tr>
+<tr><td><code>_scalecomponents</code></td><td>Per-panel scale, e.g. <code>[0.975, 1.030, 1]</code></td></tr>
+</tbody></table></div>
+<h3 id="inelastic-incoherent-correction">Inelastic / incoherent correction<a class="anchor" href="#inelastic-incoherent-correction">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>Attribute</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>_fitinelasticincoh</code></td><td>Fit the inelastic incoherent correction</td></tr>
+<tr><td><code>_selectminincoh</code></td><td>Search for the minimum incoherent level</td></tr>
+<tr><td><code>_incohfit_qmin</code> / <code>_incohfit_qmax</code></td><td>Q window used for that fit</td></tr>
+<tr><td><code>_outputwavelengthdependentprofile</code></td><td>Also write I(Q, λ)</td></tr>
+<tr><td><code>_elasticref</code> / <code>_elasticreftrans</code> / <code>_elasticrefthickness</code></td><td>Elastic-reference run, its transmission and thickness</td></tr>
+</tbody></table></div>
+<p>The full list and the drtsans JSON key each one maps to is on the <a href="parameters.html">parameters</a> page — that table is the same mapping the exported script uses, so it applies here verbatim.</p>
+<h2 id="4-run-it">4 · Run it<a class="anchor" href="#4-run-it">#</a></h2>
+<pre><code>drtsans reduce_template.py</code></pre>
+<p><code>drtsans</code> runs the current production build. Two other builds exist for testing new features before they are released:</p>
+<pre><code>drtsans --qa  reduce_template.py     # release-candidate build
+drtsans --dev reduce_template.py     # latest development build</code></pre>
+<p>Use the plain <code>drtsans</code> unless your local contact asks you to try <code>--qa</code> or <code>--dev</code>.</p>
+<h2 id="5-read-the-output">5 · Read the output<a class="anchor" href="#5-read-the-output">#</a></h2>
+<p>Each reduction writes into <code>_outputdir</code>:</p>
+<div class="table-wrap"><table><thead><tr><th>File</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>*_Iq.dat</code></td><td>1-D reduced I(Q)</td></tr>
+<tr><td><code>*_Iqxqy.dat</code></td><td>2-D I(qx, qy)</td></tr>
+<tr><td><code>*.png</code></td><td>Plot images</td></tr>
+<tr><td><code>*.json</code></td><td>The reduction parameters that were used</td></tr>
+<tr><td><code>*.out</code></td><td>Reduction log</td></tr>
+<tr><td><code>*_trans.txt</code></td><td>Fitted transmission</td></tr>
+<tr><td><code>*_raw_trans.txt</code></td><td>Raw transmission</td></tr>
+</tbody></table></div>
+<h2 id="6-stitch-configurations">6 · Stitch configurations<a class="anchor" href="#6-stitch-configurations">#</a></h2>
+<p>A template that measured a sample in more than one configuration merges them with drtsans&#x27; <code>stitch_profiles</code>. Overlap windows are listed low-Q to high-Q and <code>target_profile_index</code> picks which curve the others scale onto (0 = the first):</p>
+<pre class="lang-python"><code>from drtsans.stitch import stitch_profiles
+
+overlap = [0.07, 0.08]              # [MergeAB_min, MergeAB_max, ...] increasing Q
+stitched = stitch_profiles([iq1, iq2], overlap[0:2], target_profile_index=0)
+save_iqmod(stitched, output_directory + &#x27;merged_&#x27; + sample + &#x27;_Iq.txt&#x27;,
+           sep=&#x27; &#x27;, float_format=&#x27;%.6E&#x27;)</code></pre>
+<p>The merged curve is written as <code>merged_&lt;sample&gt;_Iq.txt</code>.</p>
+<h2 id="generate-a-starter-script-automatically">Generate a starter script automatically<a class="anchor" href="#generate-a-starter-script-automatically">#</a></h2>
+<p>Since 2025 a helper drafts the whole thing from the catalog. After <code>eqsans_setup.sh</code>:</p>
+<pre><code>drtsans eqsans_guesslist.py 12345</code></pre>
+<p>For IPTS-12345 it writes three files into the current folder:</p>
+<ul><li><code>catalog_12345.csv</code> — the full run catalog</li><li><code>runlist_12345.dat</code> — run numbers, transmission numbers and sample names</li><li><code>reduce12345_generated.py</code> — a reduction script, <strong>for review before you run it</strong></li></ul>
+<p>Check the pairings and calibration files, then:</p>
+<pre><code>drtsans reduce12345_generated.py</code></pre>
+<p>This is the same job the interactive tool does with <a href="commands.html#cmd-load"><code><a href="commands.html#cmd-load">/load ipts</a></code></a></p>
+<ul><li><a href="commands.html#cmd-matchruns"><code><a href="commands.html#cmd-matchruns">/matchruns</a></code></a> — and if you would rather stay in a</li></ul>
+<p>script but let the tool do the pairing, run those and <a href="commands.html#cmd-export-script"><code><a href="commands.html#cmd-export-script">/export script</a></code></a> to get a filled-in template back.</p>
+<h2 id="more">More<a class="anchor" href="#more">#</a></h2>
+<ul><li>Legacy guide with screenshots: <a href="https://sites.google.com/view/eqsans/script-reduction">sites.google.com/view/eqsans/script-reduction</a></li><li>Setting up the Python tools (video): <a href="https://youtu.be/O7DwtdnficI">youtu.be/O7DwtdnficI</a></li><li>Script-based reduction (video, older <code>python</code> syntax — use <code>drtsans</code>): <a href="https://youtu.be/cmGThfVlpRU">youtu.be/cmGThfVlpRU</a></li></ul>
+<blockquote><p>The script wrapper is a community tool and, as its own header notes, <em>not officially supported by SNS</em>. When something in the reduction looks wrong, the <a href="protocol.html">protocol</a> page lists what a trustworthy reduction has to satisfy.</p></blockquote>
+  </article>
+</main>
+<footer><div class="bar">
+  <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
+  <span>Generated 2026-08-31 by <code>docs/generate.py</code></span>
+</div></footer>
+<script src="search.js"></script>
+</body>
+</html>
