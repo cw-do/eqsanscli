@@ -527,7 +527,8 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/autopilot current --to <N>` | Stop after step N (aliases `--till`/`--until`); `--to 8` = reduce standard + find scale factor, then stop |
 | `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
 | `/calibrate <iq_file> --applynow` | Same, and apply it to the config named in the filename, marking affected rows for re-reduction |
-| `/export script [file]` | Export standalone Python script |
+| `/export script [file]` | Export standalone Python script (generated layout) |
+| `/export script --like <example.py> [-o <out>]` | Reproduce an existing script's style — keep its EQVar setup, config loops and stitching verbatim, refill only the run lists / sample names / thickness from the current table |
 
 ### Stitching
 

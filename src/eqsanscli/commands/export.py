@@ -21,8 +21,30 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
     if not table.rows:
         return CommandResult(success=False, message=_nothing_to_export(state, table))
 
-    if args:
-        output_path = args[0]
+    # --- Parse flags: --like <example.py> (template mode), -o/--out <path> ---
+    like_path: str | None = None
+    out_path: str | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--like", "--template", "--style") and i + 1 < len(args):
+            like_path = args[i + 1]
+            i += 2
+        elif a in ("-o", "--out", "--output") and i + 1 < len(args):
+            out_path = args[i + 1]
+            i += 2
+        else:
+            positional.append(a)
+            i += 1
+
+    if like_path is not None:
+        return await _export_like(like_path, out_path, state)
+
+    if positional:
+        output_path = positional[0]
+    elif out_path:
+        output_path = out_path
     else:
         output_path = os.path.join(
             state.output_directory,
@@ -45,6 +67,60 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
         f"  {n_rows} samples across {n_configs} configurations.\n"
         f"  Run with: drtsans {path}",
     )
+
+
+async def _export_like(like_path: str, out_path: str | None, state: SessionState) -> CommandResult:
+    """/export script --like <example.py> — fill the user's own script with this
+    table's run numbers, keeping every other line of the example verbatim."""
+    from pathlib import Path
+
+    from eqsanscli.services.script_templating import fill_from_example
+
+    src_path = os.path.abspath(os.path.expanduser(like_path))
+    if not os.path.isfile(src_path):
+        return CommandResult(success=False, message=f"Example script not found: {like_path}")
+    try:
+        source = Path(src_path).read_text()
+    except OSError as e:
+        return CommandResult(success=False, message=f"Could not read {like_path}: {e}")
+
+    table = state.current_table
+    result = fill_from_example(source, table)
+
+    if not result.ok:
+        lines = ["Could not fill the example script — nothing written:"]
+        lines += [f"  ✗ {e}" for e in result.errors]
+        if result.warnings:
+            lines += [f"  ⚠ {w}" for w in result.warnings]
+        return CommandResult(success=False, message="\n".join(lines))
+
+    # Default output: alongside the example, suffixed for this table.
+    if out_path is None:
+        stem = Path(src_path).stem
+        out_path = os.path.join(
+            state.output_directory, f"{stem}_{state.ipts}_{table.name}.py"
+        )
+    out_path = os.path.abspath(os.path.expanduser(out_path))
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(result.new_source)
+
+    align = result.alignment
+    mapping = "\n".join(
+        f"    config block {idx} → {cfg}" for idx, cfg in sorted(align.index_to_config.items())
+    )
+    msg = [
+        f"Filled '{Path(src_path).name}' with this table's runs → {out_path}",
+        f"  {len(align.reference_order)} sample(s); config blocks aligned:",
+        mapping,
+        "  Only the input arrays (scattering/transmission/background/empty-beam, "
+        "sample names, thickness) were changed — every other line is byte-for-byte "
+        "the example's.",
+    ]
+    if result.warnings:
+        msg.append("  Warnings — review before running:")
+        msg += [f"    ⚠ {w}" for w in result.warnings]
+    msg.append(f"  Run with: drtsans {out_path}")
+    return CommandResult(success=True, message="\n".join(msg))
 
 
 def _nothing_to_export(state: SessionState, table) -> str:

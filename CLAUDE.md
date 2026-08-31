@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.29.0 | 2026-08-31 | `/export script --like <example.py>` reproduces a user's own reduction script: it keeps every line of the example verbatim (EQVar setup, per-config loops, calibration params, arithmetic, mask paths, stitching) and refills only the input arrays — scattering/transmission/background/empty-beam run lists, sample names, thickness — from the current table. Deterministic "identify then substitute": `ast` parses the example, a heuristic maps `samscatt_N`/`# 9m 15A` blocks to table configs, code replaces only those RHS spans, and a validator fails closed (parse, runs exist in table, list lengths, no leftover example runs, non-input lines byte-identical). New `services/script_templating.py`. |
 | 0.28.0 | 2026-08-28 | `/show table` gains filters that combine (AND): `--rows <spec>` (index range/list/run number, e.g. `50-100`), `--name <text>` (case-insensitive substring of the sample name, e.g. `0.25phr`), and `--sample <pat>` (exact or glob with `*`). Unknown args are rejected with usage. Read-only — no rows removed. |
 | 0.27.1 | 2026-08-28 | Long sample names (and run titles) in the working/stitch tables now wrap onto more lines instead of being ellipsis-truncated: every free-text column gets `overflow="fold"`. Rich's default column overflow is `ellipsis`; the run columns only looked like they wrapped because their cell text carries an embedded newline. |
 | 0.27.0 | 2026-08-28 | Cancel stops the whole parallel batch on one click. `reduce_row` now returns at once when the cancel event is already set — before, a freed worker launched the next queued drtsans (killed ~1s later) so a single click drained a 15-job batch only slowly, job by job. The executor loop also drops queued futures on cancel. Both front ends (`/reduce`, autopilot). |
@@ -202,6 +203,47 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-31: reproduce a user's own script style — /export script --like (v0.29.0)
+
+Asked whether the tool could "write a reduction script following the style of
+script_style2.py (assume the table is done)" — reuse the user's own script (how
+EQVar is set up, how many config loops, the stitching) and change only the run
+lists / sample names, since every scientist's script differs slightly.
+
+Framed as LLM work, but the reliable design is **identify, then substitute
+deterministically** — the language model (if used at all) only *names* which
+variables are the input arrays; code does the edit, so "keep everything else
+verbatim" is exact and checkable. For the common style it needs no LLM:
+
+- `parse_example()` — `ast` collects module-level assignments with their exact
+  RHS character spans and the comment above each.
+- `identify()` — regex maps `samscatt_N`/`samtrans_N`/`bkgscatt_N`/`bkgtrans_N`/
+  `emptybeam_N`, `sample_names`, `sample_thick`; the config hint per block comes
+  from its comment (`# 9m 15A`) or a `maskWS…` token, normalized (`2p5`→`2.5`).
+- `align()` — matches each block's hint to a table physical config, fills the
+  rest by order, and picks the reference sample order (warns on non-rectangular
+  sample sets or missing/extra configs).
+- `substitute()` — replaces only the identified RHS spans (back-to-front so
+  offsets stay valid); scalar `emptybeam` stays scalar, lists stay lists.
+- `validate()` — fails closed: the result must `ast.parse`; every emitted run
+  must be in the table; per-config lengths match the sample count; no original
+  example run survives in a replaced array; and every non-input line is
+  byte-identical to the example.
+
+Verified on the real `script_style2.py` (4 configs, per-sample loop, inline
+stitch): only the 22 input lines change, everything from the first EQVar block
+down is identical, and the output parses. An **LLM fallback** for odd variable
+naming (structured-JSON identification, never code generation) is left as a
+follow-up; the heuristic covers the common case offline.
+
+`tests/test_script_templating.py` (12 checks) against a committed fixture copy of
+the example + a synthetic 4-config table. 245 tests.
+
+**Files changed:** `services/script_templating.py` (new), `commands/export.py`,
+`services/llm_handler.py`, `tests/test_script_templating.py` +
+`tests/fixtures/example_reduction_script.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-28: /show table filters — rows, name, sample (v0.28.0)
 
@@ -323,44 +365,5 @@ reaches step 13. 217 tests.
 **Files changed:** `commands/autopilot.py`, `services/autopilot.py`,
 `services/llm_handler.py`, `app.py`, `headless.py`,
 `tests/test_autopilot_tostep.py` (new), SKILL.md, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-08-24: transmission for a displacement series, and combined `/set` (v0.25.0)
-
-Two gaps found during real-IPTS reduction (IPTS-37828, runs 187233–187242: one
-transmission `T-70.30PBD_0.25phr` and a scattering series `S-…_d0, _d2, … _d16`,
-all 4m 2.5Afs 3mmsa, `_dX` = sample displacement).
-
-**1 — `/matchruns` missed the transmission.** Matching is by sample name, and the
-`_dX` suffix made every scattering name differ from the transmission's. Two
-additions, both deterministic (no LLM):
-- **Displacement-aware base match.** `_match_base()` strips a trailing temperature
-  *and* any `_d<number>` token, so `poly_d0`, `poly_d16` and `T-poly` all key on
-  `poly`. Only the numeric `_dN` convention is stripped — `_d2o` and other
-  non-numeric `d` tokens are left alone (the `(?=_|$)` lookahead needs the digits
-  to end the token), so D2O-like names don't collapse together.
-- **Sole-transmission-per-config fallback.** If names still don't match and a
-  configuration holds exactly one plain transmission run, it can only be that one
-  — assign it, and warn that it "matched by configuration" so the user verifies.
-  Guarded: two transmissions in a config → no guess.
-
-The base match handles the real 187233 case cleanly (no warning); the fallback is
-the safety net for series whose names share nothing.
-
-**2 — one run as both transmission and empty beam, in one command.**
-`/set <row> trans,emp <run>` now accepts several run fields separated by `,` or
-`+` (run fields only — trans/bkg/bkgtrans/emp; mixing in thickness/sample/cfg is
-refused rather than guessed). Clearing (`none`) works across the set too. Note
-this makes it easy to set `trans == emp`, which **TBL-06** flags as an error
-(transmission ÷ empty beam ≈ 1); the rule is unchanged and the capability is a
-deliberate manual override, not the matcher's default.
-
-`tests/test_matching.py` (11 checks): the displacement series resolves, the
-fallback fires and is guarded, `_d2o` is protected, and the combined `/set` sets
-both fields / rejects special-field mixes / clears / leaves single-field behaviour
-untouched. 209 tests.
-
-**Files changed:** `services/matching_service.py`, `commands/matching.py`,
-`services/llm_handler.py`, `tests/test_matching.py` (new), SKILL.md, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
 
