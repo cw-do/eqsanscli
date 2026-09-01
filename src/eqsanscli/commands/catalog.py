@@ -76,14 +76,38 @@ async def handle_show(args: list[str], state: SessionState) -> CommandResult:
     )
 
 
-async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResult:
-    if not args:
-        return CommandResult(success=False, message="Usage: /load ipts <number>")
+def _ipts_from_cwd() -> int | None:
+    """The IPTS number of the current working directory, if it is under
+    /SNS/EQSANS/IPTS-NNNNN/... — matches with or without a trailing slash."""
+    m = re.search(r"/IPTS-(\d+)(?:/|$)", os.path.abspath(os.getcwd()))
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    return None
 
-    try:
-        ipts = int(args[0])
-    except ValueError:
-        return CommandResult(success=False, message=f"Invalid IPTS number: {args[0]}")
+
+async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResult:
+    inferred_note = ""
+    if not args:
+        # No number given: infer from the current IPTS folder, e.g. running from
+        # /SNS/EQSANS/IPTS-39659/shared/ loads 39659.
+        inferred = _ipts_from_cwd()
+        if inferred is None:
+            return CommandResult(
+                success=False,
+                message="Usage: /load ipts <number>\n"
+                "  /load ipts        — use the IPTS of the current folder "
+                "(only works under /SNS/EQSANS/IPTS-NNNNN/...)",
+            )
+        ipts = inferred
+        inferred_note = f" [dim](inferred from current folder)[/dim]"
+    else:
+        try:
+            ipts = int(args[0])
+        except ValueError:
+            return CommandResult(success=False, message=f"Invalid IPTS number: {args[0]}")
 
     try:
         df = _catalog_service.fetch(ipts)
@@ -102,7 +126,7 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
     rows = _build_catalog_rows(df)
     return CommandResult(
         success=True,
-        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs)",
+        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs){inferred_note}",
         data={"type": "catalog", "rows": rows, "ipts": ipts},
     )
 

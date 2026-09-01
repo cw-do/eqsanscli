@@ -373,6 +373,7 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | Command | Purpose |
 |---------|---------|
 | `/load ipts <N>` | Fetch experiment catalog from ONCat (REPLACES current catalog) |
+| `/load ipts` | Same, using the IPTS of the current folder (when under `/SNS/EQSANS/IPTS-NNNNN/…`) |
 | `/refresh catalog` | Re-fetch current IPTS catalog while preserving `/reclass` overrides; reports new runs |
 | `/show catalog` | Display all runs with metadata |
 | `/show ipts` | Show current IPTS number |

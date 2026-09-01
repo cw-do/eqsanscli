@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.35.0 | 2026-09-01 | `/load ipts` with no number infers the IPTS from the current folder — running eqsanscli from `/SNS/EQSANS/IPTS-39659/shared/` and typing `/load ipts` loads 39659 (regex matches with or without a trailing slash; falls back to usage when the cwd isn't under `/SNS/EQSANS/IPTS-NNNNN/`). LLM routes "load the current ipts" → `/load ipts`. |
 | 0.34.0 | 2026-08-31 | Fix: `--like` aligned hint-less config blocks by the table's order (distance-ascending, so `2.5m2.5a` came before `4m10a`), but a script's block index order is physical **low-Q → high-Q** (block 0 → `iq0`, the low-Q profile). It mis-assigned block 1 → 2.5m, block 2 → 4m, so the stitch (which expects `iq1` low-Q first) was backwards. `align()` now fills unhinted blocks from the remaining configs sorted low-Q first (largest λ·L = lowest Qmin), and warns if the final block order still isn't monotonic in Q. Explicit comment/mask hints still win. Fixes the case with no `--adapt` needed. |
 | 0.33.0 | 2026-08-31 | Fix: `emptyBeam`/`empty_beam`/`emptybeam` (camelCase or joined) titles were classified as plain transmissions, so empty beam was never assigned (IPTS-38659 `T-emptyBeam_4m 10A`). The empty-beam regex now matches `empty`/`emp`/`emt` joined to `beam` by any separator or none, using letter-boundary lookarounds (a trailing `\b` failed before `_`); background cells (`emptycell`/`emptyticell`) are still excluded. Also: `/show preset stitch_overlaps` now renders the overlap pairs and a how-to-edit hint instead of an empty table. |
 | 0.32.0 | 2026-08-31 | `/export script --like … --adapt`: opt-in LLM revision for the config-mismatch case. Hybrid, not fully-LLM — code fills the matched configs' run arrays (exact, never the model), the LLM only removes surplus config blocks and rewires the stitch call, and `validate_adapt()` enforces that the model may **only comment lines out or change the stitch call** (any other altered active line is rejected), plus no active references to removed configs and the filled arrays survive. The un-verifiable stitch overlaps/target get a `# attn.` marker and the output is labelled review-required. Deterministic `--like` output also gains a header stating what was refilled vs kept verbatim. LLM call is injectable for offline testing. |
@@ -208,6 +209,23 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-01: /load ipts infers the IPTS from the current folder (v0.35.0)
+
+`/load ipts` with no number now uses the IPTS of the current working directory —
+start eqsanscli in `/SNS/EQSANS/IPTS-39659/shared/`, type `/load ipts`, and it
+loads 39659. `_ipts_from_cwd()` matches `/IPTS-(\d+)` with or without a trailing
+slash (so the bare `/SNS/EQSANS/IPTS-39659` folder works too); outside an IPTS
+tree it falls back to the usage message. The success line notes it was inferred.
+Same idea autopilot already used for `/autopilot current`. LLM routing maps "load
+the current ipts" / "load the experiment I'm in" → `/load ipts`.
+
+`tests/test_load_ipts.py` (5 checks): cwd variants, no-arg infers + sets state,
+outside-IPTS shows usage, an explicit number still works, invalid number rejected.
+279 tests.
+
+**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
+`tests/test_load_ipts.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-08-31: --like aligns config blocks by Q order, not table order (v0.34.0)
 
@@ -336,37 +354,4 @@ fail closed and write nothing; the command reports the mismatch. 261 tests.
 
 **Files changed:** `services/script_templating.py`,
 `tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: /apply preset from a file, and an LLM fallback for --like (v0.30.0)
-
-Two follow-ups, built on a branch for testing before merge.
-
-**1 — `/apply preset <file.json> <config>`.** `/apply preset` resolved only names
-in `preset_configs/`, so pointing it at the user's own reduction JSON
-("use this.json as the configuration parameters for 2.5m2.5a") failed with
-"Preset not found". New `resolve_preset_source()` treats the argument as a path
-first — an existing `.json` (as given, or resolved against cwd / the output dir)
-wins over a same-named preset — and falls back to the `preset_configs/` lookup.
-All non-null configuration parameters are flattened and copied; user-set values
-are preserved unless `--force`. The copy-all mechanism itself was already correct;
-this only widened where the source can come from. `tests/test_apply_preset_file.py`
-(10 checks).
-
-**2 — LLM fallback for `--like` odd naming.** The heuristic identifier covers the
-`samscatt_N` + comment style offline. For scripts that name their input arrays
-unusually, `llm_identify_structure()` asks the model to return a **structured JSON
-mapping** (variable → role + config index) — never code — which
-`apply_llm_mapping()` applies through the same deterministic substitute/validate
-path, so the verbatim guarantee is unchanged. It runs only when the heuristic
-finds nothing and `settings.llm.is_configured`; otherwise it is a no-op. Wired
-into `/export script --like`. Tested with a stub identifier against an
-odd-named fixture (no network): the fallback fires only when the heuristic is
-empty, ignores unknown variable names, and fills correctly.
-
-`tests/test_script_templating.py` grows to 16 checks. 259 tests.
-
-**Files changed:** `services/preset_service.py`, `commands/preset.py`,
-`services/script_templating.py`, `commands/export.py`, `services/llm_handler.py`,
-`tests/test_apply_preset_file.py` (new), `tests/test_script_templating.py`,
-SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 

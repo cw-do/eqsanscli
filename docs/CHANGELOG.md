@@ -7,6 +7,39 @@ the version it shipped in.
 
 ---
 
+### 2026-08-31: /apply preset from a file, and an LLM fallback for --like (v0.30.0)
+
+Two follow-ups, built on a branch for testing before merge.
+
+**1 — `/apply preset <file.json> <config>`.** `/apply preset` resolved only names
+in `preset_configs/`, so pointing it at the user's own reduction JSON
+("use this.json as the configuration parameters for 2.5m2.5a") failed with
+"Preset not found". New `resolve_preset_source()` treats the argument as a path
+first — an existing `.json` (as given, or resolved against cwd / the output dir)
+wins over a same-named preset — and falls back to the `preset_configs/` lookup.
+All non-null configuration parameters are flattened and copied; user-set values
+are preserved unless `--force`. The copy-all mechanism itself was already correct;
+this only widened where the source can come from. `tests/test_apply_preset_file.py`
+(10 checks).
+
+**2 — LLM fallback for `--like` odd naming.** The heuristic identifier covers the
+`samscatt_N` + comment style offline. For scripts that name their input arrays
+unusually, `llm_identify_structure()` asks the model to return a **structured JSON
+mapping** (variable → role + config index) — never code — which
+`apply_llm_mapping()` applies through the same deterministic substitute/validate
+path, so the verbatim guarantee is unchanged. It runs only when the heuristic
+finds nothing and `settings.llm.is_configured`; otherwise it is a no-op. Wired
+into `/export script --like`. Tested with a stub identifier against an
+odd-named fixture (no network): the fallback fires only when the heuristic is
+empty, ignores unknown variable names, and fills correctly.
+
+`tests/test_script_templating.py` grows to 16 checks. 259 tests.
+
+**Files changed:** `services/preset_service.py`, `commands/preset.py`,
+`services/script_templating.py`, `commands/export.py`, `services/llm_handler.py`,
+`tests/test_apply_preset_file.py` (new), `tests/test_script_templating.py`,
+SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: reproduce a user's own script style — /export script --like (v0.29.0)
 
 Asked whether the tool could "write a reduction script following the style of

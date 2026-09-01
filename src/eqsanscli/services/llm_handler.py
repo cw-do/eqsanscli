@@ -115,6 +115,7 @@ Available commands:
 
 CATALOG:
 /load ipts <number>             - Fetch catalog from ONCat
+/load ipts                      - Same, inferring the IPTS from the current folder (/SNS/EQSANS/IPTS-NNNNN/...). "load the current ipts" / "load this experiment" / "load the ipts I'm in" → /load ipts
 /refresh catalog                - Re-fetch the current IPTS catalog while preserving any /reclass overrides; reports number of new runs since last fetch
 /list ipts *                    - List all EQSANS experiments (cached after first fetch)
 /list ipts <text>               - Search experiments by title or team member name (searches cache)
