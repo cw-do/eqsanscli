@@ -26,7 +26,7 @@ from eqsanscli.commands.catalog import (
 from eqsanscli.commands.config import (
     handle_config, handle_list_configs, handle_set_config, handle_show_config,
 )
-from eqsanscli.commands.data import handle_list_iq, handle_list_iqxqy, handle_plot
+from eqsanscli.commands.data import handle_display, handle_list_iq, handle_list_iqxqy, handle_plot
 from eqsanscli.commands.export import handle_confirm, handle_export_script, handle_zipnsend
 from eqsanscli.commands.instrument import handle_instrument
 from eqsanscli.commands.mask import handle_mask
@@ -97,6 +97,7 @@ def register_all(router: CommandRouter) -> None:
     router.register("calibrate", handle_calibrate)
     router.register("stitch", handle_stitch)
     router.register("plot", handle_plot)
+    router.register("display", handle_display)
     router.register("list iq", handle_list_iq)
     router.register("list iqxqy", handle_list_iqxqy)
     router.register("autopilot", handle_autopilot)

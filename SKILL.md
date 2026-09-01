@@ -553,7 +553,8 @@ is discoverable. Needs drtsans for the Mantid read/write.
 |---------|---------|
 | `/list iq` | List reduced I(Q) files |
 | `/list iqxqy` | List reduced 2D I(Qx,Qy) files |
-| `/plot <pattern> [flags]` | Plot data |
+| `/plot <pattern> [flags]` | Plot data files (renders Iq.dat etc.) |
+| `/display <image.png> [...]` | Open existing image file(s) — mask previews, saved plots — in a viewer window (needs an X display; otherwise reports the path) |
 | `/share <pattern>` | Upload files, get 24h URL |
 | `/zipnsend <email> [options]` | Zip files and email (--pattern, --dir, --subject) |
 | `/confirm [ipts]` | Confirm IPTS data reduction complete (--comment) |

@@ -223,6 +223,48 @@ else:
 """
 
 
+_DISPLAY_SCRIPT = r"""
+import sys, json, os
+import matplotlib
+if os.environ.get("DISPLAY"):
+    try:
+        matplotlib.use("TkAgg")
+    except Exception:
+        matplotlib.use("Agg")
+else:
+    matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+paths = json.loads(sys.argv[1])
+for p in paths:
+    img = mpimg.imread(p)
+    fig, ax = plt.subplots()
+    ax.imshow(img)
+    ax.axis("off")
+    ax.set_title(os.path.basename(p))
+    fig.canvas.manager.set_window_title(os.path.basename(p)) if fig.canvas.manager else None
+plt.show()
+"""
+
+
+def display_image(paths: list[str]) -> str:
+    """Open one or more existing image files (PNG, …) in a viewer window.
+
+    Only meaningful when an X display is available (the caller checks DISPLAY);
+    the window is launched detached, exactly like an interactive /plot.
+    """
+    script_path = os.path.join(tempfile.gettempdir(), "eqsanscli_display_script.py")
+    with open(script_path, "w") as f:
+        f.write(_DISPLAY_SCRIPT)
+    subprocess.Popen(
+        [_get_python(), script_path, json.dumps(paths)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return "(window)"
+
+
 def _get_python() -> str:
     return sys.executable
 

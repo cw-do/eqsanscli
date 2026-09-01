@@ -359,6 +359,7 @@ DATA & PLOTTING:
 /list iq [path]                 - List I(Q) files
 /list iqxqy [path]              - List I(Qx,Qy) files
 /plot <file|pattern> [flags]    - Plot data (flags: --logx --logy --linx --liny --kratky --guinier --porod --save <path> --title <text>)
+/display <image.png> [...]      - Open an EXISTING image file (PNG) in a viewer window — mask previews, a saved plot. Not for data files (use /plot). "show me the mask png" / "open <file>.png" / "display the plot image" → /display <file>.png
 
 STITCH:
 /stitch build                   - Build stitch table

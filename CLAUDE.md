@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.0 | 2026-09-01 | New `/display <image.png> [...]` opens existing image files (mask previews, saved plots) in a viewer window — distinct from `/plot`, which renders *data* files. Resolves paths against the cwd and output dir; opens a detached matplotlib window when `DISPLAY` is set (same pattern as an interactive `/plot`), otherwise reports the resolved path (headless/SSH). LLM routes "show me the mask png" / "open X.png" → `/display`. |
 | 0.35.0 | 2026-09-01 | `/load ipts` with no number infers the IPTS from the current folder — running eqsanscli from `/SNS/EQSANS/IPTS-39659/shared/` and typing `/load ipts` loads 39659 (regex matches with or without a trailing slash; falls back to usage when the cwd isn't under `/SNS/EQSANS/IPTS-NNNNN/`). LLM routes "load the current ipts" → `/load ipts`. |
 | 0.34.0 | 2026-08-31 | Fix: `--like` aligned hint-less config blocks by the table's order (distance-ascending, so `2.5m2.5a` came before `4m10a`), but a script's block index order is physical **low-Q → high-Q** (block 0 → `iq0`, the low-Q profile). It mis-assigned block 1 → 2.5m, block 2 → 4m, so the stitch (which expects `iq1` low-Q first) was backwards. `align()` now fills unhinted blocks from the remaining configs sorted low-Q first (largest λ·L = lowest Qmin), and warns if the final block order still isn't monotonic in Q. Explicit comment/mask hints still win. Fixes the case with no `--adapt` needed. |
 | 0.33.0 | 2026-08-31 | Fix: `emptyBeam`/`empty_beam`/`emptybeam` (camelCase or joined) titles were classified as plain transmissions, so empty beam was never assigned (IPTS-38659 `T-emptyBeam_4m 10A`). The empty-beam regex now matches `empty`/`emp`/`emt` joined to `beam` by any separator or none, using letter-boundary lookarounds (a trailing `\b` failed before `_`); background cells (`emptycell`/`emptyticell`) are still excluded. Also: `/show preset stitch_overlaps` now renders the overlap pairs and a how-to-edit hint instead of an empty table. |
@@ -209,6 +210,25 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-01: /display opens existing image files (v0.36.0)
+
+`/display <image.png> [...]` opens image files already on disk — mask previews,
+plots `/plot` saved — in a viewer window. It's the counterpart to `/plot`, which
+only renders *data* files (Iq.dat) and can't show a PNG. Paths resolve against the
+cwd and the output directory (glob supported). With `DISPLAY` set it launches a
+detached matplotlib `imshow` window (the same fire-and-forget Popen pattern as an
+interactive `/plot`); headless it reports the resolved absolute path so the file
+can be copied/opened elsewhere. `services/plotting_service.py:display_image()`;
+LLM routing maps "show me the mask png" / "open X.png" → `/display`.
+
+`tests/test_display.py` (5 checks): usage, missing file, headless path report,
+output-dir resolution, and the DISPLAY path launches the viewer (injected). 284
+tests.
+
+**Files changed:** `commands/data.py`, `commands/registry.py`,
+`services/plotting_service.py`, `services/llm_handler.py`,
+`tests/test_display.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-01: /load ipts infers the IPTS from the current folder (v0.35.0)
 
@@ -327,31 +347,4 @@ reliability on the stitch rewrite is unverified — hence the review-required la
 **Files changed:** `services/script_templating.py`, `commands/export.py`,
 `services/llm_handler.py`, `tests/test_script_templating.py`, SKILL.md, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: --like fails closed on a config mismatch (v0.31.0)
-
-Testing the new `--like` export surfaced a dangerous case: the user's template had
-4 configuration blocks but the experiment had only 2. The tool matched 2 blocks
-to the table and left the other 2 with the **example experiment's own run
-numbers**, wrote the file (ok=True, warning only), and the emitted script would
-still stitch all 4 profiles. Running it would reduce runs from a different
-experiment and mis-stitch — silent garbage.
-
-Now `fill_from_example()` refuses before writing when the example and table don't
-line up: any example block with no matching table config (would keep stale runs),
-any table config with no block (samples silently unreduced), or a block whose
-comment/mask hint disagrees with the config it would be aligned to. The error
-names the exact mismatch and the block count on each side.
-
-The safe options are to use an example whose configurations match the table, or
-trim one to fit. Automatically commenting out and re-wiring the surplus blocks —
-including the `stitch_profiles([...], overlap[...], target_profile_index=...)`
-call, whose overlaps and target index depend on the profile count — is a planned
-follow-up (task), left out here because guessing the stitch rewrite is unsafe.
-
-`tests/test_script_templating.py` (18 checks): fewer-configs and extra-config both
-fail closed and write nothing; the command reports the mismatch. 261 tests.
-
-**Files changed:** `services/script_templating.py`,
-`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 

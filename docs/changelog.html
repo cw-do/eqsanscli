@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.35.0</div>
+          data reduction tool &middot; v0.36.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,12 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-31---like-fails-closed-on-a-config-mismatch-v0310">2026-08-31: --like fails closed on a config mismatch (v0.31.0)<a class="anchor" href="#2026-08-31---like-fails-closed-on-a-config-mismatch-v0310">#</a></h3>
+<p>Testing the new <code>--like</code> export surfaced a dangerous case: the user&#x27;s template had 4 configuration blocks but the experiment had only 2. The tool matched 2 blocks to the table and left the other 2 with the <strong>example experiment&#x27;s own run numbers</strong>, wrote the file (ok=True, warning only), and the emitted script would still stitch all 4 profiles. Running it would reduce runs from a different experiment and mis-stitch — silent garbage.</p>
+<p>Now <code>fill_from_example()</code> refuses before writing when the example and table don&#x27;t line up: any example block with no matching table config (would keep stale runs), any table config with no block (samples silently unreduced), or a block whose comment/mask hint disagrees with the config it would be aligned to. The error names the exact mismatch and the block count on each side.</p>
+<p>The safe options are to use an example whose configurations match the table, or trim one to fit. Automatically commenting out and re-wiring the surplus blocks — including the <code>stitch_profiles([...], overlap[...], target_profile_index=...)</code> call, whose overlaps and target index depend on the profile count — is a planned follow-up (task), left out here because guessing the stitch rewrite is unsafe.</p>
+<p><code>tests/test_script_templating.py</code> (18 checks): fewer-configs and extra-config both fail closed and write nothing; the command reports the mismatch. 261 tests.</p>
+<p><strong>Files changed:</strong> <code>services/script_templating.py</code>, <code>tests/test_script_templating.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-08-31-apply-preset-from-a-file-and-an-llm-fallback-for---like-v0300">2026-08-31: /apply preset from a file, and an LLM fallback for --like (v0.30.0)<a class="anchor" href="#2026-08-31-apply-preset-from-a-file-and-an-llm-fallback-for---like-v0300">#</a></h3>
 <p>Two follow-ups, built on a branch for testing before merge.</p>
 <p><strong>1 — <code><a href="commands.html#cmd-apply-preset">/apply preset &lt;file.json&gt; &lt;config&gt;</a></code>.</strong> <code><a href="commands.html#cmd-apply-preset">/apply preset</a></code> resolved only names in <code>preset_configs/</code>, so pointing it at the user&#x27;s own reduction JSON (&quot;use this.json as the configuration parameters for 2.5m2.5a&quot;) failed with &quot;Preset not found&quot;. New <code>resolve_preset_source()</code> treats the argument as a path first — an existing <code>.json</code> (as given, or resolved against cwd / the output dir) wins over a same-named preset — and falls back to the <code>preset_configs/</code> lookup. All non-null configuration parameters are flattened and copied; user-set values are preserved unless <code>--force</code>. The copy-all mechanism itself was already correct; this only widened where the source can come from. <code>tests/test_apply_preset_file.py</code> (10 checks).</p>

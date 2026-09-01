@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
-from eqsanscli.services.plotting_service import PlotOptions, plot_iq, plot_iqxqy
+from eqsanscli.services.plotting_service import (
+    PlotOptions,
+    display_image,
+    plot_iq,
+    plot_iqxqy,
+)
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
@@ -96,6 +101,68 @@ def _parse_plot_args(args: list[str], opts: PlotOptions | None = None) -> tuple[
         i += 1
 
     return files, opts
+
+
+async def handle_display(args: list[str], state: SessionState) -> CommandResult:
+    """/display <image> [...] — open existing image file(s) (PNG, mask previews,
+    saved plots) in a viewer window.
+
+    Unlike /plot (which renders data files), this shows an image already on disk.
+    Files are resolved against the current dir and the output directory. A viewer
+    window needs an X display; without one, the resolved path is reported instead.
+    """
+    if not args:
+        return CommandResult(
+            success=False,
+            message="Usage: /display <image.png> [more.png ...]\n"
+            "  Opens existing image files in a viewer window (needs an X display).\n"
+            "  For a mask preview use /display <mask>_preview.png; for a saved plot,\n"
+            "  the PNG /plot wrote. To render a data file instead, use /plot.",
+        )
+
+    resolved: list[str] = []
+    for f in args:
+        if os.path.exists(f):
+            resolved.append(f)
+        elif os.path.exists(os.path.join(state.output_directory, f)):
+            resolved.append(os.path.join(state.output_directory, f))
+        elif glob.glob(os.path.join(state.output_directory, f)):
+            resolved.extend(sorted(glob.glob(os.path.join(state.output_directory, f))))
+        elif glob.glob(f):
+            resolved.extend(sorted(glob.glob(f)))
+        else:
+            resolved.append(f)
+
+    missing = [f for f in resolved if not os.path.exists(f)]
+    if missing:
+        return CommandResult(
+            success=False,
+            message=f"Not found: {', '.join(missing)}\n"
+            f"  (searched the current dir and {state.output_directory})",
+        )
+
+    paths = [os.path.abspath(f) for f in resolved]
+
+    if not os.environ.get("DISPLAY"):
+        listing = "\n".join(f"    {p}" for p in paths)
+        return CommandResult(
+            success=True,
+            message="No X display available, so a viewer window can't be opened here.\n"
+            "The image file(s) are at:\n" + listing +
+            "\n  Copy them locally (scp) or open over an X session to view.",
+        )
+
+    try:
+        display_image(paths)
+    except Exception as e:
+        return CommandResult(success=False, message=f"Could not open viewer: {e}")
+
+    label = paths[0] if len(paths) == 1 else f"{len(paths)} images"
+    return CommandResult(
+        success=True,
+        message=f"Opening {label} in a viewer window.",
+        data={"type": "image", "path": paths[0]},
+    )
 
 
 async def handle_plot(args: list[str], state: SessionState) -> CommandResult:

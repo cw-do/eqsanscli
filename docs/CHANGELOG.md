@@ -7,6 +7,33 @@ the version it shipped in.
 
 ---
 
+### 2026-08-31: --like fails closed on a config mismatch (v0.31.0)
+
+Testing the new `--like` export surfaced a dangerous case: the user's template had
+4 configuration blocks but the experiment had only 2. The tool matched 2 blocks
+to the table and left the other 2 with the **example experiment's own run
+numbers**, wrote the file (ok=True, warning only), and the emitted script would
+still stitch all 4 profiles. Running it would reduce runs from a different
+experiment and mis-stitch — silent garbage.
+
+Now `fill_from_example()` refuses before writing when the example and table don't
+line up: any example block with no matching table config (would keep stale runs),
+any table config with no block (samples silently unreduced), or a block whose
+comment/mask hint disagrees with the config it would be aligned to. The error
+names the exact mismatch and the block count on each side.
+
+The safe options are to use an example whose configurations match the table, or
+trim one to fit. Automatically commenting out and re-wiring the surplus blocks —
+including the `stitch_profiles([...], overlap[...], target_profile_index=...)`
+call, whose overlaps and target index depend on the profile count — is a planned
+follow-up (task), left out here because guessing the stitch rewrite is unsafe.
+
+`tests/test_script_templating.py` (18 checks): fewer-configs and extra-config both
+fail closed and write nothing; the command reports the mismatch. 261 tests.
+
+**Files changed:** `services/script_templating.py`,
+`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: /apply preset from a file, and an LLM fallback for --like (v0.30.0)
 
 Two follow-ups, built on a branch for testing before merge.
