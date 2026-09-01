@@ -419,7 +419,8 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/instrument off` / `/instrument on` | Disable/enable automatic resolution |
 | `/instrument check` | Verify referenced calibration files still exist |
 | `/apply preset auto` | Auto-match closest preset to each config |
-| `/apply preset <name> <config_id>` | Apply specific preset |
+| `/apply preset <name> <config_id>` | Apply a preset (from preset_configs/) to a config |
+| `/apply preset <file.json> <config_id>` | Copy all params from your own reduction .json into a config |
 | `/set outputdir <path>` | Set output directory (propagates to all configs) |
 | `/set drtsans <version>` | Set drtsans version: default, dev, qa |
 

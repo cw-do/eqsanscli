@@ -231,6 +231,121 @@ def identify(model: ExampleModel) -> ExampleModel:
 
 
 # --------------------------------------------------------------------------
+# 3b. LLM fallback for odd variable naming (structured identification only)
+# --------------------------------------------------------------------------
+#
+# When the heuristic finds no input arrays (a user names them
+# scatt_run_first / etc.), an optional language-model pass can *identify* which
+# assignment plays which role. It returns structured JSON — never code — which we
+# apply the same way the heuristic does, so the deterministic substitute/validate
+# path (and its verbatim guarantee) is unchanged.
+
+def summarize_assignments(model: ExampleModel) -> list[dict]:
+    """Compact description of each module-level assignment, for an LLM prompt."""
+    out = []
+    for a in model.assignments:
+        preview = a.rhs_text.replace("\n", " ")
+        if len(preview) > 60:
+            preview = preview[:57] + "..."
+        out.append({
+            "name": a.name,
+            "comment": a.comment_above,
+            "rhs": preview,
+            "is_scalar": a.rhs_is_scalar,
+        })
+    return out
+
+
+def apply_llm_mapping(model: ExampleModel, mapping: dict) -> bool:
+    """Populate role_blocks / sample_names / sample_thick / config_hint from a
+    structured mapping (see llm_identify_structure for the shape). Returns True
+    if at least one input array was identified. Unknown variable names are
+    ignored rather than trusted."""
+    by_name = {a.name: a for a in model.assignments}
+
+    sn = mapping.get("sample_names")
+    if isinstance(sn, str) and sn in by_name:
+        model.sample_names = by_name[sn]
+    stk = mapping.get("sample_thick")
+    if isinstance(stk, str) and stk in by_name:
+        model.sample_thick = by_name[stk]
+
+    role_blocks: dict[str, dict[int, Assignment]] = {}
+    for block in mapping.get("blocks", []):
+        if not isinstance(block, dict):
+            continue
+        try:
+            idx = int(block.get("index"))
+        except (TypeError, ValueError):
+            continue
+        cfg = str(block.get("config", "") or "")
+        hint = normalize_config_id(cfg) or _normalize_config_hint(cfg)
+        if hint:
+            model.config_hint[idx] = hint
+        for role in ROLE_FIELDS:
+            name = block.get(role)
+            if isinstance(name, str) and name in by_name:
+                role_blocks.setdefault(role, {})[idx] = by_name[name]
+
+    model.role_blocks = role_blocks
+    return bool(role_blocks)
+
+
+def llm_identify_structure(model: ExampleModel) -> bool:
+    """Real LLM identification pass. Returns False (a no-op) when the LLM is not
+    configured or the call fails — the caller then keeps the heuristic result.
+    Isolated so the rest of the module stays pure and testable offline."""
+    try:
+        from eqsanscli.config.settings import AppSettings
+        settings = AppSettings.load()
+        if not settings.llm.is_configured:
+            return False
+        from openai import OpenAI
+    except Exception:
+        return False
+
+    import json
+
+    prompt = (
+        "You are labelling the INPUT variables of an EQSANS reduction script so a "
+        "tool can refill them from a run table. Below is every top-level assignment "
+        "(name, the comment above it, a preview of its value). Identify: the array "
+        "of sample names; the array of sample thicknesses; and, per detector "
+        "configuration block, the variables holding the sample scattering runs "
+        "(samscatt), sample transmission runs (samtrans), background scattering "
+        "(bkgscatt), background transmission (bkgtrans) and empty-beam run "
+        "(emptybeam). Give each block an integer index (0,1,2,... in file order) and "
+        "a config string from its comment/mask if any (e.g. '9m15a', '2.5m2.5a'). "
+        "Reply with ONLY JSON: {\"sample_names\": name|null, \"sample_thick\": "
+        "name|null, \"blocks\": [{\"index\": int, \"config\": str, \"samscatt\": "
+        "name, \"samtrans\": name, \"bkgscatt\": name, \"bkgtrans\": name, "
+        "\"emptybeam\": name}]}. Use only names that appear in the list; omit a "
+        "field if there is no matching variable.\n\nAssignments:\n"
+        + json.dumps(summarize_assignments(model), indent=1)
+    )
+
+    try:
+        client = OpenAI(base_url=settings.llm.base_url, api_key=settings.llm.api_key,
+                        timeout=120.0)
+        for mdl in [settings.llm.model, settings.llm.fallback_model]:
+            try:
+                resp = client.chat.completions.create(
+                    model=mdl,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0, max_tokens=4000,
+                )
+                text = resp.choices[0].message.content.strip()
+                text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.M).strip()
+                mapping = json.loads(text)
+                return apply_llm_mapping(model, mapping)
+            except Exception:
+                continue
+    except Exception:
+        return False
+    return False
+
+
+# --------------------------------------------------------------------------
 # 4. Align example config indices → table config ids
 # --------------------------------------------------------------------------
 
@@ -481,15 +596,30 @@ class TemplateResult:
     errors: list[str]
 
 
-def fill_from_example(source: str, table: WorkingTable) -> TemplateResult:
-    """Full pipeline: parse → identify → align → substitute → validate."""
+def fill_from_example(source: str, table: WorkingTable,
+                      llm_identify=None) -> TemplateResult:
+    """Full pipeline: parse → identify → align → substitute → validate.
+
+    `llm_identify` is an optional callable `(ExampleModel) -> bool` tried only when
+    the heuristic finds no input arrays (unusual variable naming). It mutates the
+    model in place and returns True on success. Passing None (the default) keeps
+    the pipeline fully offline and deterministic.
+    """
     model = identify(parse_example(source))
+    used_llm = False
+    if not model.role_blocks and llm_identify is not None:
+        try:
+            used_llm = bool(llm_identify(model))
+        except Exception:
+            used_llm = False
     if not model.role_blocks:
+        hint = (" The LLM fallback did not recognise them either." if used_llm
+                else " (An LLM fallback can be enabled for unusual variable names.)")
         return TemplateResult(
             ok=False, new_source="", alignment=Alignment({}, []),
             warnings=[],
             errors=["No input arrays (samscatt_N / samtrans_N / … ) were found in "
-                    "the example. Is it an EQVar-style reduction script?"],
+                    "the example. Is it an EQVar-style reduction script?" + hint],
         )
     table_data = extract_table_data(table)
     if not table_data:

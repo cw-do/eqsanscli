@@ -323,7 +323,8 @@ before the run. Sensitivity is chosen per detector distance (1.3 m → 1o3m, 2.5
 PRESETS:
 /show presets                   - List preset configurations from preset_configs/*.json
 /show preset <name>             - Show preset params
-/apply preset <name> <config>   - Apply preset to config (skips user-set values; --force to overwrite)
+/apply preset <name|file.json> <config> - Copy all params to a config. <name> is a preset_configs/ name OR a path to the user's own reduction .json (an existing file wins). Skips user-set values; --force to overwrite.
+  "use this.json as the config parameters for 2.5m2.5a" / "load my_reduction.json into 4m10a" -> /apply preset <path> <config>
 /apply preset auto              - Re-apply matching preset to each config (mostly a no-op since /matchruns auto-applies)
 /compare <a> <b>                - Compare two configs/presets
 # /matchruns AUTO-APPLIES the matching JSON preset for each new config, so users

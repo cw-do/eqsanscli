@@ -163,6 +163,81 @@ def test_command_missing_example_errors(tmp_path):
     assert not res.success and "not found" in res.message
 
 
+# --- LLM fallback for odd variable naming --------------------------------
+
+# A script whose input arrays use names the heuristic does NOT recognise.
+ODD_EXAMPLE = """\
+ipts_number = 100
+output_directory = "/x/"
+snames = ['A', 'B']
+sthick = [1, 1]
+# 4m 10A
+scatt_a = [10, 11]
+trans_a = [12, 13]
+bg_a = [14, 14]
+bgt_a = [15, 15]
+eb_a = 16
+# BELOW IS REDUCTION CODE
+for i in range(len(snames)):
+    pass
+"""
+
+
+def _one_config_table():
+    t = WorkingTable(name="default")
+    for si, nm in enumerate(["A", "B"]):
+        t.add_row(WorkingTableRow(
+            index=0, scattering_run=str(500 + si), sample_name=nm,
+            transmission_run=str(600 + si), background_scatt="700",
+            background_trans="701", empty_beam="702",
+            detector_distance=4.0, wavelength=10.0, frequency=60, thickness=1.0))
+    return t
+
+
+def test_heuristic_alone_cannot_identify_odd_names():
+    res = st.fill_from_example(ODD_EXAMPLE, _one_config_table())
+    assert not res.ok and any("input arrays" in e for e in res.errors)
+
+
+def _stub_llm(model):
+    return st.apply_llm_mapping(model, {
+        "sample_names": "snames", "sample_thick": "sthick",
+        "blocks": [{"index": 0, "config": "4m10a", "samscatt": "scatt_a",
+                    "samtrans": "trans_a", "bkgscatt": "bg_a",
+                    "bkgtrans": "bgt_a", "emptybeam": "eb_a"}],
+    })
+
+
+def test_llm_fallback_fills_odd_names():
+    res = st.fill_from_example(ODD_EXAMPLE, _one_config_table(), llm_identify=_stub_llm)
+    assert res.ok, res.errors
+    ns: dict = {}
+    header = res.new_source.split("# BELOW IS REDUCTION CODE")[0]
+    exec(header, ns)
+    assert ns["snames"] == ["A", "B"]
+    assert ns["scatt_a"] == [500, 501]
+    assert ns["eb_a"] == 702              # scalar preserved
+    assert ns["bg_a"] == [700, 700]
+
+
+def test_llm_fallback_only_runs_when_heuristic_empty():
+    # On the normal example the heuristic already fills role_blocks, so the LLM
+    # stub must NOT be consulted (it would raise if called).
+    def _boom(model):
+        raise AssertionError("LLM fallback should not run when heuristic succeeds")
+    res = st.fill_from_example(EXAMPLE, _table(), llm_identify=_boom)
+    assert res.ok
+
+
+def test_apply_llm_mapping_ignores_unknown_names():
+    model = st.identify(st.parse_example(ODD_EXAMPLE))
+    ok = st.apply_llm_mapping(model, {
+        "sample_names": "does_not_exist",
+        "blocks": [{"index": 0, "samscatt": "also_missing"}],
+    })
+    assert not ok and model.sample_names is None
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))

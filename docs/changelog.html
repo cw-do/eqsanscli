@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.29.0</div>
+          data reduction tool &middot; v0.30.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,12 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-25-stop-autopilot-at-a-step-and-reject-unknown-flags-v0260">2026-08-25: stop autopilot at a step, and reject unknown flags (v0.26.0)<a class="anchor" href="#2026-08-25-stop-autopilot-at-a-step-and-reject-unknown-flags-v0260">#</a></h3>
+<p>Two gaps found while driving autopilot by natural language.</p>
+<p><strong>1 — no way to stop partway.</strong> &quot;reduce porsil and find scale factor&quot; / &quot;run autopilot until you get the scale factor&quot; had no target: <code>--from N</code> sets a start but there was no end. Added <strong><code>--to N</code></strong> (aliases <code>--till</code>, <code>--until</code>): run through step N, then write a resumable summary (<code>--from N+1</code> / <code>--continue</code>) and save the session. <code>_maybe_stop(step)</code> is checked at the step boundaries (2, 4, 5, 8, 9, 12); the check is <code>&gt;=</code>, so grouped steps stop as a block — <code>--to 6/7</code> run through 8 (the scale-calibration block 6→7→8, which <code>--from</code> already treats atomically because step 6&#x27;s porsil reduction has no skip guard and step 7&#x27;s scales are volatile until step 8 persists them), and <code>--to 10/11</code> run through 12 (stitch). So <strong><code>--to 8</code> is the &quot;find the scale factor&quot; stop</strong>: reduce the standard, calibrate, apply, stop before samples. Steps 1–2 build the table first, so it works with or without an existing table — which is exactly the &quot;check if porsil is in the table, else /matchruns, then reduce porsil + calibrate&quot; flow the user described, without needing a bespoke command.</p>
+<p><strong>2 — an unknown flag ate the IPTS.</strong> The failing input was <code>--till 7</code>: <code>--till</code> wasn&#x27;t recognised, so it was dropped and the following <code>7</code> was parsed as the IPTS, and autopilot ran all 13 steps. Any unrecognised <code>--flag</code> is now an error, so a typo can never silently launch the whole pipeline.</p>
+<p><code>--to</code> is threaded through both front ends (<code>app.py</code>, <code>headless.py</code>) and validated (1–13, and <code>--to ≥ --from</code>). LLM routing maps the scale-factor phrasings to <code>--to 8</code>. <code>tests/test_autopilot_tostep.py</code> (8 checks): the flag + aliases parse, out-of-range / <code>to&lt;from</code> / unknown-flag are rejected, and the engine actually stops — no step-6+ commands dispatched, resume hint printed, and a full run still reaches step 13. 217 tests.</p>
+<p><strong>Files changed:</strong> <code>commands/autopilot.py</code>, <code>services/autopilot.py</code>, <code>services/llm_handler.py</code>, <code>app.py</code>, <code>headless.py</code>, <code>tests/test_autopilot_tostep.py</code> (new), SKILL.md, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-08-24-transmission-for-a-displacement-series-and-combined-set-v0250">2026-08-24: transmission for a displacement series, and combined <code><a href="commands.html#cmd-set">/set</a></code> (v0.25.0)<a class="anchor" href="#2026-08-24-transmission-for-a-displacement-series-and-combined-set-v0250">#</a></h3>
 <p>Two gaps found during real-IPTS reduction (IPTS-37828, runs 187233–187242: one transmission <code>T-70.30PBD_0.25phr</code> and a scattering series <code>S-…_d0, _d2, … _d16</code>, all 4m 2.5Afs 3mmsa, <code>_dX</code> = sample displacement).</p>
 <p><strong>1 — <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> missed the transmission.</strong> Matching is by sample name, and the <code>_dX</code> suffix made every scattering name differ from the transmission&#x27;s. Two additions, both deterministic (no LLM):</p>
@@ -480,7 +486,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-08-31 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-01 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

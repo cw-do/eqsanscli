@@ -7,6 +7,42 @@ the version it shipped in.
 
 ---
 
+### 2026-08-25: stop autopilot at a step, and reject unknown flags (v0.26.0)
+
+Two gaps found while driving autopilot by natural language.
+
+**1 — no way to stop partway.** "reduce porsil and find scale factor" / "run
+autopilot until you get the scale factor" had no target: `--from N` sets a start
+but there was no end. Added **`--to N`** (aliases `--till`, `--until`): run
+through step N, then write a resumable summary (`--from N+1` / `--continue`) and
+save the session. `_maybe_stop(step)` is checked at the step boundaries (2, 4, 5,
+8, 9, 12); the check is `>=`, so grouped steps stop as a block — `--to 6/7` run
+through 8 (the scale-calibration block 6→7→8, which `--from` already treats
+atomically because step 6's porsil reduction has no skip guard and step 7's
+scales are volatile until step 8 persists them), and `--to 10/11` run through 12
+(stitch). So **`--to 8` is the "find the scale factor" stop**: reduce the
+standard, calibrate, apply, stop before samples. Steps 1–2 build the table first,
+so it works with or without an existing table — which is exactly the "check if
+porsil is in the table, else /matchruns, then reduce porsil + calibrate" flow the
+user described, without needing a bespoke command.
+
+**2 — an unknown flag ate the IPTS.** The failing input was `--till 7`: `--till`
+wasn't recognised, so it was dropped and the following `7` was parsed as the IPTS,
+and autopilot ran all 13 steps. Any unrecognised `--flag` is now an error, so a
+typo can never silently launch the whole pipeline.
+
+`--to` is threaded through both front ends (`app.py`, `headless.py`) and validated
+(1–13, and `--to ≥ --from`). LLM routing maps the scale-factor phrasings to
+`--to 8`. `tests/test_autopilot_tostep.py` (8 checks): the flag + aliases parse,
+out-of-range / `to<from` / unknown-flag are rejected, and the engine actually
+stops — no step-6+ commands dispatched, resume hint printed, and a full run still
+reaches step 13. 217 tests.
+
+**Files changed:** `commands/autopilot.py`, `services/autopilot.py`,
+`services/llm_handler.py`, `app.py`, `headless.py`,
+`tests/test_autopilot_tostep.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-24: transmission for a displacement series, and combined `/set` (v0.25.0)
 
 Two gaps found during real-IPTS reduction (IPTS-37828, runs 187233–187242: one

@@ -13,6 +13,7 @@ from eqsanscli.services.preset_service import (
     get_preset_name_from_path,
     list_presets,
     load_preset,
+    resolve_preset_source,
 )
 
 if TYPE_CHECKING:
@@ -84,17 +85,20 @@ async def handle_show_preset(args: list[str], state: SessionState) -> CommandRes
 
 
 async def handle_apply_preset(args: list[str], state: SessionState) -> CommandResult:
-    """Handle /apply preset <preset_name> <config_id> — copy preset to active config.
+    """Handle /apply preset <preset_or_file> <config_id> — copy params to a config.
+
+    <preset_or_file> is either a preset name from preset_configs/ OR a path to your
+    own eqsans reduction .json (an existing .json file wins over a same-named
+    preset). All configuration parameters in it are copied to <config_id>.
 
     Special case: /apply preset auto — auto-match presets to all configs in the table.
 
-    By default, preset values DO NOT overwrite parameters the user has already
-    set on the config (preset acts as a fill-in for defaults). Pass --force to
-    overwrite user-set values too.
+    By default, values DO NOT overwrite parameters the user has already set on the
+    config (acts as a fill-in for defaults). Pass --force to overwrite too.
 
     Examples:
         /apply preset conf_4m_10a_60hz 4m10a
-        /apply preset 8m_12a_60hz_inc 8m12a
+        /apply preset ./my_reduction.json 2.5m2.5a   ← copy all params from a file
         /apply preset auto
         /apply preset auto --force
     """
@@ -189,21 +193,30 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
     if len(args) < 2:
         return CommandResult(
             success=False,
-            message="Usage: /apply preset <preset_name> <config_id>\n"
+            message="Usage: /apply preset <preset_or_file.json> <config_id>\n"
             "       /apply preset auto    — auto-match presets to all configs\n"
-            "  Example: /apply preset conf_4m_10a_60hz 4m10a",
+            "  Example: /apply preset conf_4m_10a_60hz 4m10a\n"
+            "           /apply preset ./my_reduction.json 2.5m2.5a",
         )
 
     preset_name = args[0]
     config_id = " ".join(args[1:])
 
-    resolved = get_preset_name_from_path(preset_name)
-    if resolved is None:
-        return CommandResult(success=False, message=f"Preset not found: {preset_name}")
-
-    params = load_preset(resolved)
+    # Accept either a preset_configs/ name or a path to the user's own JSON file
+    # (an existing .json wins over a same-named preset).
+    params, resolved, is_file = resolve_preset_source(
+        preset_name, base_dirs=[state.output_directory],
+    )
     if params is None:
-        return CommandResult(success=False, message=f"Failed to load preset: {resolved}")
+        if is_file or preset_name.lower().endswith(".json") or "/" in preset_name:
+            return CommandResult(
+                success=False,
+                message=f"Could not read JSON config file: {preset_name}\n"
+                "  Give a path to an eqsans reduction .json, or a preset name from "
+                "preset_configs/.",
+            )
+        return CommandResult(success=False, message=f"Preset not found: {preset_name}")
+    source_desc = f"file '{resolved}'" if is_file else f"preset '{resolved}'"
 
     # Apply preset params, preserving user-set values unless --force was given
     if config_id not in state.configurations:
@@ -224,7 +237,7 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
         count += 1
 
     n_reset = _mark_config_rows_modified(state, config_id)
-    msg = f"Applied preset '{resolved}' to config '{config_id}' ({count} parameters)."
+    msg = f"Applied {source_desc} to config '{config_id}' ({count} parameters)."
     if preserved and not force:
         msg += (
             f"\n  Kept {preserved} user-set parameter(s) — pass --force to overwrite."

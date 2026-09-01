@@ -74,7 +74,10 @@ async def _export_like(like_path: str, out_path: str | None, state: SessionState
     table's run numbers, keeping every other line of the example verbatim."""
     from pathlib import Path
 
-    from eqsanscli.services.script_templating import fill_from_example
+    from eqsanscli.services.script_templating import (
+        fill_from_example,
+        llm_identify_structure,
+    )
 
     src_path = os.path.abspath(os.path.expanduser(like_path))
     if not os.path.isfile(src_path):
@@ -85,7 +88,9 @@ async def _export_like(like_path: str, out_path: str | None, state: SessionState
         return CommandResult(success=False, message=f"Could not read {like_path}: {e}")
 
     table = state.current_table
-    result = fill_from_example(source, table)
+    # The heuristic covers the common style offline; the LLM pass is tried only if
+    # it finds nothing and an LLM is configured.
+    result = fill_from_example(source, table, llm_identify=llm_identify_structure)
 
     if not result.ok:
         lines = ["Could not fill the example script — nothing written:"]

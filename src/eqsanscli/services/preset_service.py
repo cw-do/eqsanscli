@@ -46,6 +46,62 @@ def _flatten(obj: dict, prefix: str, result: dict[str, object]) -> None:
             result[flat_key.lower()] = value
 
 
+def load_preset_from_file(path: str) -> dict[str, object] | None:
+    """Load and flatten the configuration section from a reduction JSON at `path`.
+
+    Returns None if the file is missing or not valid JSON. Unlike load_preset()
+    this takes an explicit filesystem path, not a preset_configs/ name.
+    """
+    p = Path(path).expanduser()
+    if not p.is_file():
+        return None
+    try:
+        with open(p) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Failed to load preset file %s: %s", p, e)
+        return None
+    return _flatten_config(data)
+
+
+def resolve_preset_source(
+    name_or_path: str, base_dirs: list[str] | None = None,
+) -> tuple[dict[str, object] | None, str, bool]:
+    """Resolve a preset argument that may be a name OR a filesystem path.
+
+    An existing .json file (as given, or resolved against cwd / any base_dir)
+    wins over a same-named preset in preset_configs/, so a user can point
+    /apply preset at their own reduction JSON. Falls back to the preset_configs/
+    name lookup otherwise.
+
+    Returns (params, label, is_file):
+        params  — flattened configuration dict, or None if nothing resolved
+        label   — the path (is_file) or the resolved preset name, for messages
+        is_file — True when it came from an explicit file
+    """
+    candidates: list[Path] = []
+    raw = Path(name_or_path).expanduser()
+    candidates.append(raw)
+    if not raw.is_absolute():
+        candidates.append(Path.cwd() / raw)
+        for b in base_dirs or []:
+            candidates.append(Path(b).expanduser() / raw)
+
+    for c in candidates:
+        # Only treat as a file when it actually exists and looks like JSON —
+        # a bare preset name like "conf_4m_10a_60hz" must not be caught here.
+        if c.is_file() and c.suffix.lower() == ".json":
+            params = load_preset_from_file(str(c))
+            if params is not None:
+                return params, str(c), True
+
+    # Fall back to the preset_configs/ name resolution.
+    resolved = get_preset_name_from_path(name_or_path)
+    if resolved is not None:
+        return load_preset(resolved), resolved, False
+    return None, "", False
+
+
 def list_presets() -> list[dict[str, str]]:
     """List all available presets.
 
