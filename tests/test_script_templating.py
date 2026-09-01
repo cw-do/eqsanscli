@@ -130,11 +130,33 @@ def test_nonrectangular_sample_set_warns():
     assert any("sample set differs" in w for w in res.warnings)
 
 
-def test_missing_config_in_table_warns():
-    # Table only has 3 of the 4 configs the example expects.
-    t = _table(configs=CONFIGS[:3])
-    res = st.fill_from_example(EXAMPLE, t)
-    assert any("no table configuration" in w for w in res.warnings)
+def test_fewer_configs_than_example_fails_closed():
+    # Table has only 2 of the 4 configs the example expects — refuse rather than
+    # emit a script that keeps the example's own runs in the unmatched blocks.
+    res = st.fill_from_example(EXAMPLE, _table(configs=[(4, 10, 60), (2.5, 2.5, 60)]))
+    assert not res.ok
+    assert not res.new_source
+    assert any("Configuration mismatch" in e for e in res.errors)
+    assert any("no matching table config" in e for e in res.errors)
+
+
+def test_extra_config_in_table_fails_closed():
+    # Table has a config (8m10a) the example has no block for — its samples would
+    # silently not be reduced. Refuse.
+    res = st.fill_from_example(EXAMPLE, _table(configs=CONFIGS + [(8, 10, 60)]))
+    assert not res.ok
+    assert any("no block in the example" in e for e in res.errors)
+
+
+def test_command_reports_mismatch(tmp_path):
+    s = SessionState()
+    s.ipts = 1
+    s.output_directory = str(tmp_path)
+    s.tables[s.active_table] = _table(configs=[(4, 10, 60), (2.5, 2.5, 60)])
+    s.current_table.name = s.active_table
+    res = _run(["--like", str(FIXTURE)], s)
+    assert not res.success and "mismatch" in res.message.lower()
+    assert not list(tmp_path.glob("*.py"))  # nothing written
 
 
 # --- command wiring -------------------------------------------------------

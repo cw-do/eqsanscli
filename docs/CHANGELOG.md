@@ -7,6 +7,40 @@ the version it shipped in.
 
 ---
 
+### 2026-08-28: one cancel stops the whole parallel batch (v0.27.0)
+
+Reported: clicking Cancel during a multi-core reduction only killed the in-flight
+jobs; a 15-job batch kept going and needed several clicks. Single-core cancelled
+cleanly on one click.
+
+**Cause.** `reduce_row` / `run_reduction` checked the cancel event only *after*
+launching drtsans. In a `ThreadPoolExecutor` batch every row is submitted up
+front; when the user cancels, the running jobs are killed within ~1s, but as each
+worker frees the executor hands it the next queued row, which builds a JSON and
+spawns a fresh drtsans — waits 1s — *then* notices the cancel and dies. So one
+click drained the queue slowly, one launch at a time, and looked like it wasn't
+working. Single-core was fine because it checks the event at the top of each
+iteration and returns.
+
+**Fix, two layers:**
+1. `reduce_row` returns immediately with a cancelled result when the event is
+   already set, before building a JSON or spawning drtsans. This is the
+   deterministic core — every queued row becomes a no-op, so the batch drains in
+   the ~1s it takes to kill the in-flight jobs, not job-by-job.
+2. Both parallel loops (`app.py` `/reduce` worker and `services/autopilot.py`
+   `_reduce_phase`) drop every not-yet-started future (`future.cancel()`) and
+   break the moment the event is seen, so freed workers never pick up a queued
+   row and the summary reports the queued jobs as cancelled.
+
+`tests/test_reduce_cancel.py` (3 checks): a set event makes `reduce_row` a no-op
+(run_reduction never called), an unset event still launches exactly once, and a
+`None` event is safe. The executor-loop drop is timing-dependent and left to real
+use rather than a flaky concurrency test. 220 tests.
+
+**Files changed:** `services/reduction_service.py`, `services/autopilot.py`,
+`app.py`, `tests/test_reduce_cancel.py` (new), CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-25: stop autopilot at a step, and reject unknown flags (v0.26.0)
 
 Two gaps found while driving autopilot by natural language.

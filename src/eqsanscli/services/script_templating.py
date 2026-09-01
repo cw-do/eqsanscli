@@ -628,6 +628,52 @@ def fill_from_example(source: str, table: WorkingTable,
             warnings=[], errors=["The working table is empty — nothing to fill in."],
         )
     alignment = align(model, table_data)
+
+    # Fail closed on a configuration mismatch. Silently writing a script whose
+    # unmatched blocks still carry the EXAMPLE experiment's run numbers — and
+    # whose stitch step still combines every block — is worse than refusing.
+    all_idx = {i for blk in model.role_blocks.values() for i in blk}
+    matched_cfgs = set(alignment.index_to_config.values())
+    unmatched = sorted(all_idx - set(alignment.index_to_config))
+    uncovered = [c for c in table_data if c not in matched_cfgs]
+    mishinted = [
+        i for i, c in alignment.index_to_config.items()
+        if model.config_hint.get(i) and normalize_config_id(c) != model.config_hint[i]
+    ]
+    if unmatched or uncovered or mishinted:
+        errs: list[str] = [
+            f"Configuration mismatch: the example has {len(all_idx)} config block(s) "
+            f"but the table has {len(table_data)} ({', '.join(sorted(table_data))}). "
+            f"Nothing was written."
+        ]
+        if unmatched:
+            labels = ", ".join(
+                f"block {i}" + (f" ({model.config_hint[i]})" if model.config_hint.get(i) else "")
+                for i in unmatched
+            )
+            errs.append(
+                f"  ✗ {len(unmatched)} example block(s) have no matching table config: "
+                f"{labels}. They would keep the example's own run numbers and still be stitched."
+            )
+        if mishinted:
+            errs.append(
+                "  ✗ block(s) " + ", ".join(str(i) for i in mishinted) +
+                " would be aligned to a config that disagrees with their comment/mask hint."
+            )
+        if uncovered:
+            errs.append(
+                f"  ✗ {len(uncovered)} table config(s) have no block in the example: "
+                f"{', '.join(uncovered)} — their samples would not be reduced."
+            )
+        errs.append(
+            "  Use an example whose configurations match the table, or trim one to fit. "
+            "(Auto-commenting and re-wiring the extra blocks — including the stitch "
+            "call, whose overlaps and target index depend on the block count — is a "
+            "planned follow-up.)"
+        )
+        return TemplateResult(ok=False, new_source="", alignment=alignment,
+                              warnings=alignment.warnings, errors=errs)
+
     sub = substitute(model, table_data, alignment)
     errors = validate(model, sub, table, alignment)
     return TemplateResult(

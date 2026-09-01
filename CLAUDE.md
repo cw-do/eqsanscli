@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.31.0 | 2026-08-31 | `/export script --like` now **fails closed on a configuration mismatch** instead of silently emitting a wrong script. Found in testing: a 4-block example against a 2-config table wrote a file that kept the example experiment's own run numbers in the two unmatched blocks (and still stitched all four). It now refuses when any example block has no matching table config, any table config has no block, or a block's comment/mask hint disagrees with its aligned config — with a message naming the mismatch. Auto-commenting/re-wiring the extra blocks is a planned follow-up. |
 | 0.30.0 | 2026-08-31 | `/apply preset <file.json> <config>` now accepts a path to the user's own reduction JSON, not just a `preset_configs/` name — an existing `.json` (absolute, or relative to cwd/outputdir) wins over a same-named preset, and all its non-null configuration parameters are copied to the config (user-set values preserved unless `--force`). Also: the `--like` templated export gains an optional LLM fallback (`llm_identify_structure`) for unusual variable naming — the model returns a structured JSON mapping only (never code), applied through the same deterministic substitute/validate path; the heuristic still covers the common style offline. |
 | 0.29.0 | 2026-08-31 | `/export script --like <example.py>` reproduces a user's own reduction script: it keeps every line of the example verbatim (EQVar setup, per-config loops, calibration params, arithmetic, mask paths, stitching) and refills only the input arrays — scattering/transmission/background/empty-beam run lists, sample names, thickness — from the current table. Deterministic "identify then substitute": `ast` parses the example, a heuristic maps `samscatt_N`/`# 9m 15A` blocks to table configs, code replaces only those RHS spans, and a validator fails closed (parse, runs exist in table, list lengths, no leftover example runs, non-input lines byte-identical). New `services/script_templating.py`. |
 | 0.28.0 | 2026-08-28 | `/show table` gains filters that combine (AND): `--rows <spec>` (index range/list/run number, e.g. `50-100`), `--name <text>` (case-insensitive substring of the sample name, e.g. `0.25phr`), and `--sample <pat>` (exact or glob with `*`). Unknown args are rejected with usage. Read-only — no rows removed. |
@@ -204,6 +205,33 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-31: --like fails closed on a config mismatch (v0.31.0)
+
+Testing the new `--like` export surfaced a dangerous case: the user's template had
+4 configuration blocks but the experiment had only 2. The tool matched 2 blocks
+to the table and left the other 2 with the **example experiment's own run
+numbers**, wrote the file (ok=True, warning only), and the emitted script would
+still stitch all 4 profiles. Running it would reduce runs from a different
+experiment and mis-stitch — silent garbage.
+
+Now `fill_from_example()` refuses before writing when the example and table don't
+line up: any example block with no matching table config (would keep stale runs),
+any table config with no block (samples silently unreduced), or a block whose
+comment/mask hint disagrees with the config it would be aligned to. The error
+names the exact mismatch and the block count on each side.
+
+The safe options are to use an example whose configurations match the table, or
+trim one to fit. Automatically commenting out and re-wiring the surplus blocks —
+including the `stitch_profiles([...], overlap[...], target_profile_index=...)`
+call, whose overlaps and target index depend on the profile count — is a planned
+follow-up (task), left out here because guessing the stitch rewrite is unsafe.
+
+`tests/test_script_templating.py` (18 checks): fewer-configs and extra-config both
+fail closed and write nothing; the command reports the mismatch. 261 tests.
+
+**Files changed:** `services/script_templating.py`,
+`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-08-31: /apply preset from a file, and an LLM fallback for --like (v0.30.0)
 
@@ -329,39 +357,5 @@ stub log and asserts the free-text columns fold and none of them ellipsize. 223
 tests.
 
 **Files changed:** `app.py`, `tests/test_table_display.py` (new), CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-08-28: one cancel stops the whole parallel batch (v0.27.0)
-
-Reported: clicking Cancel during a multi-core reduction only killed the in-flight
-jobs; a 15-job batch kept going and needed several clicks. Single-core cancelled
-cleanly on one click.
-
-**Cause.** `reduce_row` / `run_reduction` checked the cancel event only *after*
-launching drtsans. In a `ThreadPoolExecutor` batch every row is submitted up
-front; when the user cancels, the running jobs are killed within ~1s, but as each
-worker frees the executor hands it the next queued row, which builds a JSON and
-spawns a fresh drtsans — waits 1s — *then* notices the cancel and dies. So one
-click drained the queue slowly, one launch at a time, and looked like it wasn't
-working. Single-core was fine because it checks the event at the top of each
-iteration and returns.
-
-**Fix, two layers:**
-1. `reduce_row` returns immediately with a cancelled result when the event is
-   already set, before building a JSON or spawning drtsans. This is the
-   deterministic core — every queued row becomes a no-op, so the batch drains in
-   the ~1s it takes to kill the in-flight jobs, not job-by-job.
-2. Both parallel loops (`app.py` `/reduce` worker and `services/autopilot.py`
-   `_reduce_phase`) drop every not-yet-started future (`future.cancel()`) and
-   break the moment the event is seen, so freed workers never pick up a queued
-   row and the summary reports the queued jobs as cancelled.
-
-`tests/test_reduce_cancel.py` (3 checks): a set event makes `reduce_row` a no-op
-(run_reduction never called), an unset event still launches exactly once, and a
-`None` event is safe. The executor-loop drop is timing-dependent and left to real
-use rather than a flaky concurrency test. 220 tests.
-
-**Files changed:** `services/reduction_service.py`, `services/autopilot.py`,
-`app.py`, `tests/test_reduce_cancel.py` (new), CLAUDE.md,
 `src/eqsanscli/__init__.py`.
 
