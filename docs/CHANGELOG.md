@@ -7,6 +7,47 @@ the version it shipped in.
 
 ---
 
+### 2026-08-31: reproduce a user's own script style — /export script --like (v0.29.0)
+
+Asked whether the tool could "write a reduction script following the style of
+script_style2.py (assume the table is done)" — reuse the user's own script (how
+EQVar is set up, how many config loops, the stitching) and change only the run
+lists / sample names, since every scientist's script differs slightly.
+
+Framed as LLM work, but the reliable design is **identify, then substitute
+deterministically** — the language model (if used at all) only *names* which
+variables are the input arrays; code does the edit, so "keep everything else
+verbatim" is exact and checkable. For the common style it needs no LLM:
+
+- `parse_example()` — `ast` collects module-level assignments with their exact
+  RHS character spans and the comment above each.
+- `identify()` — regex maps `samscatt_N`/`samtrans_N`/`bkgscatt_N`/`bkgtrans_N`/
+  `emptybeam_N`, `sample_names`, `sample_thick`; the config hint per block comes
+  from its comment (`# 9m 15A`) or a `maskWS…` token, normalized (`2p5`→`2.5`).
+- `align()` — matches each block's hint to a table physical config, fills the
+  rest by order, and picks the reference sample order (warns on non-rectangular
+  sample sets or missing/extra configs).
+- `substitute()` — replaces only the identified RHS spans (back-to-front so
+  offsets stay valid); scalar `emptybeam` stays scalar, lists stay lists.
+- `validate()` — fails closed: the result must `ast.parse`; every emitted run
+  must be in the table; per-config lengths match the sample count; no original
+  example run survives in a replaced array; and every non-input line is
+  byte-identical to the example.
+
+Verified on the real `script_style2.py` (4 configs, per-sample loop, inline
+stitch): only the 22 input lines change, everything from the first EQVar block
+down is identical, and the output parses. An **LLM fallback** for odd variable
+naming (structured-JSON identification, never code generation) is left as a
+follow-up; the heuristic covers the common case offline.
+
+`tests/test_script_templating.py` (12 checks) against a committed fixture copy of
+the example + a synthetic 4-config table. 245 tests.
+
+**Files changed:** `services/script_templating.py` (new), `commands/export.py`,
+`services/llm_handler.py`, `tests/test_script_templating.py` +
+`tests/fixtures/example_reduction_script.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-28: /show table filters — rows, name, sample (v0.28.0)
 
 Asked for `/show table --rows 50-100` and `/show table --name 0.25phr` (rows whose

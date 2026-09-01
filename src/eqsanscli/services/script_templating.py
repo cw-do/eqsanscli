@@ -84,6 +84,14 @@ class ConfigData:
     config_id: str
     by_sample: dict[str, dict]  # sample_name → {role: value, "thickness": float}
     order: list[str]            # sample names in table order
+    distance: float = 0.0       # sample-to-detector distance (m)
+    wavelength: float = 0.0     # wavelength (Å)
+
+    @property
+    def q_key(self) -> float:
+        """Sort key that puts LOW-Q configs first (Qmin ∝ 1/(λ·L), so a larger
+        λ·L means lower Q; negate so ascending sort = low-Q first)."""
+        return -(self.distance * self.wavelength)
 
 
 # --------------------------------------------------------------------------
@@ -102,7 +110,9 @@ def extract_table_data(table: WorkingTable) -> dict[str, ConfigData]:
         cid = normalize_config_id(row.physical_configuration)
         cd = out.get(cid)
         if cd is None:
-            cd = ConfigData(config_id=cid, by_sample={}, order=[])
+            cd = ConfigData(config_id=cid, by_sample={}, order=[],
+                            distance=float(row.detector_distance or 0),
+                            wavelength=float(row.wavelength or 0))
             out[cid] = cd
         name = row.sample_name
         if name not in cd.by_sample:
@@ -357,14 +367,22 @@ class Alignment:
 
 
 def align(model: ExampleModel, table_data: dict[str, ConfigData]) -> Alignment:
-    """Map each example config block to a table config and pick a sample order."""
+    """Map each example config block to a table config and pick a sample order.
+
+    Block index order in these scripts is physical LOW-Q → HIGH-Q (block 0 feeds
+    the first stitch profile, `iq0`, which is the low-Q data). So an unhinted block
+    is filled from the remaining configs in that Q order — NOT the table's own
+    (distance-ascending) order, which put a high-Q config first and mis-stitched.
+    """
     indices = sorted({i for blk in model.role_blocks.values() for i in blk})
     table_ids = list(table_data.keys())
+    # Configs low-Q first (largest λ·L). This is the order block indices expect.
+    q_sorted = sorted(table_ids, key=lambda c: table_data[c].q_key)
     used: set[str] = set()
     index_to_config: dict[int, str] = {}
     warnings: list[str] = []
 
-    # First pass: match by config hint.
+    # First pass: match by config hint (an explicit comment/mask wins).
     for idx in indices:
         hint = model.config_hint.get(idx, "")
         match = next((c for c in table_ids if c not in used and normalize_config_id(c) == hint), "")
@@ -372,8 +390,9 @@ def align(model: ExampleModel, table_data: dict[str, ConfigData]) -> Alignment:
             index_to_config[idx] = match
             used.add(match)
 
-    # Second pass: fill unmatched indices by position, in order.
-    leftover = [c for c in table_ids if c not in used]
+    # Second pass: fill unhinted blocks from the remaining configs in Q order
+    # (low-Q first), matched to the unhinted block indices in ascending order.
+    leftover = [c for c in q_sorted if c not in used]
     for idx in indices:
         if idx not in index_to_config:
             if leftover:
@@ -381,7 +400,8 @@ def align(model: ExampleModel, table_data: dict[str, ConfigData]) -> Alignment:
                 index_to_config[idx] = c
                 used.add(c)
                 warnings.append(
-                    f"config block {idx} had no usable hint — aligned to '{c}' by order; verify."
+                    f"config block {idx} had no hint — aligned to '{c}' by Q order "
+                    f"(low-Q first); verify."
                 )
             else:
                 warnings.append(f"config block {idx} has no table configuration to fill it.")
@@ -389,6 +409,17 @@ def align(model: ExampleModel, table_data: dict[str, ConfigData]) -> Alignment:
     for c in table_ids:
         if c not in used:
             warnings.append(f"table configuration '{c}' has no matching block in the example.")
+
+    # Sanity check: whatever the assignment, block order should be low-Q → high-Q.
+    # If it is not, the stitch (which assumes iq0 is low-Q) will be wrong.
+    ordered = [index_to_config[i] for i in indices if i in index_to_config]
+    q_of = [table_data[c].q_key for c in ordered]
+    if any(a > b for a, b in zip(q_of, q_of[1:])):
+        seq = " → ".join(ordered)
+        warnings.append(
+            f"block order is not low-Q → high-Q ({seq}) — the stitch expects the "
+            f"first block to be the lowest-Q config; verify the alignment and stitch."
+        )
 
     # Reference sample order: the aligned config with the most samples.
     aligned_cfgs = [table_data[c] for c in index_to_config.values()]

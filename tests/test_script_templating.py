@@ -69,6 +69,55 @@ def test_align_matches_hints_to_table():
     assert al.warnings == []
 
 
+# Hint-less template: blocks must be filled LOW-Q first, regardless of the table's
+# own (distance-ascending) order — the stitch assumes block 0/iq0 is the low-Q data.
+HINTLESS_2BLOCK = """\
+ipts_number = 1
+output_directory = "/x/"
+sample_names = ['A']
+sample_thick = [1]
+samscatt_1 = [1]
+samtrans_1 = [2]
+bkgscatt_1 = [3]
+bkgtrans_1 = [4]
+emptybeam_1 = 5
+samscatt_2 = [6]
+samtrans_2 = [7]
+bkgscatt_2 = [8]
+bkgtrans_2 = [9]
+emptybeam_2 = 10
+# BELOW IS REDUCTION CODE
+for i in range(len(sample_names)):
+    pass
+"""
+
+
+def _table_reversed_order():
+    """Two configs added 2.5m first (as /matchruns sorts by distance ascending)."""
+    t = WorkingTable(name="default")
+    for d, w in [(2.5, 2.5), (4, 10)]:
+        t.add_row(WorkingTableRow(
+            index=0, scattering_run="900", sample_name="A", transmission_run="901",
+            background_scatt="902", background_trans="903", empty_beam="904",
+            detector_distance=d, wavelength=w, frequency=60, thickness=1.0))
+    return t
+
+
+def test_hintless_blocks_align_low_q_first():
+    data = st.extract_table_data(_table_reversed_order())
+    assert list(data) == ["2.5m2.5a", "4m10a"]  # table order is 2.5m first
+    m = st.identify(st.parse_example(HINTLESS_2BLOCK))
+    al = st.align(m, data)
+    # block 1 (iq1, low-Q) must be 4m10a; block 2 (high-Q) must be 2.5m2.5a
+    assert al.index_to_config == {1: "4m10a", 2: "2.5m2.5a"}
+
+
+def test_hintless_fill_is_monotonic_no_stitch_warning():
+    m = st.identify(st.parse_example(HINTLESS_2BLOCK))
+    al = st.align(m, st.extract_table_data(_table_reversed_order()))
+    assert not any("not low-Q" in w for w in al.warnings)
+
+
 # --- full pipeline --------------------------------------------------------
 
 def test_fill_keeps_noninput_lines_byte_identical():

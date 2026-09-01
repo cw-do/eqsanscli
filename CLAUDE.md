@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.34.0 | 2026-08-31 | Fix: `--like` aligned hint-less config blocks by the table's order (distance-ascending, so `2.5m2.5a` came before `4m10a`), but a script's block index order is physical **low-Q → high-Q** (block 0 → `iq0`, the low-Q profile). It mis-assigned block 1 → 2.5m, block 2 → 4m, so the stitch (which expects `iq1` low-Q first) was backwards. `align()` now fills unhinted blocks from the remaining configs sorted low-Q first (largest λ·L = lowest Qmin), and warns if the final block order still isn't monotonic in Q. Explicit comment/mask hints still win. Fixes the case with no `--adapt` needed. |
 | 0.33.0 | 2026-08-31 | Fix: `emptyBeam`/`empty_beam`/`emptybeam` (camelCase or joined) titles were classified as plain transmissions, so empty beam was never assigned (IPTS-38659 `T-emptyBeam_4m 10A`). The empty-beam regex now matches `empty`/`emp`/`emt` joined to `beam` by any separator or none, using letter-boundary lookarounds (a trailing `\b` failed before `_`); background cells (`emptycell`/`emptyticell`) are still excluded. Also: `/show preset stitch_overlaps` now renders the overlap pairs and a how-to-edit hint instead of an empty table. |
 | 0.32.0 | 2026-08-31 | `/export script --like … --adapt`: opt-in LLM revision for the config-mismatch case. Hybrid, not fully-LLM — code fills the matched configs' run arrays (exact, never the model), the LLM only removes surplus config blocks and rewires the stitch call, and `validate_adapt()` enforces that the model may **only comment lines out or change the stitch call** (any other altered active line is rejected), plus no active references to removed configs and the filled arrays survive. The un-verifiable stitch overlaps/target get a `# attn.` marker and the output is labelled review-required. Deterministic `--like` output also gains a header stating what was refilled vs kept verbatim. LLM call is injectable for offline testing. |
 | 0.31.0 | 2026-08-31 | `/export script --like` now **fails closed on a configuration mismatch** instead of silently emitting a wrong script. Found in testing: a 4-block example against a 2-config table wrote a file that kept the example experiment's own run numbers in the two unmatched blocks (and still stitched all four). It now refuses when any example block has no matching table config, any table config has no block, or a block's comment/mask hint disagrees with its aligned config — with a message naming the mismatch. Auto-commenting/re-wiring the extra blocks is a planned follow-up. |
@@ -207,6 +208,36 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-31: --like aligns config blocks by Q order, not table order (v0.34.0)
+
+Testing `--like reduce_template.py` on IPTS-38659 (2 configs, hint-less template):
+it put block 1 → 2.5m2.5a and block 2 → 4m10a. Wrong — the script's stitch feeds
+block 0/`iq0` first and expects that to be the **low-Q** profile, and 4m 10A is
+lower Q than 2.5m 2.5A. So the stitched profiles were in the wrong order.
+
+Cause: `align()` filled unhinted blocks from `list(table_data.keys())`, which is
+the working table's order — and `/matchruns` sorts configs by **distance
+ascending**, putting 2.5m (2.5) before 4m (4.0). Distance-ascending is not
+Q-ascending.
+
+Fix: block index order in these scripts is physical low-Q → high-Q, and that IS
+deterministic — Qmin ∝ 1/(λ·L), so a larger λ·L means lower Q. `ConfigData` now
+carries the config's distance and wavelength; `align()` sorts the remaining
+configs **low-Q first (largest λ·L)** and fills unhinted block indices in
+ascending order from that list. It also checks the final assignment is monotonic
+in Q and warns loudly if not (the case where a script genuinely isn't
+Q-ordered). Explicit comment/mask hints still take precedence.
+
+This is why `--adapt` "didn't help": the config counts matched, so the
+deterministic path produced output (just mis-ordered) and never fell back to the
+LLM. With the ordering fixed, the plain `--like` is correct — no `--adapt` needed.
+
+`tests/test_script_templating.py` (+2: hint-less blocks align low-Q first even
+when the table lists them high-Q first; no spurious stitch warning). 274 tests.
+
+**Files changed:** `services/script_templating.py`,
+`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-08-31: empty beam matches camelCase names; /show preset stitch_overlaps (v0.33.0)
 
@@ -338,45 +369,4 @@ empty, ignores unknown variable names, and fills correctly.
 `services/script_templating.py`, `commands/export.py`, `services/llm_handler.py`,
 `tests/test_apply_preset_file.py` (new), `tests/test_script_templating.py`,
 SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: reproduce a user's own script style — /export script --like (v0.29.0)
-
-Asked whether the tool could "write a reduction script following the style of
-script_style2.py (assume the table is done)" — reuse the user's own script (how
-EQVar is set up, how many config loops, the stitching) and change only the run
-lists / sample names, since every scientist's script differs slightly.
-
-Framed as LLM work, but the reliable design is **identify, then substitute
-deterministically** — the language model (if used at all) only *names* which
-variables are the input arrays; code does the edit, so "keep everything else
-verbatim" is exact and checkable. For the common style it needs no LLM:
-
-- `parse_example()` — `ast` collects module-level assignments with their exact
-  RHS character spans and the comment above each.
-- `identify()` — regex maps `samscatt_N`/`samtrans_N`/`bkgscatt_N`/`bkgtrans_N`/
-  `emptybeam_N`, `sample_names`, `sample_thick`; the config hint per block comes
-  from its comment (`# 9m 15A`) or a `maskWS…` token, normalized (`2p5`→`2.5`).
-- `align()` — matches each block's hint to a table physical config, fills the
-  rest by order, and picks the reference sample order (warns on non-rectangular
-  sample sets or missing/extra configs).
-- `substitute()` — replaces only the identified RHS spans (back-to-front so
-  offsets stay valid); scalar `emptybeam` stays scalar, lists stay lists.
-- `validate()` — fails closed: the result must `ast.parse`; every emitted run
-  must be in the table; per-config lengths match the sample count; no original
-  example run survives in a replaced array; and every non-input line is
-  byte-identical to the example.
-
-Verified on the real `script_style2.py` (4 configs, per-sample loop, inline
-stitch): only the 22 input lines change, everything from the first EQVar block
-down is identical, and the output parses. An **LLM fallback** for odd variable
-naming (structured-JSON identification, never code generation) is left as a
-follow-up; the heuristic covers the common case offline.
-
-`tests/test_script_templating.py` (12 checks) against a committed fixture copy of
-the example + a synthetic 4-config table. 245 tests.
-
-**Files changed:** `services/script_templating.py` (new), `commands/export.py`,
-`services/llm_handler.py`, `tests/test_script_templating.py` +
-`tests/fixtures/example_reduction_script.py` (new), SKILL.md, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
 
