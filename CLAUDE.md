@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.32.0 | 2026-08-31 | `/export script --like … --adapt`: opt-in LLM revision for the config-mismatch case. Hybrid, not fully-LLM — code fills the matched configs' run arrays (exact, never the model), the LLM only removes surplus config blocks and rewires the stitch call, and `validate_adapt()` enforces that the model may **only comment lines out or change the stitch call** (any other altered active line is rejected), plus no active references to removed configs and the filled arrays survive. The un-verifiable stitch overlaps/target get a `# attn.` marker and the output is labelled review-required. Deterministic `--like` output also gains a header stating what was refilled vs kept verbatim. LLM call is injectable for offline testing. |
 | 0.31.0 | 2026-08-31 | `/export script --like` now **fails closed on a configuration mismatch** instead of silently emitting a wrong script. Found in testing: a 4-block example against a 2-config table wrote a file that kept the example experiment's own run numbers in the two unmatched blocks (and still stitched all four). It now refuses when any example block has no matching table config, any table config has no block, or a block's comment/mask hint disagrees with its aligned config — with a message naming the mismatch. Auto-commenting/re-wiring the extra blocks is a planned follow-up. |
 | 0.30.0 | 2026-08-31 | `/apply preset <file.json> <config>` now accepts a path to the user's own reduction JSON, not just a `preset_configs/` name — an existing `.json` (absolute, or relative to cwd/outputdir) wins over a same-named preset, and all its non-null configuration parameters are copied to the config (user-set values preserved unless `--force`). Also: the `--like` templated export gains an optional LLM fallback (`llm_identify_structure`) for unusual variable naming — the model returns a structured JSON mapping only (never code), applied through the same deterministic substitute/validate path; the heuristic still covers the common style offline. |
 | 0.29.0 | 2026-08-31 | `/export script --like <example.py>` reproduces a user's own reduction script: it keeps every line of the example verbatim (EQVar setup, per-config loops, calibration params, arithmetic, mask paths, stitching) and refills only the input arrays — scattering/transmission/background/empty-beam run lists, sample names, thickness — from the current table. Deterministic "identify then substitute": `ast` parses the example, a heuristic maps `samscatt_N`/`# 9m 15A` blocks to table configs, code replaces only those RHS spans, and a validator fails closed (parse, runs exist in table, list lengths, no leftover example runs, non-input lines byte-identical). New `services/script_templating.py`. |
@@ -205,6 +206,47 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
+
+The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a
+4-config template used for a 2-config experiment. `--adapt` (opt-in) now lets an
+LLM revise the script — but as a **hybrid**, decided after weighing fully-LLM
+against it:
+
+- **Fully-LLM** (model returns the whole revised script, trusted) throws away the
+  verbatim guarantee — it could silently change a calibration constant, the
+  absolute-scale arithmetic, a mask path. Rejected for real reduction.
+- **Hybrid (built):** code fills the matched configs' run arrays deterministically
+  (the model never touches a run number); the LLM does only the structural
+  surgery it is good at — comment out the surplus config blocks and rewire the
+  `stitch_profiles(...)` call. `validate_adapt()` then enforces a hard contract:
+  the model may **only** comment lines out or change the single stitch call —
+  every other altered/added active line is rejected (this provably protects all
+  kept parameters), plus no active reference to a removed config may remain and
+  every filled array must survive. The one thing not machine-checkable — whether
+  the new `overlap[…]` slice and `target_profile_index` are physically right —
+  gets a `# attn.` marker and the whole output is labelled *review-required*.
+
+`--adapt` engages only when the deterministic path can't handle it (mismatch);
+when configs already line up it is a no-op that defers to the exact fill. The LLM
+call (`llm_adapt_default`, via `settings.llm`) is injectable, so the safety layer
+is tested offline: a good stub passes and flags the stitch; a stub that edits a
+param or leaves stale runs is rejected; an unconfigured LLM fails gracefully.
+The deterministic `--like` output also gained a header block stating what was
+refilled vs kept verbatim (with a `# attn.` section).
+
+Feasibility was proven first by running the transform by hand (Claude as the LLM):
+a 4-block example → correct 2-config script, stitch rewired to
+`stitch_profiles([iq1, iq2], overlap[2:4], target_profile_index=0)`.
+
+`tests/test_script_templating.py` (25 checks). 268 tests. Deferred: reaching the
+tool's own smaller model (gemini-3-flash / gpt-5-mini) needs a real key and its
+reliability on the stitch rewrite is unverified — hence the review-required label.
+
+**Files changed:** `services/script_templating.py`, `commands/export.py`,
+`services/llm_handler.py`, `tests/test_script_templating.py`, SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
 
 ### 2026-08-31: --like fails closed on a config mismatch (v0.31.0)
 
@@ -332,30 +374,5 @@ tests.
 
 **Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
 `tests/test_show_table.py` (new), SKILL.md, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-08-28: long names wrap in the tables, not truncate (v0.27.1)
-
-Reported: in the reduction (working) table a long sample name showed clipped —
-`70.30PBD_0.25…`. The run-number columns wrapped fine, so the fix should make the
-sample column behave the same.
-
-**Cause.** Rich `Table` columns default to `overflow="ellipsis"`, so a plain-text
-cell that outgrows its allotted width is truncated with `…`. The run-number
-columns only *looked* like they wrapped because `_run_cell` puts the title on a
-second line with an embedded `\n`; even they clipped a long no-space title token
-(`S-70.30PBD…`) at a narrow width.
-
-**Fix.** `overflow="fold"` on every free-text column of the working table (Sample,
-Config, and the five run columns) and the stitch table's Sample. Fold wraps the
-full text onto more lines — breaking mid-token when there is no space — so nothing
-is ever hidden. The fixed-width numeric/status columns (Idx, Thick, Status) keep
-the default; they are short and must not wrap.
-
-`tests/test_table_display.py` (3 checks) drives the real render methods with a
-stub log and asserts the free-text columns fold and none of them ellipsize. 223
-tests.
-
-**Files changed:** `app.py`, `tests/test_table_display.py` (new), CLAUDE.md,
 `src/eqsanscli/__init__.py`.
 

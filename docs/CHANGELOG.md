@@ -7,6 +7,31 @@ the version it shipped in.
 
 ---
 
+### 2026-08-28: long names wrap in the tables, not truncate (v0.27.1)
+
+Reported: in the reduction (working) table a long sample name showed clipped —
+`70.30PBD_0.25…`. The run-number columns wrapped fine, so the fix should make the
+sample column behave the same.
+
+**Cause.** Rich `Table` columns default to `overflow="ellipsis"`, so a plain-text
+cell that outgrows its allotted width is truncated with `…`. The run-number
+columns only *looked* like they wrapped because `_run_cell` puts the title on a
+second line with an embedded `\n`; even they clipped a long no-space title token
+(`S-70.30PBD…`) at a narrow width.
+
+**Fix.** `overflow="fold"` on every free-text column of the working table (Sample,
+Config, and the five run columns) and the stitch table's Sample. Fold wraps the
+full text onto more lines — breaking mid-token when there is no space — so nothing
+is ever hidden. The fixed-width numeric/status columns (Idx, Thick, Status) keep
+the default; they are short and must not wrap.
+
+`tests/test_table_display.py` (3 checks) drives the real render methods with a
+stub log and asserts the free-text columns fold and none of them ellipsize. 223
+tests.
+
+**Files changed:** `app.py`, `tests/test_table_display.py` (new), CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-28: one cancel stops the whole parallel batch (v0.27.0)
 
 Reported: clicking Cancel during a multi-core reduction only killed the in-flight

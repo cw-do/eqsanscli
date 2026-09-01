@@ -529,7 +529,8 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
 | `/calibrate <iq_file> --applynow` | Same, and apply it to the config named in the filename, marking affected rows for re-reduction |
 | `/export script [file]` | Export standalone Python script (generated layout) |
-| `/export script --like <example.py> [-o <out>]` | Reproduce an existing script's style — keep its EQVar setup, config loops and stitching verbatim, refill only the run lists / sample names / thickness from the current table |
+| `/export script --like <example.py> [-o <out>]` | Reproduce an existing script's style — keep its EQVar setup, config loops and stitching verbatim, refill only the run lists / sample names / thickness from the current table. Fails closed if the example's configurations don't match the table |
+| `/export script --like <example.py> --adapt` | Opt-in: when configs don't match, let an LLM revise the script (remove surplus config blocks, rewire stitch). Matched run arrays are still filled by code; the stitch call is marked `# attn.` and the output is review-required |
 
 ### Stitching
 

@@ -594,6 +594,23 @@ class TemplateResult:
     alignment: Alignment
     warnings: list[str]
     errors: list[str]
+    changed_vars: list[str] = field(default_factory=list)   # input arrays refilled
+    review_required: bool = False                            # True for LLM --adapt output
+    attn: list[str] = field(default_factory=list)            # human-review notes
+
+
+def _mismatch(model: ExampleModel, alignment: Alignment,
+              table_data: dict) -> tuple[list[int], list[str], list[int]]:
+    """(unmatched example blocks, uncovered table configs, mis-hinted blocks)."""
+    all_idx = {i for blk in model.role_blocks.values() for i in blk}
+    matched = set(alignment.index_to_config.values())
+    unmatched = sorted(all_idx - set(alignment.index_to_config))
+    uncovered = [c for c in table_data if c not in matched]
+    mishinted = [
+        i for i, c in alignment.index_to_config.items()
+        if model.config_hint.get(i) and normalize_config_id(c) != model.config_hint[i]
+    ]
+    return unmatched, uncovered, mishinted
 
 
 def fill_from_example(source: str, table: WorkingTable,
@@ -632,15 +649,9 @@ def fill_from_example(source: str, table: WorkingTable,
     # Fail closed on a configuration mismatch. Silently writing a script whose
     # unmatched blocks still carry the EXAMPLE experiment's run numbers — and
     # whose stitch step still combines every block — is worse than refusing.
-    all_idx = {i for blk in model.role_blocks.values() for i in blk}
-    matched_cfgs = set(alignment.index_to_config.values())
-    unmatched = sorted(all_idx - set(alignment.index_to_config))
-    uncovered = [c for c in table_data if c not in matched_cfgs]
-    mishinted = [
-        i for i, c in alignment.index_to_config.items()
-        if model.config_hint.get(i) and normalize_config_id(c) != model.config_hint[i]
-    ]
+    unmatched, uncovered, mishinted = _mismatch(model, alignment, table_data)
     if unmatched or uncovered or mishinted:
+        all_idx = {i for blk in model.role_blocks.values() for i in blk}
         errs: list[str] = [
             f"Configuration mismatch: the example has {len(all_idx)} config block(s) "
             f"but the table has {len(table_data)} ({', '.join(sorted(table_data))}). "
@@ -666,10 +677,9 @@ def fill_from_example(source: str, table: WorkingTable,
                 f"{', '.join(uncovered)} — their samples would not be reduced."
             )
         errs.append(
-            "  Use an example whose configurations match the table, or trim one to fit. "
-            "(Auto-commenting and re-wiring the extra blocks — including the stitch "
-            "call, whose overlaps and target index depend on the block count — is a "
-            "planned follow-up.)"
+            "  Use an example whose configurations match the table, trim one to fit, "
+            "or retry with --adapt to let the LLM revise the script (structural edits "
+            "only, with the stitch call flagged for review)."
         )
         return TemplateResult(ok=False, new_source="", alignment=alignment,
                               warnings=alignment.warnings, errors=errs)
@@ -678,5 +688,211 @@ def fill_from_example(source: str, table: WorkingTable,
     errors = validate(model, sub, table, alignment)
     return TemplateResult(
         ok=not errors, new_source=sub.new_source, alignment=alignment,
-        warnings=sub.warnings, errors=errors,
+        warnings=sub.warnings, errors=errors, changed_vars=sorted(sub.emitted),
+    )
+
+
+# --------------------------------------------------------------------------
+# 7. --adapt: LLM revises the script for a configuration mismatch
+# --------------------------------------------------------------------------
+#
+# When the example has more configuration blocks than the table has configs, the
+# deterministic path fails closed. --adapt instead: (1) fills the MATCHED blocks
+# deterministically (code, not the model, touches run numbers), then (2) asks the
+# LLM to perform ONLY the structural surgery it is good at — comment out the
+# surplus blocks and rewire the stitch call. The result is validated hard and the
+# un-verifiable part (the stitch overlaps/target) is marked "# attn." for review.
+
+_ATTN = "# attn."
+
+
+def build_adapt_prompt(partial_source: str, model: ExampleModel,
+                       alignment: Alignment, removed: list[int]) -> str:
+    """Careful prompt: fill is already done; the model only removes blocks and
+    rewires the stitch, and must not touch anything else."""
+    removed_desc = []
+    for i in removed:
+        hint = model.config_hint.get(i, "?")
+        vars_ = [blk[i].name for blk in model.role_blocks.values() if i in blk]
+        removed_desc.append(f"  - block {i} (config {hint}): input vars {', '.join(sorted(vars_))}")
+    kept = ", ".join(f"{i}->{c}" for i, c in sorted(alignment.index_to_config.items()))
+
+    return (
+        "You are adapting an EQSANS reduction script. Its input run arrays for the "
+        "KEPT configurations are ALREADY filled correctly — do not change any run "
+        "number, sample name, thickness, calibration parameter, mask path, or "
+        "arithmetic. Your ONLY job:\n"
+        "  1. Remove the surplus configuration block(s) listed below — comment out "
+        "(prefix with '# ') every line that belongs to each: its input-array "
+        "assignments, its in-loop EQVar block (from `eq = EQVar()` through "
+        "`reduceNow(eq)`, including the `print('... config N')` and "
+        "`iqnameN = ...` lines), and its stitch lines (`iqN_fn = ...`, "
+        "`iqN = load_iqmod(...)`).\n"
+        "  2. Rewire the stitch call so it combines ONLY the surviving profiles, "
+        "with the correct overlap slice and target_profile_index. The overlap list "
+        "holds two values per junction between consecutive profiles, in order; "
+        "keep only the junctions between surviving profiles, and set "
+        "target_profile_index to the position of the former target within the new "
+        "profile list.\n"
+        f"  3. Append ' {_ATTN} verify stitch overlaps/target' to the rewired "
+        "stitch line, and add a '" + _ATTN + " ...' comment on any other line a "
+        "human should double-check.\n"
+        "Rules: only COMMENT OUT lines or change the single stitch_profiles(...) "
+        "line. Do NOT add, delete, or edit any other active line. Reply with the "
+        "COMPLETE revised script and nothing else.\n\n"
+        f"KEEP these blocks (index->config): {kept}\n"
+        f"REMOVE these blocks:\n" + "\n".join(removed_desc) + "\n\n"
+        "SCRIPT:\n" + partial_source
+    )
+
+
+def validate_adapt(partial_source: str, revised: str, model: ExampleModel,
+                   table: WorkingTable, alignment: Alignment,
+                   removed: list[int], sub: "Substitution") -> tuple[list[str], list[str]]:
+    """Return (errors, attn_notes). Empty errors → safe to present for review."""
+    errors: list[str] = []
+
+    try:
+        ast.parse(revised)
+    except SyntaxError as e:
+        return [f"LLM output does not parse: {e}"], []
+
+    def _active(text: str) -> set[str]:
+        return {l.rstrip() for l in text.splitlines()
+                if l.strip() and not l.lstrip().startswith("#")}
+
+    partial_active = _active(partial_source)
+    revised_active = _active(revised)
+
+    # (1) The model may only remove (comment) lines or change the stitch call.
+    #     Any new active line that is not a stitch call means it altered something.
+    new_active = revised_active - partial_active
+    stray = [l.strip() for l in new_active if "stitch_profiles(" not in l]
+    if stray:
+        errors.append("LLM changed code outside the stitch call: "
+                      + "; ".join(stray[:3]) + (" …" if len(stray) > 3 else ""))
+
+    # (2) No active reference to any removed block's variables or original runs.
+    removed_tokens: set[str] = set()
+    removed_runs: set[str] = set()
+    for i in removed:
+        removed_tokens |= {f"iq{i}", f"iqname{i}"}
+        for role, blk in model.role_blocks.items():
+            if i in blk:
+                removed_tokens.add(blk[i].name)
+                for tok in re.findall(r"\d{3,}", blk[i].rhs_text):
+                    removed_runs.add(tok)
+    for line in revised_active:
+        for tok in removed_tokens:
+            if re.search(rf"\b{re.escape(tok)}\b", line):
+                errors.append(f"removed config still referenced: {line.strip()}")
+                break
+
+    # (3) The deterministically-filled arrays must survive unchanged.
+    for name, vals in sub.emitted.items():
+        want = f"{name}" 
+        present = any(re.match(rf"\s*{re.escape(name)}\s*=", l) for l in revised_active)
+        if not present:
+            errors.append(f"filled array '{name}' was dropped by the LLM.")
+
+    # (4) The stitch call must be active, reference no removed profile.
+    stitch_lines = [l for l in revised_active if "stitch_profiles(" in l]
+    if not stitch_lines:
+        errors.append("no active stitch_profiles(...) call in the LLM output.")
+    else:
+        for i in removed:
+            if any(re.search(rf"\biq{i}\b", l) for l in stitch_lines):
+                errors.append(f"stitch call still includes removed profile iq{i}.")
+
+    # attn notes: surface every '# attn.' line, and ensure the stitch line has one.
+    attn = [l.strip() for l in revised.splitlines() if _ATTN in l]
+    if stitch_lines and not any(_ATTN in l for l in revised.splitlines()
+                                if "stitch_profiles(" in l):
+        attn.append("stitch_profiles(...) — verify overlaps/target index (not marked by LLM)")
+
+    return errors, attn
+
+
+def llm_adapt_default(prompt: str) -> str | None:
+    """Real LLM call for --adapt. Returns None when unconfigured or on failure."""
+    try:
+        from eqsanscli.config.settings import AppSettings
+        settings = AppSettings.load()
+        if not settings.llm.is_configured:
+            return None
+        from openai import OpenAI
+    except Exception:
+        return None
+    try:
+        client = OpenAI(base_url=settings.llm.base_url, api_key=settings.llm.api_key,
+                        timeout=180.0)
+        for mdl in [settings.llm.model, settings.llm.fallback_model]:
+            try:
+                resp = client.chat.completions.create(
+                    model=mdl, messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0, max_tokens=8000,
+                )
+                text = resp.choices[0].message.content.strip()
+                # Strip a ```python fence if the model added one.
+                text = re.sub(r"^```(?:python)?\s*|\s*```$", "", text, flags=re.S).strip()
+                if text:
+                    return text
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def adapt_from_example(source: str, table: WorkingTable, llm_call,
+                       llm_identify=None) -> TemplateResult:
+    """--adapt: fill matched blocks deterministically, then let the LLM remove the
+    surplus blocks and rewire stitch. `llm_call(prompt) -> str|None` is injectable
+    for testing. Output is review-required, never trusted blindly."""
+    model = identify(parse_example(source))
+    if not model.role_blocks and llm_identify is not None:
+        try:
+            llm_identify(model)
+        except Exception:
+            pass
+    if not model.role_blocks:
+        return TemplateResult(False, "", Alignment({}, []), [],
+                              ["No input arrays found in the example."])
+    table_data = extract_table_data(table)
+    if not table_data:
+        return TemplateResult(False, "", Alignment({}, []), [],
+                              ["The working table is empty — nothing to fill in."])
+
+    alignment = align(model, table_data)
+    unmatched, uncovered, _ = _mismatch(model, alignment, table_data)
+    if uncovered:
+        return TemplateResult(
+            False, "", alignment, alignment.warnings,
+            [f"--adapt cannot fabricate blocks for table config(s) with no example "
+             f"block: {', '.join(uncovered)}. Extend the example instead."])
+    if not unmatched:
+        # Nothing to adapt — the deterministic path handles it exactly.
+        return fill_from_example(source, table, llm_identify=llm_identify)
+
+    # Fill the matched blocks deterministically (code owns the run numbers).
+    sub = substitute(model, table_data, alignment)
+
+    prompt = build_adapt_prompt(sub.new_source, model, alignment, unmatched)
+    revised = None
+    try:
+        revised = llm_call(prompt) if llm_call else None
+    except Exception:
+        revised = None
+    if not revised:
+        return TemplateResult(
+            False, "", alignment, alignment.warnings,
+            ["--adapt needs a configured LLM (settings.llm) and it did not return a "
+             "revision. Nothing was written."])
+
+    errors, attn = validate_adapt(sub.new_source, revised, model, table,
+                                  alignment, unmatched, sub)
+    return TemplateResult(
+        ok=not errors, new_source=("" if errors else revised), alignment=alignment,
+        warnings=sub.warnings, errors=errors, changed_vars=sorted(sub.emitted),
+        review_required=True, attn=attn,
     )

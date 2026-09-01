@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -258,6 +259,116 @@ def test_apply_llm_mapping_ignores_unknown_names():
         "blocks": [{"index": 0, "samscatt": "also_missing"}],
     })
     assert not ok and model.sample_names is None
+
+
+# --- --adapt: LLM structural revision for a config mismatch ----------------
+
+def _table_2cfg():
+    return _table(configs=[(4, 10, 60), (2.5, 2.5, 60)])
+
+
+def _good_adapt_stub(prompt):
+    """Stand in for a capable LLM: comment out blocks 0 & 3, rewire the stitch."""
+    partial = prompt.split("SCRIPT:\n", 1)[1]
+    out = partial.splitlines()
+
+    def cmt(lo, hi):
+        for i in range(lo, hi + 1):
+            if out[i].strip() and not out[i].lstrip().startswith("#"):
+                ind = out[i][:len(out[i]) - len(out[i].lstrip())]
+                out[i] = ind + "# " + out[i].lstrip()
+
+    def find(pred, s=0):
+        for i in range(s, len(out)):
+            if pred(out[i]):
+                return i
+        return -1
+
+    for n, hdr in [(0, "#9m 15A"), (3, "#1.3m 1A")]:
+        h = find(lambda l: l.strip() == hdr)
+        e = find(lambda l: l.strip().startswith(f"emptybeam_{n}"), h)
+        cmt(h, e)
+        p = find(lambda l: f"config {n}'" in l)
+        r = find(lambda l: l.strip() == "reduceNow(eq)", p)
+        cmt(p, r)
+        for i, l in enumerate(out):
+            if re.match(rf"\s*iq{n}(_fn)?\s*=", l) and not l.lstrip().startswith("#"):
+                ind = l[:len(l) - len(l.lstrip())]
+                out[i] = ind + "# " + l.lstrip()
+    for i, l in enumerate(out):
+        if "stitch_profiles(" in l and "iq0" in l:
+            out[i] = re.sub(r"stitch_profiles\(.*?\)",
+                            "stitch_profiles([iq1, iq2], overlap[2:4], target_profile_index=0)",
+                            l) + "  # attn. verify stitch overlaps/target"
+    return "\n".join(out) + "\n"
+
+
+def test_adapt_good_revision_passes_and_flags_stitch():
+    res = st.adapt_from_example(EXAMPLE, _table_2cfg(), llm_call=_good_adapt_stub)
+    assert res.ok, res.errors
+    assert res.review_required
+    ast.parse(res.new_source)
+    assert any("stitch_profiles([iq1, iq2]" in a for a in res.attn)
+    # removed configs' runs survive only as commented-out lines, never active.
+    active = [l for l in res.new_source.splitlines()
+              if l.strip() and not l.lstrip().startswith("#")]
+    assert not any("186680" in l or "186644" in l for l in active)
+
+
+def test_adapt_rejects_edit_outside_stitch():
+    def bad(prompt):
+        return _good_adapt_stub(prompt).replace("eq._numqbins = 300", "eq._numqbins = 999")
+    res = st.adapt_from_example(EXAMPLE, _table_2cfg(), llm_call=bad)
+    assert not res.ok
+    assert any("outside the stitch call" in e for e in res.errors)
+
+
+def test_adapt_rejects_stale_removed_runs():
+    def bad(prompt):  # returns the partial unchanged — removed blocks still active
+        return prompt.split("SCRIPT:\n", 1)[1]
+    res = st.adapt_from_example(EXAMPLE, _table_2cfg(), llm_call=bad)
+    assert not res.ok
+    assert any("removed config still referenced" in e for e in res.errors)
+
+
+def test_adapt_requires_llm():
+    res = st.adapt_from_example(EXAMPLE, _table_2cfg(), llm_call=lambda p: None)
+    assert not res.ok and any("configured LLM" in e for e in res.errors)
+
+
+def test_adapt_is_noop_when_configs_match():
+    # No mismatch → adapt should just defer to the deterministic fill (no LLM).
+    def _boom(p):
+        raise AssertionError("LLM must not be called when configs already match")
+    res = st.adapt_from_example(EXAMPLE, _table(), llm_call=_boom)
+    assert res.ok and not res.review_required
+
+
+def test_command_adapt_without_llm_fails_gracefully(tmp_path):
+    s = SessionState()
+    s.ipts = 1
+    s.output_directory = str(tmp_path)
+    s.tables[s.active_table] = _table_2cfg()
+    s.current_table.name = s.active_table
+    # No LLM configured in the test env → --adapt should fail, write nothing.
+    res = _run(["--like", str(FIXTURE), "--adapt"], s)
+    assert not res.success
+    assert not list(tmp_path.glob("*.py"))
+
+
+def test_command_deterministic_header_present(tmp_path):
+    s = SessionState()
+    s.ipts = 38681
+    s.output_directory = str(tmp_path)
+    s.tables[s.active_table] = _table()
+    s.current_table.name = s.active_table
+    out = tmp_path / "filled.py"
+    res = _run(["--like", str(FIXTURE), "-o", str(out)], s)
+    assert res.success
+    text = out.read_text()
+    assert "CHANGED (refilled from the working table)" in text
+    assert "KEPT VERBATIM" in text
+    ast.parse(text)  # header is comments, still parses
 
 
 if __name__ == "__main__":

@@ -347,10 +347,12 @@ REDUCTION:
   Missing transmission or background is a WARNING only — reduction proceeds (a background-cell row such as
   banjo legitimately has no background).
 /export script [filename]       - Export .py reduction script (generated layout)
-/export script --like <example.py> [-o <out>] - Reproduce an EXISTING script's style: keep its EQVar setup, config loops and stitching verbatim, only refilling the run lists / sample names / thickness from the current table
+/export script --like <example.py> [-o <out>] - Reproduce an EXISTING script's style: keep its EQVar setup, config loops and stitching verbatim, only refilling the run lists / sample names / thickness from the current table. Fails closed if the example's config count doesn't match the table.
   "write a reduction script following the style of script_style2.py" -> /export script --like script_style2.py
   "make a reduction script like my_reduce.py (the table is done)" -> /export script --like my_reduce.py
   "use example.py as a template for the reduction script" -> /export script --like example.py
+/export script --like <example.py> --adapt - Same, but when the example has MORE config blocks than the table, let an LLM remove the surplus blocks and rewire the stitch (matched run arrays are still filled by code; stitch marked '# attn.', output review-required). Use only when the user explicitly accepts an LLM-adapted script.
+  "the template has 4 configs but I only have 2 — adapt it" / "revise script_style2.py to work with my 2 configs" -> /export script --like script_style2.py --adapt
 
 DATA & PLOTTING:
 /list iq [path]                 - List I(Q) files

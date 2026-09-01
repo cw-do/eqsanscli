@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.31.0</div>
+          data reduction tool &middot; v0.32.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,12 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-28-long-names-wrap-in-the-tables-not-truncate-v0271">2026-08-28: long names wrap in the tables, not truncate (v0.27.1)<a class="anchor" href="#2026-08-28-long-names-wrap-in-the-tables-not-truncate-v0271">#</a></h3>
+<p>Reported: in the reduction (working) table a long sample name showed clipped — <code>70.30PBD_0.25…</code>. The run-number columns wrapped fine, so the fix should make the sample column behave the same.</p>
+<p><strong>Cause.</strong> Rich <code>Table</code> columns default to <code>overflow=&quot;ellipsis&quot;</code>, so a plain-text cell that outgrows its allotted width is truncated with <code>…</code>. The run-number columns only <em>looked</em> like they wrapped because <code>_run_cell</code> puts the title on a second line with an embedded <code>\n</code>; even they clipped a long no-space title token (<code>S-70.30PBD…</code>) at a narrow width.</p>
+<p><strong>Fix.</strong> <code>overflow=&quot;fold&quot;</code> on every free-text column of the working table (Sample, Config, and the five run columns) and the stitch table&#x27;s Sample. Fold wraps the full text onto more lines — breaking mid-token when there is no space — so nothing is ever hidden. The fixed-width numeric/status columns (Idx, Thick, Status) keep the default; they are short and must not wrap.</p>
+<p><code>tests/test_table_display.py</code> (3 checks) drives the real render methods with a stub log and asserts the free-text columns fold and none of them ellipsize. 223 tests.</p>
+<p><strong>Files changed:</strong> <code>app.py</code>, <code>tests/test_table_display.py</code> (new), CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-08-28-one-cancel-stops-the-whole-parallel-batch-v0270">2026-08-28: one cancel stops the whole parallel batch (v0.27.0)<a class="anchor" href="#2026-08-28-one-cancel-stops-the-whole-parallel-batch-v0270">#</a></h3>
 <p>Reported: clicking Cancel during a multi-core reduction only killed the in-flight jobs; a 15-job batch kept going and needed several clicks. Single-core cancelled cleanly on one click.</p>
 <p><strong>Cause.</strong> <code>reduce_row</code> / <code>run_reduction</code> checked the cancel event only <em>after</em> launching drtsans. In a <code>ThreadPoolExecutor</code> batch every row is submitted up front; when the user cancels, the running jobs are killed within ~1s, but as each worker frees the executor hands it the next queued row, which builds a JSON and spawns a fresh drtsans — waits 1s — <em>then</em> notices the cancel and dies. So one click drained the queue slowly, one launch at a time, and looked like it wasn&#x27;t working. Single-core was fine because it checks the event at the top of each iteration and returns.</p>
