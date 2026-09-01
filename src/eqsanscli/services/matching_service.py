@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 
 BKG_KEYWORDS = ["bkg", "banjo", "background", "emptycell", "emptyticell", "empty ticell",
                 "empty ti-cell", "ti-cell", "ticell"]
-# Empty beam patterns: "empty", "emp", "emt" as standalone words, or followed by "beam"
-# Must NOT match "emptycell", "emptyticell", etc. (those are background)
+# Empty beam patterns: "empty"/"emp"/"emt" joined to "beam" by any separator or
+# none ("empty beam", "emptybeam", "empty_beam", "emptyBeam"), OR standalone
+# "empty"/"emp"/"emt" as a whole word. Must NOT match "emptycell"/"emptyticell"
+# etc. — those have no word boundary after "empty" and are caught as background first.
 _EMPTY_BEAM_RE = re.compile(
-    r"\b(?:empty\s+beam|emp\s+beam|emt\s+beam|empty|emp|emt)\b", re.IGNORECASE
+    # empty beam / emptybeam / empty_beam / emptyBeam — letter-boundaries, not \b,
+    # because an underscore is a \w char so "beam\b" would fail before "_4m".
+    r"(?<![a-z])(?:empty|emp|emt)[\s_-]*beam(?![a-z])"
+    r"|\b(?:empty|emp|emt)\b",            # standalone empty / emp / emt
+    re.IGNORECASE,
 )
 
 # Valid run_class values (canonical names used internally)

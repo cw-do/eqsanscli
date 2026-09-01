@@ -46,6 +46,31 @@ def _flatten(obj: dict, prefix: str, result: dict[str, object]) -> None:
             result[flat_key.lower()] = value
 
 
+def load_preset_raw(name: str) -> dict | None:
+    """Return the full parsed JSON of a preset_configs/ file (NOT flattened).
+
+    Used to display non-config presets like stitch_overlaps.json, which carry an
+    ``overlaps`` list rather than a ``configuration`` section.
+    """
+    preset_dir = _find_preset_dir()
+    if preset_dir is None:
+        return None
+    for path in (preset_dir / f"{name}.json", preset_dir / f"conf_{name}.json"):
+        if path.is_file():
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return None
+    return None
+
+
+def preset_dir_path() -> str | None:
+    """Filesystem path of the preset_configs/ directory, for user-facing hints."""
+    d = _find_preset_dir()
+    return str(d) if d else None
+
+
 def load_preset_from_file(path: str) -> dict[str, object] | None:
     """Load and flatten the configuration section from a reduction JSON at `path`.
 

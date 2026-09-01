@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.32.0</div>
+          data reduction tool &middot; v0.33.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,13 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-08-28-show-table-filters-rows-name-sample-v0280">2026-08-28: /show table filters — rows, name, sample (v0.28.0)<a class="anchor" href="#2026-08-28-show-table-filters-rows-name-sample-v0280">#</a></h3>
+<p>Asked for <code><a href="commands.html#cmd-show-table">/show table --rows 50-100</a></code> and <code><a href="commands.html#cmd-show-table">/show table --name 0.25phr</a></code> (rows whose sample name contains <code>0.25phr</code>). <code><a href="commands.html#cmd-show-table">/show table</a></code> previously took only <code>--sample</code>, which is an <em>exact</em> match (or glob with <code>*</code>), so <code>--sample 0.25phr</code> matched nothing — you had to type <code>--sample *0.25phr*</code>.</p>
+<p>Three filters, composable (AND):</p>
+<ul><li><strong><code>--rows &lt;spec&gt;</code></strong> (aliases <code>--row</code>/<code>--index</code>/<code>--idx</code>/<code>--range</code>) — index range, list, or run number, via the existing <code>parse_row_selection</code> (<code>50-100</code>, <code>1,3,5</code>).</li><li><strong><code>--name &lt;text&gt;</code></strong> (alias <code>--contains</code>) — case-insensitive <strong>substring</strong> of the sample name, the easy &quot;contains&quot; form the user wanted.</li><li><strong><code>--sample &lt;pat&gt;</code></strong> — kept as-is: exact, or glob when it contains <code>*</code>.</li></ul>
+<p>Unrecognised arguments are now rejected with usage rather than silently ignored (the parser walks tokens instead of only checking <code>args[0]</code>). Read-only — no rows are removed; the label shows which filters ran and &quot;N of M row(s)&quot;. LLM routing maps &quot;rows 50 to 100&quot; → <code>--rows</code>, &quot;containing 0.25phr&quot; → <code>--name</code>.</p>
+<p><code>tests/test_show_table.py</code> (10 checks): substring vs glob vs exact, range/list, filters combining, no-match message, unknown-flag rejection, empty table. 233 tests.</p>
+<p><strong>Files changed:</strong> <code>commands/catalog.py</code>, <code>services/llm_handler.py</code>, <code>tests/test_show_table.py</code> (new), SKILL.md, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-08-28-long-names-wrap-in-the-tables-not-truncate-v0271">2026-08-28: long names wrap in the tables, not truncate (v0.27.1)<a class="anchor" href="#2026-08-28-long-names-wrap-in-the-tables-not-truncate-v0271">#</a></h3>
 <p>Reported: in the reduction (working) table a long sample name showed clipped — <code>70.30PBD_0.25…</code>. The run-number columns wrapped fine, so the fix should make the sample column behave the same.</p>
 <p><strong>Cause.</strong> Rich <code>Table</code> columns default to <code>overflow=&quot;ellipsis&quot;</code>, so a plain-text cell that outgrows its allotted width is truncated with <code>…</code>. The run-number columns only <em>looked</em> like they wrapped because <code>_run_cell</code> puts the title on a second line with an embedded <code>\n</code>; even they clipped a long no-space title token (<code>S-70.30PBD…</code>) at a narrow width.</p>

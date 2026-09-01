@@ -7,6 +7,33 @@ the version it shipped in.
 
 ---
 
+### 2026-08-28: /show table filters — rows, name, sample (v0.28.0)
+
+Asked for `/show table --rows 50-100` and `/show table --name 0.25phr` (rows whose
+sample name contains `0.25phr`). `/show table` previously took only `--sample`,
+which is an *exact* match (or glob with `*`), so `--sample 0.25phr` matched
+nothing — you had to type `--sample *0.25phr*`.
+
+Three filters, composable (AND):
+- **`--rows <spec>`** (aliases `--row`/`--index`/`--idx`/`--range`) — index range,
+  list, or run number, via the existing `parse_row_selection` (`50-100`, `1,3,5`).
+- **`--name <text>`** (alias `--contains`) — case-insensitive **substring** of the
+  sample name, the easy "contains" form the user wanted.
+- **`--sample <pat>`** — kept as-is: exact, or glob when it contains `*`.
+
+Unrecognised arguments are now rejected with usage rather than silently ignored
+(the parser walks tokens instead of only checking `args[0]`). Read-only — no rows
+are removed; the label shows which filters ran and "N of M row(s)". LLM routing
+maps "rows 50 to 100" → `--rows`, "containing 0.25phr" → `--name`.
+
+`tests/test_show_table.py` (10 checks): substring vs glob vs exact, range/list,
+filters combining, no-match message, unknown-flag rejection, empty table. 233
+tests.
+
+**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
+`tests/test_show_table.py` (new), SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-28: long names wrap in the tables, not truncate (v0.27.1)
 
 Reported: in the reduction (working) table a long sample name showed clipped —

@@ -25,7 +25,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from eqsanscli.commands.matching import handle_set
 from eqsanscli.models.session_state import SessionState
 from eqsanscli.models.working_table import WorkingTableRow
-from eqsanscli.services.matching_service import add_run_class_column, match_runs
+from eqsanscli.services.matching_service import (
+    add_run_class_column,
+    classify_title,
+    match_runs,
+)
+
+
+# --- empty-beam classification (IPTS-38659: "T-emptyBeam_4m 10A") ----------
+
+def test_camelcase_and_joined_emptybeam_classify_as_empty():
+    # The reported bug: "emptyBeam" (no space) was read as a plain transmission.
+    assert classify_title("T-emptyBeam_4m 10A") == "empty_trans"
+    assert classify_title("T-emptyBeam_2.5m 2.5A") == "empty_trans"
+    assert classify_title("T-empty_beam 8m") == "empty_trans"
+    assert classify_title("emptybeam") == "empty_trans"
+    assert classify_title("empty beam 4m") == "empty_trans"
+    assert classify_title("S-emptyBeam") == "empty_scatt"
+
+
+def test_empty_beam_does_not_swallow_background_or_others():
+    # Background cells and unrelated words must NOT become empty beam.
+    assert classify_title("emptyticell 4m") == "bkg_scatt"
+    assert classify_title("T-emptycell") == "bkg_trans"
+    assert classify_title("empty_ticell 4m") == "bkg_scatt"
+    assert classify_title("banjo 4m") == "bkg_scatt"
+    assert classify_title("temperature scan 4m") == "scattering"
+    assert classify_title("beamstop 4m") == "scattering"
+
+
+def test_emptybeam_assigned_as_empty_in_working_table():
+    cfg = dict(detector_distance=4.0, wavelength=10.0, frequency=60)
+    rows = [
+        dict(run_number=187605, title="T-emptyBeam_4m 10A", **cfg),
+        dict(run_number=187607, title="T-porsil_4m 10A", **cfg),
+        dict(run_number=187610, title="S-porsil_4m 10A", **cfg),
+    ]
+    table, _ = match_runs(_catalog(rows), ipts=38659)
+    assert table.rows and all(r.empty_beam == "187605" for r in table.rows)
 
 
 def _run(coro):

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from eqsanscli.commands.preset import handle_apply_preset
+from eqsanscli.commands.preset import handle_apply_preset, handle_show_preset
 from eqsanscli.models.session_state import SessionState
 from eqsanscli.services.preset_service import (
     load_preset_from_file,
@@ -109,6 +109,22 @@ def test_preset_name_still_works():
     res = _run(["conf_4m_10a_60hz", "4m10a"], st)
     assert res.success and len(st.configurations["4m10a"]) > 10
     assert "preset" in res.message
+
+
+# --- /show preset stitch_overlaps renders the overlaps + how to edit -------
+
+def test_show_stitch_overlaps_lists_pairs_and_edit_hint():
+    res = asyncio.new_event_loop().run_until_complete(
+        handle_show_preset(["stitch_overlaps"], SessionState()))
+    assert res.success
+    msg = res.message
+    # actual overlap data shown (not an empty config table)
+    assert "4m10a" in msg and "2.5m2.5a" in msg
+    assert "[0.05, 0.06]" in msg
+    assert "frame0" in msg
+    # and a clear how-to-edit hint pointing at the JSON file
+    assert "stitch_overlaps.json" in msg
+    assert "/stitch smart" in msg
 
 
 if __name__ == "__main__":

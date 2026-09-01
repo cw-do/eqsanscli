@@ -13,6 +13,8 @@ from eqsanscli.services.preset_service import (
     get_preset_name_from_path,
     list_presets,
     load_preset,
+    load_preset_raw,
+    preset_dir_path,
     resolve_preset_source,
 )
 
@@ -64,6 +66,12 @@ async def handle_show_preset(args: list[str], state: SessionState) -> CommandRes
     if resolved is None:
         return CommandResult(success=False, message=f"Preset not found: {name}")
 
+    # Non-config presets (e.g. stitch_overlaps.json) carry an "overlaps" list, not
+    # a "configuration" section — render them their own way instead of an empty table.
+    raw = load_preset_raw(resolved)
+    if raw and isinstance(raw.get("overlaps"), list):
+        return _show_overlaps_preset(resolved, raw)
+
     params = load_preset(resolved)
     if params is None:
         return CommandResult(success=False, message=f"Failed to load preset: {resolved}")
@@ -82,6 +90,45 @@ async def handle_show_preset(args: list[str], state: SessionState) -> CommandRes
         message=f"Preset: {resolved}",
         data={"type": "config_table", "rows": rows, "config_id": f"preset:{resolved}"},
     )
+
+
+def _show_overlaps_preset(resolved: str, raw: dict) -> CommandResult:
+    """Render the stitch-overlaps preset: the config pairs and how to edit them."""
+    entries = raw.get("overlaps", [])
+    pairs = []
+    for entry in entries:
+        cfgs = entry.get("configs", [])
+        ov = entry.get("overlap", [])
+        pairs.append((
+            " → ".join(str(c) for c in cfgs) if cfgs else "?",
+            f"[{ov[0]}, {ov[1]}]" if len(ov) == 2 else str(ov),
+            str(entry.get("note", "")),
+        ))
+    hdr_pair, hdr_ov = "Config pair (low-Q → high-Q)", "Overlap Q [min,max]"
+    wpair = max([len(p[0]) for p in pairs] + [len(hdr_pair)])
+    wov = max([len(p[1]) for p in pairs] + [len(hdr_ov)])
+
+    lines = [
+        f"[bold]Stitch overlaps[/bold] ({resolved}) — predefined overlap Q-ranges used",
+        "by smart stitch (/stitch smart, autopilot). A listed pair OVERRIDES the",
+        "auto-computed overlap; any pair not listed falls back to auto.",
+        "",
+        f"  {hdr_pair:<{wpair}}  {hdr_ov:<{wov}}  Note",
+        f"  {'-' * wpair}  {'-' * wov}  {'-' * 4}",
+    ]
+    for pair, window, note in pairs:
+        lines.append(f"  {pair:<{wpair}}  {window:<{wov}}  {note}")
+
+    pdir = preset_dir_path()
+    loc = f"{pdir}/{resolved}.json" if pdir else f"{resolved}.json"
+    lines += [
+        "",
+        f"[dim]To change: edit {loc}[/dim]",
+        '[dim]  each entry: {"configs": ["<lowQ>", "<highQ>"], "overlap": [qmin, qmax], "note": "..."}[/dim]',
+        "[dim]  configs are normalized ids (4m10a, 2.5m2.5a) low-Q → high-Q, or frame0/frame1 for 30Hz.[/dim]",
+        "[dim]  Saved changes are picked up on the next /stitch smart run.[/dim]",
+    ]
+    return CommandResult(success=True, message="\n".join(lines))
 
 
 async def handle_apply_preset(args: list[str], state: SessionState) -> CommandResult:

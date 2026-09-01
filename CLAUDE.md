@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.33.0 | 2026-08-31 | Fix: `emptyBeam`/`empty_beam`/`emptybeam` (camelCase or joined) titles were classified as plain transmissions, so empty beam was never assigned (IPTS-38659 `T-emptyBeam_4m 10A`). The empty-beam regex now matches `empty`/`emp`/`emt` joined to `beam` by any separator or none, using letter-boundary lookarounds (a trailing `\b` failed before `_`); background cells (`emptycell`/`emptyticell`) are still excluded. Also: `/show preset stitch_overlaps` now renders the overlap pairs and a how-to-edit hint instead of an empty table. |
 | 0.32.0 | 2026-08-31 | `/export script --like … --adapt`: opt-in LLM revision for the config-mismatch case. Hybrid, not fully-LLM — code fills the matched configs' run arrays (exact, never the model), the LLM only removes surplus config blocks and rewires the stitch call, and `validate_adapt()` enforces that the model may **only comment lines out or change the stitch call** (any other altered active line is rejected), plus no active references to removed configs and the filled arrays survive. The un-verifiable stitch overlaps/target get a `# attn.` marker and the output is labelled review-required. Deterministic `--like` output also gains a header stating what was refilled vs kept verbatim. LLM call is injectable for offline testing. |
 | 0.31.0 | 2026-08-31 | `/export script --like` now **fails closed on a configuration mismatch** instead of silently emitting a wrong script. Found in testing: a 4-block example against a 2-config table wrote a file that kept the example experiment's own run numbers in the two unmatched blocks (and still stitched all four). It now refuses when any example block has no matching table config, any table config has no block, or a block's comment/mask hint disagrees with its aligned config — with a message naming the mismatch. Auto-commenting/re-wiring the extra blocks is a planned follow-up. |
 | 0.30.0 | 2026-08-31 | `/apply preset <file.json> <config>` now accepts a path to the user's own reduction JSON, not just a `preset_configs/` name — an existing `.json` (absolute, or relative to cwd/outputdir) wins over a same-named preset, and all its non-null configuration parameters are copied to the config (user-set values preserved unless `--force`). Also: the `--like` templated export gains an optional LLM fallback (`llm_identify_structure`) for unusual variable naming — the model returns a structured JSON mapping only (never code), applied through the same deterministic substitute/validate path; the heuristic still covers the common style offline. |
@@ -206,6 +207,36 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-08-31: empty beam matches camelCase names; /show preset stitch_overlaps (v0.33.0)
+
+**1 — empty beam not assigned (IPTS-38659).** `/matchruns` left every row without
+an empty beam even though the runs `T-emptyBeam_4m 10A` / `T-emptyBeam_2.5m 2.5A`
+were present. `classify_title` read them as plain **transmissions**: the
+`_EMPTY_BEAM_RE` only matched "empty beam" with a literal space or standalone
+"empty" as a whole word, so the camelCase joined form matched nothing. Two subtle
+points in the fix: (a) `empty`/`emp`/`emt` may join `beam` by any separator or
+none (`empty beam`, `emptybeam`, `empty_beam`, `emptyBeam`); (b) a trailing `\b`
+fails before `_` (underscore is a `\w` char), so the pattern uses letter-boundary
+lookarounds `(?<![a-z])…beam(?![a-z])` instead. Background cells
+(`emptycell`/`emptyticell`/`empty_ticell`) still classify as background — they
+have no word boundary after "empty" and are matched by BKG keywords first. Now
+`T-emptyBeam_4m 10A` → `empty_trans` and becomes the config's empty beam.
+
+**2 — `/show preset stitch_overlaps`** showed an empty table (it is not a config
+preset — it holds an `overlaps` list, not a `configuration` section). It now
+detects that shape (`load_preset_raw`) and prints the config pairs with their
+overlap Q-windows and notes, plus a how-to-edit hint pointing at the JSON file
+and the entry format. Smart stitch prefers a listed pair's overlap over the
+auto-computed one; unlisted pairs fall back to auto.
+
+`tests/test_matching.py` (+3: camelCase/joined/underscore → empty, background not
+swallowed, empty beam assigned end to end) and `tests/test_apply_preset_file.py`
+(+1: overlaps render + edit hint). 272 tests.
+
+**Files changed:** `services/matching_service.py`, `services/preset_service.py`,
+`commands/preset.py`, `tests/test_matching.py`, `tests/test_apply_preset_file.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
 
@@ -347,32 +378,5 @@ the example + a synthetic 4-config table. 245 tests.
 **Files changed:** `services/script_templating.py` (new), `commands/export.py`,
 `services/llm_handler.py`, `tests/test_script_templating.py` +
 `tests/fixtures/example_reduction_script.py` (new), SKILL.md, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-08-28: /show table filters — rows, name, sample (v0.28.0)
-
-Asked for `/show table --rows 50-100` and `/show table --name 0.25phr` (rows whose
-sample name contains `0.25phr`). `/show table` previously took only `--sample`,
-which is an *exact* match (or glob with `*`), so `--sample 0.25phr` matched
-nothing — you had to type `--sample *0.25phr*`.
-
-Three filters, composable (AND):
-- **`--rows <spec>`** (aliases `--row`/`--index`/`--idx`/`--range`) — index range,
-  list, or run number, via the existing `parse_row_selection` (`50-100`, `1,3,5`).
-- **`--name <text>`** (alias `--contains`) — case-insensitive **substring** of the
-  sample name, the easy "contains" form the user wanted.
-- **`--sample <pat>`** — kept as-is: exact, or glob when it contains `*`.
-
-Unrecognised arguments are now rejected with usage rather than silently ignored
-(the parser walks tokens instead of only checking `args[0]`). Read-only — no rows
-are removed; the label shows which filters ran and "N of M row(s)". LLM routing
-maps "rows 50 to 100" → `--rows`, "containing 0.25phr" → `--name`.
-
-`tests/test_show_table.py` (10 checks): substring vs glob vs exact, range/list,
-filters combining, no-match message, unknown-flag rejection, empty table. 233
-tests.
-
-**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
-`tests/test_show_table.py` (new), SKILL.md, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
 
