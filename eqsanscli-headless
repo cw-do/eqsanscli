@@ -1,9 +1,13 @@
 #!/bin/bash
+# Headless (JSON-over-stdin) launcher. See ./eqsanscli for why the Python
+# environment is pinned to the bundled venv rather than the caller's — some
+# users hit "No module named 'rich'" when their PYTHONPATH/PYTHONHOME/user-site
+# pointed at another Python and shadowed the venv's packages.
 SCRIPT_DIR="/SNS/EQSANS/shared/script/eqsanstools-cli"
 
-source "$SCRIPT_DIR/.venv/bin/activate"
-
-export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+export PYTHONPATH="$SCRIPT_DIR/src"
 export EQSANSCLI_ROOT="$SCRIPT_DIR"
 
-exec python -m eqsanscli headless
+exec "$SCRIPT_DIR/.venv/bin/python" -m eqsanscli headless "$@"

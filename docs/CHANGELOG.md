@@ -7,6 +7,77 @@ the version it shipped in.
 
 ---
 
+### 2026-08-31: empty beam matches camelCase names; /show preset stitch_overlaps (v0.33.0)
+
+**1 — empty beam not assigned (IPTS-38659).** `/matchruns` left every row without
+an empty beam even though the runs `T-emptyBeam_4m 10A` / `T-emptyBeam_2.5m 2.5A`
+were present. `classify_title` read them as plain **transmissions**: the
+`_EMPTY_BEAM_RE` only matched "empty beam" with a literal space or standalone
+"empty" as a whole word, so the camelCase joined form matched nothing. Two subtle
+points in the fix: (a) `empty`/`emp`/`emt` may join `beam` by any separator or
+none (`empty beam`, `emptybeam`, `empty_beam`, `emptyBeam`); (b) a trailing `\b`
+fails before `_` (underscore is a `\w` char), so the pattern uses letter-boundary
+lookarounds `(?<![a-z])…beam(?![a-z])` instead. Background cells
+(`emptycell`/`emptyticell`/`empty_ticell`) still classify as background — they
+have no word boundary after "empty" and are matched by BKG keywords first. Now
+`T-emptyBeam_4m 10A` → `empty_trans` and becomes the config's empty beam.
+
+**2 — `/show preset stitch_overlaps`** showed an empty table (it is not a config
+preset — it holds an `overlaps` list, not a `configuration` section). It now
+detects that shape (`load_preset_raw`) and prints the config pairs with their
+overlap Q-windows and notes, plus a how-to-edit hint pointing at the JSON file
+and the entry format. Smart stitch prefers a listed pair's overlap over the
+auto-computed one; unlisted pairs fall back to auto.
+
+`tests/test_matching.py` (+3: camelCase/joined/underscore → empty, background not
+swallowed, empty beam assigned end to end) and `tests/test_apply_preset_file.py`
+(+1: overlaps render + edit hint). 272 tests.
+
+**Files changed:** `services/matching_service.py`, `services/preset_service.py`,
+`commands/preset.py`, `tests/test_matching.py`, `tests/test_apply_preset_file.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
+
+The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a
+4-config template used for a 2-config experiment. `--adapt` (opt-in) now lets an
+LLM revise the script — but as a **hybrid**, decided after weighing fully-LLM
+against it:
+
+- **Fully-LLM** (model returns the whole revised script, trusted) throws away the
+  verbatim guarantee — it could silently change a calibration constant, the
+  absolute-scale arithmetic, a mask path. Rejected for real reduction.
+- **Hybrid (built):** code fills the matched configs' run arrays deterministically
+  (the model never touches a run number); the LLM does only the structural
+  surgery it is good at — comment out the surplus config blocks and rewire the
+  `stitch_profiles(...)` call. `validate_adapt()` then enforces a hard contract:
+  the model may **only** comment lines out or change the single stitch call —
+  every other altered/added active line is rejected (this provably protects all
+  kept parameters), plus no active reference to a removed config may remain and
+  every filled array must survive. The one thing not machine-checkable — whether
+  the new `overlap[…]` slice and `target_profile_index` are physically right —
+  gets a `# attn.` marker and the whole output is labelled *review-required*.
+
+`--adapt` engages only when the deterministic path can't handle it (mismatch);
+when configs already line up it is a no-op that defers to the exact fill. The LLM
+call (`llm_adapt_default`, via `settings.llm`) is injectable, so the safety layer
+is tested offline: a good stub passes and flags the stitch; a stub that edits a
+param or leaves stale runs is rejected; an unconfigured LLM fails gracefully.
+The deterministic `--like` output also gained a header block stating what was
+refilled vs kept verbatim (with a `# attn.` section).
+
+Feasibility was proven first by running the transform by hand (Claude as the LLM):
+a 4-block example → correct 2-config script, stitch rewired to
+`stitch_profiles([iq1, iq2], overlap[2:4], target_profile_index=0)`.
+
+`tests/test_script_templating.py` (25 checks). 268 tests. Deferred: reaching the
+tool's own smaller model (gemini-3-flash / gpt-5-mini) needs a real key and its
+reliability on the stitch rewrite is unverified — hence the review-required label.
+
+**Files changed:** `services/script_templating.py`, `commands/export.py`,
+`services/llm_handler.py`, `tests/test_script_templating.py`, SKILL.md, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: --like fails closed on a config mismatch (v0.31.0)
 
 Testing the new `--like` export surfaced a dangerous case: the user's template had

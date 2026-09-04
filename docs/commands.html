@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.36.0</div>
+          data reduction tool &middot; v0.36.2</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -318,9 +318,12 @@ Autopilot steps (13 total):
   12. Stitch profiles
   13. Plot results
 
---from N: skip steps 1..(N-1) and start at step N. Requires catalog + working
-  table already in session (e.g. from prior /load ipts + /matchruns + /apply preset).
+--from N: skip steps 1..(N-1) and start at step N. Needs a loaded catalog
+  (from /load ipts). --from 2 starts at match-runs and BUILDS the table, so it
+  needs only the catalog; --from 3+ skip matching and need the table already
+  populated (e.g. from a prior /matchruns + /apply preset).
   Examples:
+    --from 2  — skip catalog load; match runs and continue (only needs /load ipts)
     --from 5  — skip load/match/verify/presets; set outputdir and proceed to porsil
                 (use when match table + configs are already set up the way you want)
     --from 6  — skip outputdir too; jump straight to porsil reduction
@@ -538,7 +541,7 @@ Autopilot steps (13 total):
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-01 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-04 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

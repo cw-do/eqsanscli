@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.36.0</div>
+          data reduction tool &middot; v0.36.2</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -154,6 +154,11 @@ outputwavelengthdependentprofile  True</code></pre>
 <div class="kb"><h1 id="instrument-calibration-files">Instrument calibration files<a class="anchor" href="#instrument-calibration-files">#</a></h1>
 <p>Six parameters are properties of the <strong>accelerator cycle</strong>, not of an instrument configuration: <code>maskfilename</code>, <code>sensitivityfilename</code>, <code>darkfilename</code>, <code>beamfluxfilename</code>, <code>detectoroffset</code>, <code>scalecomponents.detector1</code> (and <code>sampleoffset</code>). They are resolved from the run number at runtime by <code>services/instrument_files.py</code>.</p>
 <p><strong>Do not write current filenames into this document or into a preset.</strong> They go stale within one cycle — that is exactly how the previous knowledge file ended up naming 2025B files three cycles late. Filenames below are worked examples, labelled with their cycle.</p>
+<h2 id="when-they-are-resolved-and-when-they-are-not">When they are resolved — and when they are not<a class="anchor" href="#when-they-are-resolved-and-when-they-are-not">#</a></h2>
+<p>Resolution runs automatically at <strong><code><a href="commands.html#cmd-matchruns">/matchruns</a></code></strong> (after presets are applied, so the machine-physics files win over any preset values) and in <strong>autopilot</strong> (step 4c, same resolver), and on demand at <strong><code><a href="commands.html#cmd-instrument">/instrument apply</a></code></strong>. It is gated by <code>auto_instrument_files</code> (on by default; <code><a href="commands.html#cmd-instrument">/instrument off</a></code> disables it) and can be locked to one cycle with <code><a href="commands.html#cmd-instrument">/instrument pin &lt;cycle&gt;</a></code>.</p>
+<p>It does <strong>not</strong> run at <strong><code><a href="commands.html#cmd-export-script">/export script</a></code></strong> — that command emits whatever is already in each config, so if the cycle&#x27;s calibration has changed, run <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> (or <code><a href="commands.html#cmd-instrument">/instrument apply</a></code>) <em>before</em> exporting or the script carries the old files. <code><a href="commands.html#cmd-instrument">/instrument show</a></code> displays what is currently resolved.</p>
+<p><strong>Precedence with presets.</strong> <code><a href="commands.html#cmd-apply-preset">/apply preset &lt;name|file.json&gt;</a></code> <strong>without</strong> <code>--force</code> never overwrites a value the config already has, so after <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> it leaves the resolved calibration intact and only fills gaps. <code><a href="commands.html#cmd-apply-preset">/apply preset --force</a></code> overwrites everything the preset carries — including these six params if a preset (wrongly) contains them — and does <strong>not</strong> re-resolve afterwards; recover with <code><a href="commands.html#cmd-instrument">/instrument apply --force</a></code>. Presets should not carry these six params at all.</p>
+<p><strong>Re-resolving keeps your overrides.</strong> A repeat <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> (or <code><a href="commands.html#cmd-instrument">/instrument apply</a></code> without <code>--force</code>) updates the resolver-owned values to the newest files but preserves an explicit <code><a href="commands.html#cmd-set-config">/set config</a></code> edit — the resolver treats a value it did not write as a manual override and leaves it. Only <code><a href="commands.html#cmd-instrument">/instrument apply --force</a></code> overrides a <code><a href="commands.html#cmd-set-config">/set config</a></code> edit.</p>
 <h2 id="where-the-files-live">Where the files live<a class="anchor" href="#where-the-files-live">#</a></h2>
 <p><code>/SNS/EQSANS/shared/NeXusFiles/EQSANS/&lt;year&gt;&lt;A|B&gt;_mp/</code> per cycle:</p>
 <div class="table-wrap"><table><thead><tr><th>Artifact</th><th>Pattern</th><th>Example (2026B)</th></tr></thead><tbody>
@@ -205,7 +210,7 @@ outputwavelengthdependentprofile  True</code></pre>
 <h2 id="offsets-and-scale-components">Offsets and scale components<a class="anchor" href="#offsets-and-scale-components">#</a></h2>
 <p><code>detoffset</code>, <code>scalecomp</code> and <code>samoffset</code> come from the cycle&#x27;s AgBe calibration, determined at the start of the cycle by the instrument scientist. <code>scalecomp</code> is the <code>detector1</code> array <code>[x, y, z]</code> where <code>y = scale_all × scale_y</code>.</p>
 <p>Worked examples: 2026B <code>scalecomp = [1.004251, 1.057915, 1]</code>, <code>detoffset = 66.763</code>, <code>samoffset = 285.0</code>. 2026A <code>[1.003571, 1.052902, 1]</code>, <code>detoffset = 77.244</code>. Historical, from <code>202502_agbe/34965/banjo</code>: <code>scalecomp = [1.002, 1.0728155533894388, 1]</code>, <code>detoffset = 84.38081</code>, <code>samoffset = 300</code> (banjo rack, ti-rack).</p>
-<p><code>samoffset</code> depends on the sample rack in use, so it is not purely a cycle property — check it when the rack changes.</p>
+<p><code>samoffset</code> is the most experiment-dependent of the six: it tracks the sample rack / stage in use, which in practice <strong>changes from experiment to experiment</strong>, not just from cycle to cycle. Treat the cycle&#x27;s AgBe value as a starting point and override it per experiment with <code><a href="commands.html#cmd-set-config">/set config &lt;id&gt; sampleoffset &lt;mm&gt;</a></code>. That override is preserved across a later <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> (the resolver treats it as a manual edit), so you set it once — only <code><a href="commands.html#cmd-instrument">/instrument apply --force</a></code> would reset it back to the cycle value.</p>
 <p>No AgBe calibration exists before cycle 2026A. Older data reduces without these values rather than with invented ones (protocol <a href="protocol.html#rule-CAL-05" class="rule-ref">CAL-05</a>).</p></div>
 <h2 id="kb-stitching">stitching<a class="anchor" href="#kb-stitching">#</a></h2>
 <p class="summary">Combining I(Q) from several configurations into one profile.</p>
@@ -252,7 +257,7 @@ outputwavelengthdependentprofile  True</code></pre>
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-01 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-04 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

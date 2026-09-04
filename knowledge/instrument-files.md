@@ -2,7 +2,7 @@
 topic: instrument-files
 summary: How mask, flood, dark current, flux and the AgBe offsets are chosen for a run.
 load: on-demand
-updated: 2026-08-17
+updated: 2026-09-01
 ---
 
 # Instrument calibration files
@@ -17,6 +17,32 @@ configuration: `maskfilename`, `sensitivityfilename`, `darkfilename`,
 stale within one cycle — that is exactly how the previous knowledge file ended up
 naming 2025B files three cycles late. Filenames below are worked examples,
 labelled with their cycle.
+
+## When they are resolved — and when they are not
+
+Resolution runs automatically at **`/matchruns`** (after presets are applied, so
+the machine-physics files win over any preset values) and in **autopilot**
+(step 4c, same resolver), and on demand at **`/instrument apply`**. It is gated by
+`auto_instrument_files` (on by default; `/instrument off` disables it) and can be
+locked to one cycle with `/instrument pin <cycle>`.
+
+It does **not** run at **`/export script`** — that command emits whatever is
+already in each config, so if the cycle's calibration has changed, run
+`/matchruns` (or `/instrument apply`) *before* exporting or the script carries the
+old files. `/instrument show` displays what is currently resolved.
+
+**Precedence with presets.** `/apply preset <name|file.json>` **without** `--force`
+never overwrites a value the config already has, so after `/matchruns` it leaves
+the resolved calibration intact and only fills gaps. `/apply preset --force`
+overwrites everything the preset carries — including these six params if a preset
+(wrongly) contains them — and does **not** re-resolve afterwards; recover with
+`/instrument apply --force`. Presets should not carry these six params at all.
+
+**Re-resolving keeps your overrides.** A repeat `/matchruns` (or `/instrument
+apply` without `--force`) updates the resolver-owned values to the newest files
+but preserves an explicit `/set config` edit — the resolver treats a value it did
+not write as a manual override and leaves it. Only `/instrument apply --force`
+overrides a `/set config` edit.
 
 ## Where the files live
 
@@ -217,8 +243,13 @@ Worked examples: 2026B `scalecomp = [1.004251, 1.057915, 1]`, `detoffset = 66.76
 Historical, from `202502_agbe/34965/banjo`: `scalecomp = [1.002, 1.0728155533894388, 1]`,
 `detoffset = 84.38081`, `samoffset = 300` (banjo rack, ti-rack).
 
-`samoffset` depends on the sample rack in use, so it is not purely a cycle
-property — check it when the rack changes.
+`samoffset` is the most experiment-dependent of the six: it tracks the sample
+rack / stage in use, which in practice **changes from experiment to experiment**,
+not just from cycle to cycle. Treat the cycle's AgBe value as a starting point and
+override it per experiment with `/set config <id> sampleoffset <mm>`. That
+override is preserved across a later `/matchruns` (the resolver treats it as a
+manual edit), so you set it once — only `/instrument apply --force` would reset it
+back to the cycle value.
 
 No AgBe calibration exists before cycle 2026A. Older data reduces without these
 values rather than with invented ones (protocol CAL-05).

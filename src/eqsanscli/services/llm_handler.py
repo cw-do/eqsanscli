@@ -279,6 +279,14 @@ These are CYCLE-specific and live in /SNS/EQSANS/shared/NeXusFiles/EQSANS/<cycle
 automatically at /matchruns and in autopilot, by run number: the newest cycle whose calibration started at or
 before the run. Sensitivity is chosen per detector distance (1.3 m → 1o3m, 2.5 m → 2o5m, 4 m and anything longer
 → 4m). The user does NOT need to set these by hand, and /set config with a hand-typed path still wins.
+  Resolution runs at /matchruns and autopilot but NOT at /export script — /export emits whatever is already in the
+  config, so if the cycle's calibration changed, run /matchruns or /instrument apply BEFORE exporting.
+  /apply preset WITHOUT --force never overwrites these (they are already set after /matchruns); /apply preset --force
+  CAN clobber them if the preset carries calibration paths and does not re-resolve — recover with /instrument apply --force.
+  sampleoffset (sample offset) tracks the sample rack/stage and in practice changes experiment-to-experiment, not just
+  per cycle. Override it per experiment with /set config <id> sampleoffset <mm>; that edit survives a later /matchruns
+  (only /instrument apply --force resets it to the cycle value).
+    "set the sample offset to 290 for 4m10a" / "this experiment's samoffset is 290" → /set config 4m10a sampleoffset 290
 /instrument show                - What each config resolves to now, and what apply would change
 /instrument list [run]          - Cycle inventory (dark/floods/flux/AgBe per cycle) + what a run would pick
 /instrument apply [--force]     - Resolve now; --force also replaces values the user set with /set config

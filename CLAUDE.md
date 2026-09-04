@@ -97,6 +97,8 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.2 | 2026-09-01 | Three fixes surfaced during real use. **`/autopilot --from 2`** was wrongly rejected with "requires a populated working table" — but step 2 *is* match-runs, which builds the table; `--from 2` now needs only a loaded catalog (`--from 3+` still need the table). **Step 4b** printed machine-physics files (dark/flood/flux/offset) under "user-set parameters per config" because its snapshot kept everything differing from the preset — it now also excludes resolver-owned values (tracked in `instrument_provenance`), so only genuine `/set config` edits show; step 4c still resolves the calibration. **Knowledge** updated on when instrument files resolve (`/matchruns`, autopilot 4c — *not* `/export script`), preset precedence (`--force` can clobber them), and that `sampleoffset` changes experiment-to-experiment (override with `/set config <id> sampleoffset`). |
+| 0.36.1 | 2026-09-01 | Fix: some users hit `ModuleNotFoundError: No module named 'rich'`. The launchers (`eqsanscli`, `eqsanscli-headless`) did `source .venv/bin/activate` then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`, **keeping the caller's PYTHONPATH** — on the analysis nodes that often points at another Python (a python3.9 conda / `~/.local`), so the venv's python3.11 imported rich/textual from there and failed when that env lacked a compatible copy. Launchers now run the venv's python by absolute path and don't inherit the user's Python search paths (`unset PYTHONHOME`, `PYTHONNOUSERSITE=1`, `PYTHONPATH=src` only). Verified by running the real launcher under a hostile `PYTHONPATH`/`PYTHONHOME`. |
 | 0.36.0 | 2026-09-01 | New `/display <image.png> [...]` opens existing image files (mask previews, saved plots) in a viewer window — distinct from `/plot`, which renders *data* files. Resolves paths against the cwd and output dir; opens a detached matplotlib window when `DISPLAY` is set (same pattern as an interactive `/plot`), otherwise reports the resolved path (headless/SSH). LLM routes "show me the mask png" / "open X.png" → `/display`. |
 | 0.35.0 | 2026-09-01 | `/load ipts` with no number infers the IPTS from the current folder — running eqsanscli from `/SNS/EQSANS/IPTS-39659/shared/` and typing `/load ipts` loads 39659 (regex matches with or without a trailing slash; falls back to usage when the cwd isn't under `/SNS/EQSANS/IPTS-NNNNN/`). LLM routes "load the current ipts" → `/load ipts`. |
 | 0.34.0 | 2026-08-31 | Fix: `--like` aligned hint-less config blocks by the table's order (distance-ascending, so `2.5m2.5a` came before `4m10a`), but a script's block index order is physical **low-Q → high-Q** (block 0 → `iq0`, the low-Q profile). It mis-assigned block 1 → 2.5m, block 2 → 4m, so the stitch (which expects `iq1` low-Q first) was backwards. `align()` now fills unhinted blocks from the remaining configs sorted low-Q first (largest λ·L = lowest Qmin), and warns if the final block order still isn't monotonic in Q. Explicit comment/mask hints still win. Fixes the case with no `--adapt` needed. |
@@ -211,6 +213,69 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-01: autopilot --from 2, step-4b snapshot, calibration knowledge (v0.36.2)
+
+Three things found while driving real reductions.
+
+**1 — `/autopilot --from 2` was rejected.** The `--from` validation demanded a
+populated working table for any `from_step >= 2`, but step 2 *is* match-runs — the
+step that builds the table — so `--from 2` refused before it could run. Fixed:
+`--from 2` needs only a loaded catalog (step 1 = load is what it skips); the
+populated-table requirement now applies to `--from 3+`, which skip matching. Help
+text corrected; it wrongly said `--from` always needs a table.
+
+**2 — Step 4b mislabelled machine-physics files as "user-set".** Step 4b
+re-applies the parameters you set before autopilot so they win over presets. Its
+snapshot kept every value differing from the preset — and a prior `/matchruns`
+leaves the resolved dark/flood/flux/offset files in the config, which also differ
+from the preset, so they were captured and printed under "user-set parameters per
+config". The snapshot now also excludes resolver-owned values (still equal to what
+the resolver recorded in `instrument_provenance`), so only genuine `/set config`
+edits appear there; step 4c still resolves the calibration. A user override of a
+resolved param (e.g. `sampleoffset` differing from the cycle value) is kept.
+Extracted as `_user_param_snapshot()` for testing.
+
+**3 — Calibration-procedure knowledge.** `knowledge/instrument-files.md` and the
+LLM routing now state when instrument files resolve (`/matchruns`, autopilot 4c —
+NOT `/export script`, which emits what's already in the config), preset precedence
+(`/apply preset` without `--force` preserves them; `--force` can clobber them →
+recover with `/instrument apply --force`), and that `sampleoffset` changes
+experiment-to-experiment, overridden with `/set config <id> sampleoffset <mm>`.
+
+`tests/test_autopilot_tostep.py` (+6: --from 2 builds the table / needs catalog,
+--from 3 still needs a table, and the snapshot excludes resolver-owned params but
+keeps overrides). `tests/test_knowledge.py` still green. 290 tests.
+
+**Files changed:** `services/autopilot.py`, `commands/autopilot.py`,
+`services/llm_handler.py`, `knowledge/instrument-files.md`,
+`tests/test_autopilot_tostep.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-01: launchers pin the bundled venv — fixes "No module named 'rich'" (v0.36.1)
+
+Some users hit `ModuleNotFoundError: No module named 'rich'` while others didn't.
+The venv (`.venv`, python3.11) is self-contained and world-readable and has rich,
+so it wasn't a permission or install problem. The launchers were the cause: they
+`source .venv/bin/activate` and then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`,
+**keeping the caller's PYTHONPATH**. On the SNS analysis nodes a user's PYTHONPATH
+(or PYTHONHOME, or `~/.local` user-site) frequently points at ANOTHER Python — a
+python3.9 conda env, drtsans/mantid — and PYTHONPATH entries are searched before a
+venv's own site-packages, so the python3.11 venv imported rich/textual from the
+wrong place and failed when that environment had no compatible copy. Reproduced
+directly: with `PYTHONPATH` set to a python3.9 site-packages, the venv python
+imported `rich` from `…/python3.9/site-packages/rich`.
+
+Fix: both `eqsanscli` and `eqsanscli-headless` now run the venv's python by
+absolute path (no reliance on `activate`) and do not inherit the user's Python
+search paths — `unset PYTHONHOME`, `export PYTHONNOUSERSITE=1`, and
+`PYTHONPATH="$SCRIPT_DIR/src"` (only our package). drtsans still resolves from the
+user's PATH as before (it is a separate subprocess). The `/SNS/EQSANS/shared/
+usertools/eqsanscli` entry point is a symlink to this launcher, so it inherits the
+fix. Verified by running the real launcher under a hostile PYTHONPATH+PYTHONHOME:
+boots and reports v0.36.0, rich loaded from the venv.
+
+**Files changed:** `eqsanscli`, `eqsanscli-headless`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-01: /display opens existing image files (v0.36.0)
 
 `/display <image.png> [...]` opens image files already on disk — mask previews,
@@ -276,75 +341,4 @@ when the table lists them high-Q first; no spurious stitch warning). 274 tests.
 
 **Files changed:** `services/script_templating.py`,
 `tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: empty beam matches camelCase names; /show preset stitch_overlaps (v0.33.0)
-
-**1 — empty beam not assigned (IPTS-38659).** `/matchruns` left every row without
-an empty beam even though the runs `T-emptyBeam_4m 10A` / `T-emptyBeam_2.5m 2.5A`
-were present. `classify_title` read them as plain **transmissions**: the
-`_EMPTY_BEAM_RE` only matched "empty beam" with a literal space or standalone
-"empty" as a whole word, so the camelCase joined form matched nothing. Two subtle
-points in the fix: (a) `empty`/`emp`/`emt` may join `beam` by any separator or
-none (`empty beam`, `emptybeam`, `empty_beam`, `emptyBeam`); (b) a trailing `\b`
-fails before `_` (underscore is a `\w` char), so the pattern uses letter-boundary
-lookarounds `(?<![a-z])…beam(?![a-z])` instead. Background cells
-(`emptycell`/`emptyticell`/`empty_ticell`) still classify as background — they
-have no word boundary after "empty" and are matched by BKG keywords first. Now
-`T-emptyBeam_4m 10A` → `empty_trans` and becomes the config's empty beam.
-
-**2 — `/show preset stitch_overlaps`** showed an empty table (it is not a config
-preset — it holds an `overlaps` list, not a `configuration` section). It now
-detects that shape (`load_preset_raw`) and prints the config pairs with their
-overlap Q-windows and notes, plus a how-to-edit hint pointing at the JSON file
-and the entry format. Smart stitch prefers a listed pair's overlap over the
-auto-computed one; unlisted pairs fall back to auto.
-
-`tests/test_matching.py` (+3: camelCase/joined/underscore → empty, background not
-swallowed, empty beam assigned end to end) and `tests/test_apply_preset_file.py`
-(+1: overlaps render + edit hint). 272 tests.
-
-**Files changed:** `services/matching_service.py`, `services/preset_service.py`,
-`commands/preset.py`, `tests/test_matching.py`, `tests/test_apply_preset_file.py`,
-CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
-
-The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a
-4-config template used for a 2-config experiment. `--adapt` (opt-in) now lets an
-LLM revise the script — but as a **hybrid**, decided after weighing fully-LLM
-against it:
-
-- **Fully-LLM** (model returns the whole revised script, trusted) throws away the
-  verbatim guarantee — it could silently change a calibration constant, the
-  absolute-scale arithmetic, a mask path. Rejected for real reduction.
-- **Hybrid (built):** code fills the matched configs' run arrays deterministically
-  (the model never touches a run number); the LLM does only the structural
-  surgery it is good at — comment out the surplus config blocks and rewire the
-  `stitch_profiles(...)` call. `validate_adapt()` then enforces a hard contract:
-  the model may **only** comment lines out or change the single stitch call —
-  every other altered/added active line is rejected (this provably protects all
-  kept parameters), plus no active reference to a removed config may remain and
-  every filled array must survive. The one thing not machine-checkable — whether
-  the new `overlap[…]` slice and `target_profile_index` are physically right —
-  gets a `# attn.` marker and the whole output is labelled *review-required*.
-
-`--adapt` engages only when the deterministic path can't handle it (mismatch);
-when configs already line up it is a no-op that defers to the exact fill. The LLM
-call (`llm_adapt_default`, via `settings.llm`) is injectable, so the safety layer
-is tested offline: a good stub passes and flags the stitch; a stub that edits a
-param or leaves stale runs is rejected; an unconfigured LLM fails gracefully.
-The deterministic `--like` output also gained a header block stating what was
-refilled vs kept verbatim (with a `# attn.` section).
-
-Feasibility was proven first by running the transform by hand (Claude as the LLM):
-a 4-block example → correct 2-config script, stitch rewired to
-`stitch_profiles([iq1, iq2], overlap[2:4], target_profile_index=0)`.
-
-`tests/test_script_templating.py` (25 checks). 268 tests. Deferred: reaching the
-tool's own smaller model (gemini-3-flash / gpt-5-mini) needs a real key and its
-reliability on the stitch rewrite is unverified — hence the review-required label.
-
-**Files changed:** `services/script_templating.py`, `commands/export.py`,
-`services/llm_handler.py`, `tests/test_script_templating.py`, SKILL.md, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
 

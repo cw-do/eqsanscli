@@ -41,6 +41,44 @@ def _write_wrapped(write: Callable, text: str, indent: str = "    ", wrap_width:
 _DEFAULT_STANDARD_PATTERNS = ["porsil", "porasil"]
 
 
+def _user_param_snapshot(state) -> dict[str, dict]:
+    """Parameters the user EXPLICITLY set before autopilot, per config — the ones
+    Step 4b must re-apply so they win over presets.
+
+    Excludes two things that are present in ``state.configurations`` but are NOT
+    user edits:
+      - values equal to the matching JSON preset (a prior /matchruns leaves those);
+      - machine-physics files/offsets the resolver wrote (tracked in
+        ``state.instrument_provenance``). These differ from the preset but belong
+        to the cycle, not the user — Step 4c re-resolves them. Without this filter
+        they were captured here and printed under "user-set parameters per config",
+        which is what made autopilot's log look like the user had set the dark /
+        flood / flux / offset files.
+    A value the user changed AWAY from the resolved one (prov[k] != v, e.g. a
+    per-experiment ``/set config <id> sampleoffset``) is a real edit and is kept.
+    """
+    from eqsanscli.models.config_id import normalize_config_id
+    from eqsanscli.services.config_manager import _load_matching_preset
+
+    snapshot: dict[str, dict] = {}
+    for cfg, params in state.configurations.items():
+        if cfg == ALL_CONFIGS_KEY:
+            # /set config all values are always user intent — no filtering.
+            snapshot[cfg] = dict(params)
+            continue
+        preset_for_cfg = _load_matching_preset(cfg)
+        prov = (state.instrument_provenance.get(cfg)
+                or state.instrument_provenance.get(normalize_config_id(cfg), {}))
+        user_only = {
+            k: v for k, v in params.items()
+            if not (k in preset_for_cfg and preset_for_cfg[k] == v)   # preset value
+            and not (k in prov and prov[k] == v)                       # resolver-owned
+        }
+        if user_only:
+            snapshot[normalize_config_id(cfg)] = user_only
+    return snapshot
+
+
 def _is_standard_sample(sample_name: str, standard_sample: str | None = None) -> bool:
     """Check if a sample name is the calibration standard.
 
@@ -360,29 +398,12 @@ def run_autopilot_sync(
 
     t0 = time.time()
 
-    # Snapshot anything the user set BEFORE autopilot started — these are
-    # explicit overrides (maskfilename, sensitivityfilename, custom params, etc.)
-    # that the user typed and must win over presets. Re-applied after Step 4.
-    #
-    # Filter out preset-derived values (a prior /matchruns auto-applies the
-    # matching JSON preset, which leaves preset-equal values in
-    # state.configurations). Only values that DIFFER from the preset are
-    # considered "user-set" for Step 4b's restore + summary.
+    # Snapshot the parameters the user set BEFORE autopilot started, so Step 4b
+    # can re-apply them over the presets. Preset-equal values and machine-physics
+    # files the resolver owns are excluded (Step 4c handles the latter) — see
+    # _user_param_snapshot. `normalize_config_id` is used again below.
     from eqsanscli.models.config_id import normalize_config_id
-    from eqsanscli.services.config_manager import _load_matching_preset
-    user_param_snapshot: dict[str, dict] = {}
-    for cfg, params in state.configurations.items():
-        if cfg == ALL_CONFIGS_KEY:
-            # /set config all values are always user intent — no preset filter
-            user_param_snapshot[cfg] = dict(params)
-            continue
-        preset_for_cfg = _load_matching_preset(cfg)
-        user_only = {
-            k: v for k, v in params.items()
-            if not (k in preset_for_cfg and preset_for_cfg[k] == v)
-        }
-        if user_only:
-            user_param_snapshot[normalize_config_id(cfg)] = user_only
+    user_param_snapshot: dict[str, dict] = _user_param_snapshot(state)
 
     # Validate --from
     if continue_mode and from_step > 1:
@@ -392,8 +413,11 @@ def run_autopilot_sync(
         if state.catalog is None or state.catalog.empty:
             write(f"[red]✗ --from {from_step} requires a loaded catalog. Run /load ipts <N> first.[/red]")
             return
-        if not state.current_table.rows:
-            write(f"[red]✗ --from {from_step} requires a populated working table. Run /matchruns first.[/red]")
+        # Step 2 IS match-runs — it builds the table — so --from 2 must NOT require
+        # a populated table. Only --from 3+ (which skip matching) need one.
+        if from_step >= 3 and not state.current_table.rows:
+            write(f"[red]✗ --from {from_step} skips matching and requires a populated "
+                  f"working table. Run /matchruns first, or use --from 2 to build it.[/red]")
             return
         if not ipts:
             ipts = state.ipts

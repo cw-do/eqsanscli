@@ -1,9 +1,21 @@
 #!/bin/bash
+# Launch eqsanscli with its bundled virtualenv, independent of the caller's
+# Python environment.
+#
+# Why the extra env handling: some users hit "ModuleNotFoundError: No module
+# named 'rich'". The old launcher did `source .venv/bin/activate` and then
+# `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`, keeping the user's own
+# PYTHONPATH. On the SNS analysis nodes that PYTHONPATH (or PYTHONHOME, or a
+# ~/.local user-site) often points at ANOTHER Python — a python3.9 conda env,
+# drtsans/mantid, etc. — so the venv's python3.11 imported rich/textual from
+# there instead of from the venv, and failed when that env had no compatible
+# copy. We now run the venv's python by absolute path and do not inherit the
+# user's Python search paths.
 SCRIPT_DIR="/SNS/EQSANS/shared/script/eqsanstools-cli"
 
-source "$SCRIPT_DIR/.venv/bin/activate"
-
-export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
+unset PYTHONHOME                       # a conda/module PYTHONHOME redirects stdlib
+export PYTHONNOUSERSITE=1              # ignore ~/.local (may hold an incompatible rich)
+export PYTHONPATH="$SCRIPT_DIR/src"    # only our package — NOT the user's PYTHONPATH
 export EQSANSCLI_ROOT="$SCRIPT_DIR"
 
-exec python -m eqsanscli "$@"
+exec "$SCRIPT_DIR/.venv/bin/python" -m eqsanscli "$@"
