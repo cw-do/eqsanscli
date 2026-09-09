@@ -474,6 +474,48 @@ def merge_new_runs(
             f"Presets will be applied for these."
         )
 
+    # Reconcile preserved rows against runs now reclassified to 'ignore'. --update
+    # keeps existing assignments verbatim, so a transmission/background/empty that
+    # the user has since marked ignore (e.g. an old transmission remeasured after a
+    # bad wavelength) would otherwise keep being used. Drop rows whose scattering
+    # run is now ignored, and re-match any ignored trans/bkg/empty from the fresh
+    # table (falling back to blank).
+    ignored_runs: set[str] = set()
+    if "run_class" in fresh_catalog.columns and "run_number" in fresh_catalog.columns:
+        for _, r in fresh_catalog.iterrows():
+            if str(r.get("run_class", "")) == "ignore":
+                ignored_runs.add(str(r["run_number"]))
+
+    if ignored_runs:
+        def _uses(value: str) -> bool:
+            return any(p.strip() in ignored_runs
+                       for p in str(value or "").replace("+", ",").split(","))
+
+        fresh_by_scatt = {r.scattering_run: r for r in fresh_table.rows}
+        run_fields = ("transmission_run", "background_scatt", "background_trans", "empty_beam")
+
+        removed = [row.index for row in existing_table.rows if _uses(row.scattering_run)]
+        for idx in sorted(removed, reverse=True):
+            existing_table.remove_row(idx)
+        if removed:
+            warnings.append(
+                f"Removed {len(removed)} row(s) whose scattering run was reclassified "
+                f"to ignore."
+            )
+
+        n_fixed = 0
+        for row in existing_table.rows:
+            fresh = fresh_by_scatt.get(row.scattering_run)
+            for f in run_fields:
+                if _uses(getattr(row, f, "")):
+                    row.set_field(f, getattr(fresh, f, "") if fresh else "")  # done → modified
+                    n_fixed += 1
+        if n_fixed:
+            warnings.append(
+                f"Re-matched {n_fixed} assignment(s) that pointed at now-ignored runs; "
+                f"affected rows were marked 'modified' for re-reduction."
+            )
+
     return existing_table, warnings, len(new_rows), sorted(new_config_ids)
 
 

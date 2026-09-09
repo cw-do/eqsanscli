@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.4 | 2026-09-01 | Fix: `/matchruns --update` kept using a run the user had reclassified to `ignore` (e.g. an old transmission remeasured after a bad wavelength). `--update` preserves existing rows' assignments verbatim, and never re-checked them against the fresh `ignore` set — so the stale transmission stayed assigned. It now reconciles preserved rows: rows whose scattering run is now `ignore` are removed, and any transmission/background/empty pointing at a now-ignored run is re-matched from the fresh table (rows marked `modified`), with a warning. Plain `/matchruns` (rebuild) already excluded `ignore`; only `--update` was affected. |
 | 0.36.3 | 2026-09-01 | Fix: `/autopilot --from 9` re-reduced every row even when 8/9 were `done`. Steps 1–5 were skipped but the scale block (6–8) had no `--from` guard, so step 8 re-applied `standardabsolutescale` via `/set config`, which marks every row in that config `modified` — so step 9's skip-if-`done` saw no `done` rows and reduced all. `--from ≥ 9` now skips 6–8 and only *reports* the existing scale (no re-apply), matching the flag's documented "reduce samples with existing scales". `done` rows are preserved; only non-`done` rows reduce (still `--force` to redo all). |
 | 0.36.2 | 2026-09-01 | Three fixes surfaced during real use. **`/autopilot --from 2`** was wrongly rejected with "requires a populated working table" — but step 2 *is* match-runs, which builds the table; `--from 2` now needs only a loaded catalog (`--from 3+` still need the table). **Step 4b** printed machine-physics files (dark/flood/flux/offset) under "user-set parameters per config" because its snapshot kept everything differing from the preset — it now also excludes resolver-owned values (tracked in `instrument_provenance`), so only genuine `/set config` edits show; step 4c still resolves the calibration. **Knowledge** updated on when instrument files resolve (`/matchruns`, autopilot 4c — *not* `/export script`), preset precedence (`--force` can clobber them), and that `sampleoffset` changes experiment-to-experiment (override with `/set config <id> sampleoffset`). |
 | 0.36.1 | 2026-09-01 | Fix: some users hit `ModuleNotFoundError: No module named 'rich'`. The launchers (`eqsanscli`, `eqsanscli-headless`) did `source .venv/bin/activate` then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`, **keeping the caller's PYTHONPATH** — on the analysis nodes that often points at another Python (a python3.9 conda / `~/.local`), so the venv's python3.11 imported rich/textual from there and failed when that env lacked a compatible copy. Launchers now run the venv's python by absolute path and don't inherit the user's Python search paths (`unset PYTHONHOME`, `PYTHONNOUSERSITE=1`, `PYTHONPATH=src` only). Verified by running the real launcher under a hostile `PYTHONPATH`/`PYTHONHOME`. |
@@ -214,6 +215,34 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-01: /matchruns --update respects runs reclassified to ignore (v0.36.4)
+
+Reported: a series of runs had wrong wavelength metadata, so they were
+reclassified to `ignore`; the transmission was remeasured. But `/matchruns` kept
+using the OLD, ignored transmission.
+
+Cause is the `--update` path (`merge_new_runs`). Plain `/matchruns` rebuilds from
+the catalog and `_classify_catalog` drops `ignore`, so it was always correct. But
+`--update` — the recommended flow after remeasuring, because it preserves
+already-reduced rows — copies existing rows' assignments verbatim and never
+re-checked them. So a transmission the user had since marked `ignore` stayed
+assigned on the preserved row. Reproduced: reduce a row (trans 200, `done`),
+reclass 200 → ignore with new trans 300 present, `--update` → row still on 200.
+
+Fix: after merging, `merge_new_runs` reconciles the preserved rows against the
+fresh `ignore` set — a row whose *scattering* run is now ignored is removed, and
+any `transmission`/`background`/`empty` pointing at a now-ignored run is
+re-matched from the fresh table (blank if none), via `set_field` so a `done` row
+becomes `modified` for re-reduction. Both actions warn. New rows (from the fresh
+table) already exclude ignored runs, so they are unaffected.
+
+`tests/test_matching.py` (+3): --update re-matches an ignored transmission and
+marks the row modified, removes a row whose scattering run is ignored, and leaves
+valid assignments untouched. 294 tests.
+
+**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-01: /autopilot --from 9 no longer re-reduces done rows (v0.36.3)
 
 Reported: `/autopilot --from 9` on IPTS-38151 re-reduced all 9 sample rows even
@@ -306,25 +335,6 @@ boots and reports v0.36.0, rich loaded from the venv.
 
 **Files changed:** `eqsanscli`, `eqsanscli-headless`, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /display opens existing image files (v0.36.0)
-
-`/display <image.png> [...]` opens image files already on disk — mask previews,
-plots `/plot` saved — in a viewer window. It's the counterpart to `/plot`, which
-only renders *data* files (Iq.dat) and can't show a PNG. Paths resolve against the
-cwd and the output directory (glob supported). With `DISPLAY` set it launches a
-detached matplotlib `imshow` window (the same fire-and-forget Popen pattern as an
-interactive `/plot`); headless it reports the resolved absolute path so the file
-can be copied/opened elsewhere. `services/plotting_service.py:display_image()`;
-LLM routing maps "show me the mask png" / "open X.png" → `/display`.
-
-`tests/test_display.py` (5 checks): usage, missing file, headless path report,
-output-dir resolution, and the DISPLAY path launches the viewer (injected). 284
-tests.
-
-**Files changed:** `commands/data.py`, `commands/registry.py`,
-`services/plotting_service.py`, `services/llm_handler.py`,
-`tests/test_display.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-01: /load ipts infers the IPTS from the current folder (v0.35.0)
 

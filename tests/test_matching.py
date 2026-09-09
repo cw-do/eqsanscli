@@ -29,7 +29,57 @@ from eqsanscli.services.matching_service import (
     add_run_class_column,
     classify_title,
     match_runs,
+    merge_new_runs,
 )
+
+
+# --- /matchruns --update respects runs reclassified to 'ignore' ------------
+# (an old transmission remeasured after a bad wavelength, marked ignore, was
+#  still used because --update preserves existing rows' assignments verbatim.)
+
+def _poly_catalog(with_new_trans=True):
+    recs = [
+        dict(run_number=100, title="S-poly 4m 10A", detector_distance=4.0, wavelength=10.0, frequency=60),
+        dict(run_number=200, title="T-poly 4m 10A", detector_distance=4.0, wavelength=10.0, frequency=60),
+    ]
+    if with_new_trans:
+        recs.append(dict(run_number=300, title="T-poly 4m 10A", detector_distance=4.0, wavelength=10.0, frequency=60))
+    return add_run_class_column(pd.DataFrame(recs))
+
+
+def test_update_rematches_ignored_transmission():
+    # initial match: old transmission 200 assigned, row reduced (done)
+    table, _ = match_runs(_poly_catalog(with_new_trans=False), ipts=1)
+    assert table.rows[0].transmission_run == "200"
+    table.rows[0].status = "done"
+
+    # fresh catalog: new trans 300 present, old 200 reclassified to ignore
+    fresh = _poly_catalog(with_new_trans=True)
+    fresh.loc[fresh["run_number"] == 200, "run_class"] = "ignore"
+
+    merged, warnings, _, _ = merge_new_runs(table, fresh, ipts=1)
+    assert merged.rows[0].transmission_run == "300"      # ignored 200 dropped
+    assert merged.rows[0].status == "modified"           # stale → needs re-reduction
+    assert any("now-ignored" in w for w in warnings)
+
+
+def test_update_removes_row_whose_scattering_run_is_ignored():
+    table, _ = match_runs(_poly_catalog(with_new_trans=False), ipts=1)
+    fresh = _poly_catalog(with_new_trans=False)
+    fresh.loc[fresh["run_number"] == 100, "run_class"] = "ignore"   # ignore the sample scatter
+    merged, warnings, _, _ = merge_new_runs(table, fresh, ipts=1)
+    assert not merged.rows                                          # the row is gone
+    assert any("scattering run was reclassified to ignore" in w for w in warnings)
+
+
+def test_update_leaves_valid_assignments_untouched():
+    table, _ = match_runs(_poly_catalog(with_new_trans=False), ipts=1)
+    table.rows[0].status = "done"
+    fresh = _poly_catalog(with_new_trans=False)   # nothing ignored
+    merged, warnings, _, _ = merge_new_runs(table, fresh, ipts=1)
+    assert merged.rows[0].transmission_run == "200"
+    assert merged.rows[0].status == "done"        # untouched
+    assert not any("now-ignored" in w for w in warnings)
 
 
 # --- empty-beam classification (IPTS-38659: "T-emptyBeam_4m 10A") ----------
