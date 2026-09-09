@@ -233,6 +233,61 @@ def test_snapshot_empty_when_only_matchruns_ran():
     assert "4m10a" not in _user_param_snapshot(st)
 
 
+# --- --from 9 must not re-apply scale (which would mark done rows modified) ----
+
+def test_from_9_skips_scale_block_and_keeps_done_rows(monkeypatch):
+    from eqsanscli.integrations.drtsans_runner import ReductionResult
+    import eqsanscli.services.reduction_service as rs
+    import eqsanscli.services.autopilot as ap
+
+    st = SessionState()
+    st.ipts = 38151
+    st.catalog = pd.DataFrame([dict(run_number=1, title="S-x 4m 2.5a",
+                                    detector_distance=4.0, wavelength=2.5, frequency=30)])
+    st.configurations["4m2.5a30hz"] = {"standardabsolutescale": 0.4145807}
+    from eqsanscli.models.working_table import WorkingTableRow
+    st.current_table.add_row(WorkingTableRow(
+        index=0, scattering_run="900", sample_name="porsil", transmission_run="901",
+        empty_beam="500", detector_distance=4.0, wavelength=2.5, frequency=30, status="done"))
+    for i in range(9):
+        st.current_table.add_row(WorkingTableRow(
+            index=0, scattering_run=str(1000 + i), sample_name=f"S{i}",
+            transmission_run=str(2000 + i), empty_beam="500",
+            detector_distance=4.0, wavelength=2.5, frequency=30,
+            status=("done" if i < 8 else "ready")))
+
+    reduced, dispatched = [], []
+
+    def fake_reduce(row, **kw):
+        reduced.append(row.sample_name)
+        row.status = "done"
+        return ReductionResult(success=True, json_path="", output_file="/x_Iq.dat",
+                               elapsed_seconds=0.1, stdout="", stderr="", return_code=0)
+
+    monkeypatch.setattr(rs, "reduce_row", fake_reduce)
+    monkeypatch.setattr(rs, "blocking_problems", lambda r: [])
+
+    def dispatch_sync(cmd):
+        dispatched.append(cmd)
+        # simulate the real /set config side effect that caused the bug
+        if cmd.startswith("/set config") and "standardabsolutescale" in cmd:
+            for r in st.current_table.rows:
+                if r.status == "done":
+                    r.status = "modified"
+        return CommandResult(success=True, message="", data=None)
+
+    ap.run_autopilot_sync(ipts=38151, state=st, dispatch_sync=dispatch_sync,
+                          write=lambda m: None, from_step=9, to_step=9, force=False)
+
+    # step 8 must NOT re-apply the scale (that marked rows modified)
+    assert not any("standardabsolutescale" in c for c in dispatched)
+    # only the one non-done sample row was reduced; the eight done ones were skipped
+    assert reduced == ["S8"]
+    # the eight originally-done rows were never touched
+    orig_done = {f"S{i}" for i in range(8)}
+    assert all(r.status == "done" for r in st.current_table.rows if r.sample_name in orig_done)
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))

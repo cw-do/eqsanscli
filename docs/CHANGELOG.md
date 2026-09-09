@@ -37,6 +37,36 @@ swallowed, empty beam assigned end to end) and `tests/test_apply_preset_file.py`
 `commands/preset.py`, `tests/test_matching.py`, `tests/test_apply_preset_file.py`,
 CLAUDE.md, `src/eqsanscli/__init__.py`.
 
+### 2026-08-31: --like aligns config blocks by Q order, not table order (v0.34.0)
+
+Testing `--like reduce_template.py` on IPTS-38659 (2 configs, hint-less template):
+it put block 1 → 2.5m2.5a and block 2 → 4m10a. Wrong — the script's stitch feeds
+block 0/`iq0` first and expects that to be the **low-Q** profile, and 4m 10A is
+lower Q than 2.5m 2.5A. So the stitched profiles were in the wrong order.
+
+Cause: `align()` filled unhinted blocks from `list(table_data.keys())`, which is
+the working table's order — and `/matchruns` sorts configs by **distance
+ascending**, putting 2.5m (2.5) before 4m (4.0). Distance-ascending is not
+Q-ascending.
+
+Fix: block index order in these scripts is physical low-Q → high-Q, and that IS
+deterministic — Qmin ∝ 1/(λ·L), so a larger λ·L means lower Q. `ConfigData` now
+carries the config's distance and wavelength; `align()` sorts the remaining
+configs **low-Q first (largest λ·L)** and fills unhinted block indices in
+ascending order from that list. It also checks the final assignment is monotonic
+in Q and warns loudly if not (the case where a script genuinely isn't
+Q-ordered). Explicit comment/mask hints still take precedence.
+
+This is why `--adapt` "didn't help": the config counts matched, so the
+deterministic path produced output (just mis-ordered) and never fell back to the
+LLM. With the ordering fixed, the plain `--like` is correct — no `--adapt` needed.
+
+`tests/test_script_templating.py` (+2: hint-less blocks align low-Q first even
+when the table lists them high-Q first; no spurious stitch warning). 274 tests.
+
+**Files changed:** `services/script_templating.py`,
+`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
 
 The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a

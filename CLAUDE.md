@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.3 | 2026-09-01 | Fix: `/autopilot --from 9` re-reduced every row even when 8/9 were `done`. Steps 1–5 were skipped but the scale block (6–8) had no `--from` guard, so step 8 re-applied `standardabsolutescale` via `/set config`, which marks every row in that config `modified` — so step 9's skip-if-`done` saw no `done` rows and reduced all. `--from ≥ 9` now skips 6–8 and only *reports* the existing scale (no re-apply), matching the flag's documented "reduce samples with existing scales". `done` rows are preserved; only non-`done` rows reduce (still `--force` to redo all). |
 | 0.36.2 | 2026-09-01 | Three fixes surfaced during real use. **`/autopilot --from 2`** was wrongly rejected with "requires a populated working table" — but step 2 *is* match-runs, which builds the table; `--from 2` now needs only a loaded catalog (`--from 3+` still need the table). **Step 4b** printed machine-physics files (dark/flood/flux/offset) under "user-set parameters per config" because its snapshot kept everything differing from the preset — it now also excludes resolver-owned values (tracked in `instrument_provenance`), so only genuine `/set config` edits show; step 4c still resolves the calibration. **Knowledge** updated on when instrument files resolve (`/matchruns`, autopilot 4c — *not* `/export script`), preset precedence (`--force` can clobber them), and that `sampleoffset` changes experiment-to-experiment (override with `/set config <id> sampleoffset`). |
 | 0.36.1 | 2026-09-01 | Fix: some users hit `ModuleNotFoundError: No module named 'rich'`. The launchers (`eqsanscli`, `eqsanscli-headless`) did `source .venv/bin/activate` then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`, **keeping the caller's PYTHONPATH** — on the analysis nodes that often points at another Python (a python3.9 conda / `~/.local`), so the venv's python3.11 imported rich/textual from there and failed when that env lacked a compatible copy. Launchers now run the venv's python by absolute path and don't inherit the user's Python search paths (`unset PYTHONHOME`, `PYTHONNOUSERSITE=1`, `PYTHONPATH=src` only). Verified by running the real launcher under a hostile `PYTHONPATH`/`PYTHONHOME`. |
 | 0.36.0 | 2026-09-01 | New `/display <image.png> [...]` opens existing image files (mask previews, saved plots) in a viewer window — distinct from `/plot`, which renders *data* files. Resolves paths against the cwd and output dir; opens a detached matplotlib window when `DISPLAY` is set (same pattern as an interactive `/plot`), otherwise reports the resolved path (headless/SSH). LLM routes "show me the mask png" / "open X.png" → `/display`. |
@@ -213,6 +214,36 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-01: /autopilot --from 9 no longer re-reduces done rows (v0.36.3)
+
+Reported: `/autopilot --from 9` on IPTS-38151 re-reduced all 9 sample rows even
+though 8 were `done`. The log was the giveaway — steps 1–5 said "Skipped
+(--from 9)" but steps 6, 7, 8 ran, and step 8 logged "Applying absolute scale
+factors ✓ 4m2.5a30hz: 0.4145807".
+
+Cause: the standard/calibrate/apply-scale block (steps 6–8) was guarded only by
+`continue_mode`, not by `from_step`. So `--from 9` fell into the `elif has_porsil`
+branch and re-applied the scale with `/set config <cfg> standardabsolutescale …`.
+That call runs `_mark_config_rows_modified`, which flips every `done` row in the
+config to `modified`. Step 9 then skips only rows whose status is exactly `done`
+— and there were none left — so it reduced all 9. The done-skip logic was fine;
+it was being sabotaged one step earlier.
+
+Fix: the "skip 6–8, reuse existing scale" branch now triggers on
+`continue_mode or from_step >= 9`, and it only *reports* the current
+`standardabsolutescale` — it does not re-run `/set config`, so `done` rows stay
+`done`. This matches `--from 9`'s own documented meaning ("skip
+standard/calibrate/apply-scale; reduce samples with existing scales"). `--from
+6/7/8` still run the whole scale block (unchanged); `--force` still redoes all.
+
+`tests/test_autopilot_tostep.py` (+1): --from 9 with a scale-bearing config and
+8 done rows reduces only the one non-done row, and never re-applies the scale
+(the stub simulates the modified-marking side effect that the earlier repro
+missed). 291 tests.
+
+**Files changed:** `services/autopilot.py`, `tests/test_autopilot_tostep.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-01: autopilot --from 2, step-4b snapshot, calibration knowledge (v0.36.2)
 
 Three things found while driving real reductions.
@@ -311,34 +342,4 @@ outside-IPTS shows usage, an explicit number still works, invalid number rejecte
 
 **Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
 `tests/test_load_ipts.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-08-31: --like aligns config blocks by Q order, not table order (v0.34.0)
-
-Testing `--like reduce_template.py` on IPTS-38659 (2 configs, hint-less template):
-it put block 1 → 2.5m2.5a and block 2 → 4m10a. Wrong — the script's stitch feeds
-block 0/`iq0` first and expects that to be the **low-Q** profile, and 4m 10A is
-lower Q than 2.5m 2.5A. So the stitched profiles were in the wrong order.
-
-Cause: `align()` filled unhinted blocks from `list(table_data.keys())`, which is
-the working table's order — and `/matchruns` sorts configs by **distance
-ascending**, putting 2.5m (2.5) before 4m (4.0). Distance-ascending is not
-Q-ascending.
-
-Fix: block index order in these scripts is physical low-Q → high-Q, and that IS
-deterministic — Qmin ∝ 1/(λ·L), so a larger λ·L means lower Q. `ConfigData` now
-carries the config's distance and wavelength; `align()` sorts the remaining
-configs **low-Q first (largest λ·L)** and fills unhinted block indices in
-ascending order from that list. It also checks the final assignment is monotonic
-in Q and warns loudly if not (the case where a script genuinely isn't
-Q-ordered). Explicit comment/mask hints still take precedence.
-
-This is why `--adapt` "didn't help": the config counts matched, so the
-deterministic path produced output (just mis-ordered) and never fell back to the
-LLM. With the ordering fixed, the plain `--like` is correct — no `--adapt` needed.
-
-`tests/test_script_templating.py` (+2: hint-less blocks align low-Q first even
-when the table lists them high-Q first; no spurious stitch warning). 274 tests.
-
-**Files changed:** `services/script_templating.py`,
-`tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 

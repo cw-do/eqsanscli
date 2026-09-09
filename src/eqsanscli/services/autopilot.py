@@ -1116,12 +1116,18 @@ def run_autopilot_sync(
     reference_config = None
     max_workers = state.max_workers
 
-    # In continue mode, skip standard/calibrate — reuse saved scale factors
-    if continue_mode:
-        write(f"[bold]Step 6/13:[/bold] Reduce {std_label} — [dim]Skipped (using saved calibration)[/dim]")
+    # Skip standard/calibrate/apply-scale and reuse the existing scale factors when
+    # continuing OR when --from starts at/after step 9. Crucially this branch does
+    # NOT re-run /set config standardabsolutescale: re-applying it marks every row
+    # in the config "modified", which would defeat step 9's skip of already-"done"
+    # rows. It only reports what is already set. (--from 9 = "reduce samples with
+    # existing scales", per the flag's own help.)
+    if continue_mode or from_step >= 9:
+        reason = "using saved calibration" if continue_mode else f"--from {from_step}"
+        write(f"[bold]Step 6/13:[/bold] Reduce {std_label} — [dim]Skipped ({reason})[/dim]")
         write("[bold]Step 7/13:[/bold] Calibrate — [dim]Skipped[/dim]")
         write("[bold]Step 8/13:[/bold] Apply scale factors — [dim]Skipped[/dim]")
-        write("  Saved scale factors:")
+        write("  Existing scale factors (not re-applied):")
         for cfg in sorted(c for c in state.configurations.keys() if c != ALL_CONFIGS_KEY):
             scale = state.configurations[cfg].get("standardabsolutescale", "?")
             write(f"    {cfg}: standardabsolutescale = {scale}")

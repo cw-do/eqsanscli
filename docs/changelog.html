@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.36.2</div>
+          data reduction tool &middot; v0.36.3</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -46,6 +46,13 @@
 <p><strong>2 — <code><a href="commands.html#cmd-show-preset">/show preset stitch_overlaps</a></code></strong> showed an empty table (it is not a config preset — it holds an <code>overlaps</code> list, not a <code>configuration</code> section). It now detects that shape (<code>load_preset_raw</code>) and prints the config pairs with their overlap Q-windows and notes, plus a how-to-edit hint pointing at the JSON file and the entry format. Smart stitch prefers a listed pair&#x27;s overlap over the auto-computed one; unlisted pairs fall back to auto.</p>
 <p><code>tests/test_matching.py</code> (+3: camelCase/joined/underscore → empty, background not swallowed, empty beam assigned end to end) and <code>tests/test_apply_preset_file.py</code> (+1: overlaps render + edit hint). 272 tests.</p>
 <p><strong>Files changed:</strong> <code>services/matching_service.py</code>, <code>services/preset_service.py</code>, <code>commands/preset.py</code>, <code>tests/test_matching.py</code>, <code>tests/test_apply_preset_file.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
+<h3 id="2026-08-31---like-aligns-config-blocks-by-q-order-not-table-order-v0340">2026-08-31: --like aligns config blocks by Q order, not table order (v0.34.0)<a class="anchor" href="#2026-08-31---like-aligns-config-blocks-by-q-order-not-table-order-v0340">#</a></h3>
+<p>Testing <code>--like reduce_template.py</code> on IPTS-38659 (2 configs, hint-less template): it put block 1 → 2.5m2.5a and block 2 → 4m10a. Wrong — the script&#x27;s stitch feeds block 0/<code>iq0</code> first and expects that to be the <strong>low-Q</strong> profile, and 4m 10A is lower Q than 2.5m 2.5A. So the stitched profiles were in the wrong order.</p>
+<p>Cause: <code>align()</code> filled unhinted blocks from <code>list(table_data.keys())</code>, which is the working table&#x27;s order — and <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> sorts configs by <strong>distance ascending</strong>, putting 2.5m (2.5) before 4m (4.0). Distance-ascending is not Q-ascending.</p>
+<p>Fix: block index order in these scripts is physical low-Q → high-Q, and that IS deterministic — Qmin ∝ 1/(λ·L), so a larger λ·L means lower Q. <code>ConfigData</code> now carries the config&#x27;s distance and wavelength; <code>align()</code> sorts the remaining configs <strong>low-Q first (largest λ·L)</strong> and fills unhinted block indices in ascending order from that list. It also checks the final assignment is monotonic in Q and warns loudly if not (the case where a script genuinely isn&#x27;t Q-ordered). Explicit comment/mask hints still take precedence.</p>
+<p>This is why <code>--adapt</code> &quot;didn&#x27;t help&quot;: the config counts matched, so the deterministic path produced output (just mis-ordered) and never fell back to the LLM. With the ordering fixed, the plain <code>--like</code> is correct — no <code>--adapt</code> needed.</p>
+<p><code>tests/test_script_templating.py</code> (+2: hint-less blocks align low-Q first even when the table lists them high-Q first; no spurious stitch warning). 274 tests.</p>
+<p><strong>Files changed:</strong> <code>services/script_templating.py</code>, <code>tests/test_script_templating.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-08-31---adapt-llm-revises-the-script-for-a-config-mismatch-v0320">2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)<a class="anchor" href="#2026-08-31---adapt-llm-revises-the-script-for-a-config-mismatch-v0320">#</a></h3>
 <p>The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a 4-config template used for a 2-config experiment. <code>--adapt</code> (opt-in) now lets an LLM revise the script — but as a <strong>hybrid</strong>, decided after weighing fully-LLM against it:</p>
 <ul><li><strong>Fully-LLM</strong> (model returns the whole revised script, trusted) throws away the verbatim guarantee — it could silently change a calibration constant, the absolute-scale arithmetic, a mask path. Rejected for real reduction.</li><li><strong>Hybrid (built):</strong> code fills the matched configs&#x27; run arrays deterministically (the model never touches a run number); the LLM does only the structural surgery it is good at — comment out the surplus config blocks and rewire the <code>stitch_profiles(...)</code> call. <code>validate_adapt()</code> then enforces a hard contract: the model may <strong>only</strong> comment lines out or change the single stitch call — every other altered/added active line is rejected (this provably protects all kept parameters), plus no active reference to a removed config may remain and every filled array must survive. The one thing not machine-checkable — whether the new <code>overlap[…]</code> slice and <code>target_profile_index</code> are physically right — gets a <code># attn.</code> marker and the whole output is labelled <em>review-required</em>.</li></ul>
@@ -537,7 +544,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-04 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-09 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>
