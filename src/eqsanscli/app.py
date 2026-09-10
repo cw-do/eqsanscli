@@ -363,6 +363,19 @@ class EQSANSApp(App):
                 row.status = "reducing"
 
             write(f"  [dim]Submitting {len(rows_to_reduce)} jobs to {max_workers} workers...[/dim]")
+            # Show which sample each job is — otherwise a parallel run only prints
+            # sample names on completion, so mid-run you can't see what is going.
+            for i, (idx, row) in enumerate(rows_to_reduce, 1):
+                if row.background_scatt:
+                    bkg_title = state.run_title(row.background_scatt)
+                    bkg_info = f"  bkg={row.background_scatt}" + (f" [dim]({bkg_title})[/dim]" if bkg_title else "")
+                else:
+                    bkg_info = "  [yellow]no bkg[/yellow]"
+                write(
+                    f"  [dim][{i}/{total}][/dim] [yellow]⟳[/yellow] "
+                    f"[bold]{row.sample_name}[/bold] ({row.configuration}){bkg_info} "
+                    f"→ {row.output_stem}.json"
+                )
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {

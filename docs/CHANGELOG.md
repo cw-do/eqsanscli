@@ -67,6 +67,23 @@ when the table lists them high-Q first; no spurious stitch warning). 274 tests.
 **Files changed:** `services/script_templating.py`,
 `tests/test_script_templating.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
+### 2026-09-01: /load ipts infers the IPTS from the current folder (v0.35.0)
+
+`/load ipts` with no number now uses the IPTS of the current working directory —
+start eqsanscli in `/SNS/EQSANS/IPTS-39659/shared/`, type `/load ipts`, and it
+loads 39659. `_ipts_from_cwd()` matches `/IPTS-(\d+)` with or without a trailing
+slash (so the bare `/SNS/EQSANS/IPTS-39659` folder works too); outside an IPTS
+tree it falls back to the usage message. The success line notes it was inferred.
+Same idea autopilot already used for `/autopilot current`. LLM routing maps "load
+the current ipts" / "load the experiment I'm in" → `/load ipts`.
+
+`tests/test_load_ipts.py` (5 checks): cwd variants, no-arg infers + sets state,
+outside-IPTS shows usage, an explicit number still works, invalid number rejected.
+279 tests.
+
+**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
+`tests/test_load_ipts.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
 
 The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a

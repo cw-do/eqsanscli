@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.5 | 2026-09-01 | `/reduce` in parallel mode now shows which sample each job is at **submission** (a `⟳ <sample> (config) → …json` line per row), instead of only naming samples on completion — so a single parallel job no longer sits at "Submitting 1 jobs to 3 workers…" with nothing identifying it until it finishes. Mirrors the single-core start line and autopilot. TUI (`app.py`) multi-core `/reduce` branch. |
 | 0.36.4 | 2026-09-01 | Fix: `/matchruns --update` kept using a run the user had reclassified to `ignore` (e.g. an old transmission remeasured after a bad wavelength). `--update` preserves existing rows' assignments verbatim, and never re-checked them against the fresh `ignore` set — so the stale transmission stayed assigned. It now reconciles preserved rows: rows whose scattering run is now `ignore` are removed, and any transmission/background/empty pointing at a now-ignored run is re-matched from the fresh table (rows marked `modified`), with a warning. Plain `/matchruns` (rebuild) already excluded `ignore`; only `--update` was affected. |
 | 0.36.3 | 2026-09-01 | Fix: `/autopilot --from 9` re-reduced every row even when 8/9 were `done`. Steps 1–5 were skipped but the scale block (6–8) had no `--from` guard, so step 8 re-applied `standardabsolutescale` via `/set config`, which marks every row in that config `modified` — so step 9's skip-if-`done` saw no `done` rows and reduced all. `--from ≥ 9` now skips 6–8 and only *reports* the existing scale (no re-apply), matching the flag's documented "reduce samples with existing scales". `done` rows are preserved; only non-`done` rows reduce (still `--force` to redo all). |
 | 0.36.2 | 2026-09-01 | Three fixes surfaced during real use. **`/autopilot --from 2`** was wrongly rejected with "requires a populated working table" — but step 2 *is* match-runs, which builds the table; `--from 2` now needs only a loaded catalog (`--from 3+` still need the table). **Step 4b** printed machine-physics files (dark/flood/flux/offset) under "user-set parameters per config" because its snapshot kept everything differing from the preset — it now also excludes resolver-owned values (tracked in `instrument_provenance`), so only genuine `/set config` edits show; step 4c still resolves the calibration. **Knowledge** updated on when instrument files resolve (`/matchruns`, autopilot 4c — *not* `/export script`), preset precedence (`--force` can clobber them), and that `sampleoffset` changes experiment-to-experiment (override with `/set config <id> sampleoffset`). |
@@ -214,6 +215,29 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-01: /reduce names the sample at submission, not on completion (v0.36.5)
+
+Reported: running `/reduce` in parallel mode, "it doesn't show which sample I'm
+reducing" — the sample name "appeared after done". Autopilot showed it.
+
+Cause: the TUI `/reduce` worker has two branches. Single-core prints a
+`⟳ <sample> (config) → …json` line at the START of each row. The multi-core
+(parallel) branch — the default when `/settings multiprocessing > 1` — marked
+rows "reducing" silently, printed only "Submitting N jobs to M workers…", and
+named samples solely on the completion line inside the `as_completed` loop. So a
+lone parallel job sat at "Submitting 1 jobs to 3 workers…" with nothing
+identifying it until it finished a minute later.
+
+Fix: the multi-core branch now writes the same `⟳ <sample>` start line for every
+row right after submitting (before the executor runs), so each sample appears
+immediately; the existing ✓/✗/⊘ completion lines are unchanged. Matches
+single-core and autopilot.
+
+TUI-only display change (no test — the reduction worker is a Textual `@work`
+thread); the line mirrors the proven single-core one. 294 tests.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-01: /matchruns --update respects runs reclassified to ignore (v0.36.4)
 
@@ -335,21 +359,4 @@ boots and reports v0.36.0, rich loaded from the venv.
 
 **Files changed:** `eqsanscli`, `eqsanscli-headless`, CLAUDE.md,
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /load ipts infers the IPTS from the current folder (v0.35.0)
-
-`/load ipts` with no number now uses the IPTS of the current working directory —
-start eqsanscli in `/SNS/EQSANS/IPTS-39659/shared/`, type `/load ipts`, and it
-loads 39659. `_ipts_from_cwd()` matches `/IPTS-(\d+)` with or without a trailing
-slash (so the bare `/SNS/EQSANS/IPTS-39659` folder works too); outside an IPTS
-tree it falls back to the usage message. The success line notes it was inferred.
-Same idea autopilot already used for `/autopilot current`. LLM routing maps "load
-the current ipts" / "load the experiment I'm in" → `/load ipts`.
-
-`tests/test_load_ipts.py` (5 checks): cwd variants, no-arg infers + sets state,
-outside-IPTS shows usage, an explicit number still works, invalid number rejected.
-279 tests.
-
-**Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
-`tests/test_load_ipts.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
