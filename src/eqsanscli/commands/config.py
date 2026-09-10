@@ -7,10 +7,33 @@ from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.config_id import (
     base_config_id, find_matching_config, is_derived_config_id, normalize_config_id,
 )
-from eqsanscli.services.config_manager import get_config, list_config_params, set_config_param
+from eqsanscli.services.config_manager import (
+    ALL_CONFIGS_KEY, get_config, list_config_params, set_config_param,
+)
 
 if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
+
+
+def _resolve_config_key(raw: str, state: SessionState) -> str:
+    """Resolve a user-typed config id to an EXISTING config key.
+
+    Cloned configs keep their raw name (e.g. `4m2.5a30hz_TR`), but
+    `normalize_config_id` strips underscores and lowercases, giving
+    `4m2.5a30hztr` — a different key. Writing/reading the normalized form then
+    misses the clone entirely (the override lands on a phantom key and the row's
+    reduction never sees it). Match the user's input to a stored/table config key
+    (exact first, then normalized-equal, preserving the stored casing); fall back
+    to the normalized form only when nothing matches (a genuinely new config).
+    """
+    keys = list(state.configurations.keys()) + list(state.current_table.configurations)
+    if raw in keys:
+        return raw
+    norm = normalize_config_id(raw)
+    for k in keys:
+        if k != ALL_CONFIGS_KEY and normalize_config_id(k) == norm:
+            return k
+    return norm
 
 
 # Params whose values are file paths — resolve bare filenames to absolute paths
@@ -63,7 +86,7 @@ async def handle_show_config(args: list[str], state: SessionState) -> CommandRes
     if not args:
         return await handle_list_configs([], state)
 
-    config_id = normalize_config_id("_".join(args))
+    config_id = _resolve_config_key("_".join(args), state)
     params = list_config_params(config_id, state.configurations)
 
     # Values the instrument-file resolver put here get their own marker, with the
@@ -199,7 +222,7 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
         return CommandResult(success=True, message=msg)
 
     # --- /set config <id> <param> <val> ---
-    config_id = normalize_config_id(raw_id)
+    config_id = _resolve_config_key(raw_id, state)
 
     resolve_note: str | None = None
     if param.lower() in _FILE_PATH_PARAMS:

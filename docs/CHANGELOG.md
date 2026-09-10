@@ -84,6 +84,34 @@ outside-IPTS shows usage, an explicit number still works, invalid number rejecte
 **Files changed:** `commands/catalog.py`, `services/llm_handler.py`,
 `tests/test_load_ipts.py` (new), SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
+### 2026-09-01: /matchruns --update respects runs reclassified to ignore (v0.36.4)
+
+Reported: a series of runs had wrong wavelength metadata, so they were
+reclassified to `ignore`; the transmission was remeasured. But `/matchruns` kept
+using the OLD, ignored transmission.
+
+Cause is the `--update` path (`merge_new_runs`). Plain `/matchruns` rebuilds from
+the catalog and `_classify_catalog` drops `ignore`, so it was always correct. But
+`--update` — the recommended flow after remeasuring, because it preserves
+already-reduced rows — copies existing rows' assignments verbatim and never
+re-checked them. So a transmission the user had since marked `ignore` stayed
+assigned on the preserved row. Reproduced: reduce a row (trans 200, `done`),
+reclass 200 → ignore with new trans 300 present, `--update` → row still on 200.
+
+Fix: after merging, `merge_new_runs` reconciles the preserved rows against the
+fresh `ignore` set — a row whose *scattering* run is now ignored is removed, and
+any `transmission`/`background`/`empty` pointing at a now-ignored run is
+re-matched from the fresh table (blank if none), via `set_field` so a `done` row
+becomes `modified` for re-reduction. Both actions warn. New rows (from the fresh
+table) already exclude ignored runs, so they are unaffected.
+
+`tests/test_matching.py` (+3): --update re-matches an ignored transmission and
+marks the row modified, removes a row whose scattering run is ignored, and leaves
+valid assignments untouched. 294 tests.
+
+**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
 
 The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a

@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.36.6 | 2026-09-01 | Fix: `/set config <clone> <param> <val>` on a cloned config whose name has an underscore/uppercase (e.g. `4m2.5a30hz_TR`) silently wrote to a phantom key — `handle_set_config`/`handle_show_config` normalized the id (`4m2.5a30hz_TR` → `4m2.5a30hztr`), but clones are stored under their raw name, so the override landed on a non-existent config and the row's reduction never saw it (`usetimeslice` kept reading its old value; the confirmation even echoed the mangled name). Both now resolve the typed id to the existing config key (exact, then normalized-equal, preserving the stored casing) before read/write; the normalized spelling also maps back to the clone. New config ids still fall back to normalized. |
 | 0.36.5 | 2026-09-01 | `/reduce` in parallel mode now shows which sample each job is at **submission** (a `⟳ <sample> (config) → …json` line per row), instead of only naming samples on completion — so a single parallel job no longer sits at "Submitting 1 jobs to 3 workers…" with nothing identifying it until it finishes. Mirrors the single-core start line and autopilot. TUI (`app.py`) multi-core `/reduce` branch. |
 | 0.36.4 | 2026-09-01 | Fix: `/matchruns --update` kept using a run the user had reclassified to `ignore` (e.g. an old transmission remeasured after a bad wavelength). `--update` preserves existing rows' assignments verbatim, and never re-checked them against the fresh `ignore` set — so the stale transmission stayed assigned. It now reconciles preserved rows: rows whose scattering run is now `ignore` are removed, and any transmission/background/empty pointing at a now-ignored run is re-matched from the fresh table (rows marked `modified`), with a warning. Plain `/matchruns` (rebuild) already excluded `ignore`; only `--update` was affected. |
 | 0.36.3 | 2026-09-01 | Fix: `/autopilot --from 9` re-reduced every row even when 8/9 were `done`. Steps 1–5 were skipped but the scale block (6–8) had no `--from` guard, so step 8 re-applied `standardabsolutescale` via `/set config`, which marks every row in that config `modified` — so step 9's skip-if-`done` saw no `done` rows and reduced all. `--from ≥ 9` now skips 6–8 and only *reports* the existing scale (no re-apply), matching the flag's documented "reduce samples with existing scales". `done` rows are preserved; only non-`done` rows reduce (still `--force` to redo all). |
@@ -216,6 +217,37 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-01: /set config resolves cloned config names (v0.36.6)
+
+Reported: `/set config 4m2.5a30hz_TR usetimeslice True` reported success but the
+value kept reading `False`, and the confirmation echoed a different name
+(`4m2.5a30hztr`) than was typed.
+
+`4m2.5a30hz_TR` is a clone, stored in `state.configurations` under that exact
+name. But `handle_set_config` and `handle_show_config` ran the typed id through
+`normalize_config_id`, which strips underscores and lowercases —
+`4m2.5a30hz_TR` → `4m2.5a30hztr`. So `/set config` wrote the override to a
+*phantom* `4m2.5a30hztr` key that no config or row uses, while the real clone (and
+row 11, whose `configuration_override` is `4m2.5a30hz_TR`) kept the old value.
+`get_config` for the row looks up the exact key, so the reduction never saw the
+change. Reproduced: the set created a second key and the row still read `False`.
+
+Fix: a `_resolve_config_key()` maps the typed id to an existing config key —
+exact match first, then a normalized-equal match (preserving the stored
+casing/underscores of clones) — used by both `/set config` and `/show config`.
+`4m2.5a30hz_TR` now updates the clone directly, the row's reduction sees it, and
+the confirmation echoes the name typed. The normalized spelling `4m2.5a30hztr`
+also resolves back to the clone (no phantom). A genuinely new config id (nothing
+matches) still falls back to the normalized form. Any orphan phantom key a user
+already created is harmless (no row references it).
+
+`tests/test_config_clone.py` (+3): set on the clone name lands on the clone and
+the row sees it, the normalized form resolves to the clone, and /show reads it.
+297 tests.
+
+**Files changed:** `commands/config.py`, `tests/test_config_clone.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-01: /reduce names the sample at submission, not on completion (v0.36.5)
 
 Reported: running `/reduce` in parallel mode, "it doesn't show which sample I'm
@@ -238,34 +270,6 @@ TUI-only display change (no test — the reduction worker is a Textual `@work`
 thread); the line mirrors the proven single-core one. 294 tests.
 
 **Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /matchruns --update respects runs reclassified to ignore (v0.36.4)
-
-Reported: a series of runs had wrong wavelength metadata, so they were
-reclassified to `ignore`; the transmission was remeasured. But `/matchruns` kept
-using the OLD, ignored transmission.
-
-Cause is the `--update` path (`merge_new_runs`). Plain `/matchruns` rebuilds from
-the catalog and `_classify_catalog` drops `ignore`, so it was always correct. But
-`--update` — the recommended flow after remeasuring, because it preserves
-already-reduced rows — copies existing rows' assignments verbatim and never
-re-checked them. So a transmission the user had since marked `ignore` stayed
-assigned on the preserved row. Reproduced: reduce a row (trans 200, `done`),
-reclass 200 → ignore with new trans 300 present, `--update` → row still on 200.
-
-Fix: after merging, `merge_new_runs` reconciles the preserved rows against the
-fresh `ignore` set — a row whose *scattering* run is now ignored is removed, and
-any `transmission`/`background`/`empty` pointing at a now-ignored run is
-re-matched from the fresh table (blank if none), via `set_field` so a `done` row
-becomes `modified` for re-reduction. Both actions warn. New rows (from the fresh
-table) already exclude ignored runs, so they are unaffected.
-
-`tests/test_matching.py` (+3): --update re-matches an ignored transmission and
-marks the row modified, removes a row whose scattering run is ignored, and leaves
-valid assignments untouched. 294 tests.
-
-**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
-CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-01: /autopilot --from 9 no longer re-reduces done rows (v0.36.3)
 

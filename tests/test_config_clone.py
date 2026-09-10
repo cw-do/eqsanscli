@@ -238,6 +238,50 @@ def test_both_entry_points_register_the_same_commands():
     assert set(shared.commands) - set(headless.commands) == set()
 
 
+def _clone_state():
+    from eqsanscli.commands.config import handle_set_config  # noqa: F401
+    st = SessionState()
+    # a clone stored under its raw name (underscore + uppercase), as /config clone keeps it
+    st.configurations["4m2.5a30hz_TR"] = {"usetimeslice": False, "qbintype": "log"}
+    st.current_table.add_row(WorkingTableRow(
+        index=0, scattering_run="188043", sample_name="ab0-1_fs",
+        detector_distance=4.0, wavelength=2.5, frequency=30,
+        configuration_override="4m2.5a30hz_TR"))
+    return st
+
+
+def test_set_config_on_clone_name_lands_on_the_clone():
+    from eqsanscli.commands.config import handle_set_config
+    st = _clone_state()
+    res = _run(handle_set_config(["4m2.5a30hz_TR", "usetimeslice", "True"], st))
+    assert res.success
+    # no phantom normalized key; the clone itself is updated
+    assert "4m2.5a30hztr" not in st.configurations
+    assert st.configurations["4m2.5a30hz_TR"]["usetimeslice"] is True
+    # the row (and thus the reduction) sees it
+    row = st.current_table.rows[0]
+    assert get_config(row.configuration, st.configurations)["usetimeslice"] is True
+    assert "4m2.5a30hz_TR" in res.message   # echoes the name the user typed
+
+
+def test_set_config_normalized_form_also_resolves_to_clone():
+    from eqsanscli.commands.config import handle_set_config
+    st = _clone_state()
+    # the normalized spelling the tool used to echo must map back to the clone
+    _run(handle_set_config(["4m2.5a30hztr", "usetimeslice", "True"], st))
+    assert "4m2.5a30hztr" not in st.configurations
+    assert st.configurations["4m2.5a30hz_TR"]["usetimeslice"] is True
+
+
+def test_show_config_reads_the_clone_value():
+    from eqsanscli.commands.config import handle_set_config, handle_show_config
+    st = _clone_state()
+    _run(handle_set_config(["4m2.5a30hz_TR", "usetimeslice", "True"], st))
+    res = _run(handle_show_config(["4m2.5a30hz_TR"], st))
+    row = next(r for r in res.data["rows"] if r["Parameter"] == "usetimeslice")
+    assert row["Value"] == "True"
+
+
 if __name__ == "__main__":
     tests = [(n, o) for n, o in sorted(globals().items())
              if n.startswith("test_") and callable(o)]
