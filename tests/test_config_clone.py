@@ -282,6 +282,72 @@ def test_show_config_reads_the_clone_value():
     assert row["Value"] == "True"
 
 
+# --- config list annotation + /config delete -------------------------------
+
+def _phantom_state():
+    st = _clone_state()  # has clone 4m2.5a30hz_TR + a row using it
+    st.configurations["4m2.5a30hztr"] = {"usetimeslice": True}  # phantom leftover
+    return st
+
+
+def test_config_list_annotates_clone_and_flags_leftover():
+    from eqsanscli.commands.config import handle_config
+    res = _run(handle_config(["list"], _phantom_state()))
+    msg = res.message
+    assert "4m2.5a30hz_TR (4m2.5a30hztr)" in msg          # normalized id shown
+    assert "Leftover configs" in msg                       # phantom surfaced
+    assert "duplicate of 4m2.5a30hz_TR" in msg
+
+
+def test_config_delete_phantom_leaves_clone_and_row():
+    from eqsanscli.commands.config import handle_config
+    st = _phantom_state()
+    res = _run(handle_config(["delete", "4m2.5a30hztr"], st))
+    assert res.success and "Deleted" in res.message
+    assert "4m2.5a30hztr" not in st.configurations
+    assert "4m2.5a30hz_TR" in st.configurations
+    assert st.current_table.rows[0].configuration_override == "4m2.5a30hz_TR"
+
+
+def test_config_delete_in_use_refuses_without_force():
+    from eqsanscli.commands.config import handle_config
+    st = _clone_state()
+    res = _run(handle_config(["delete", "4m2.5a30hz_TR"], st))
+    assert not res.success and "assigned to" in res.message
+    assert "4m2.5a30hz_TR" in st.configurations
+
+
+def test_config_delete_force_reverts_rows():
+    from eqsanscli.commands.config import handle_config
+    st = _clone_state()
+    st.current_table.rows[0].status = "done"
+    res = _run(handle_config(["delete", "4m2.5a30hz_TR", "--force"], st))
+    assert res.success
+    assert "4m2.5a30hz_TR" not in st.configurations
+    row = st.current_table.rows[0]
+    assert row.configuration_override == ""       # reverted to physics config
+    assert row.status == "modified"               # stale → re-reduce
+
+
+def test_config_delete_physical_config_refused():
+    from eqsanscli.commands.config import handle_config
+    st = SessionState()
+    st.current_table.add_row(WorkingTableRow(
+        index=0, scattering_run="1", sample_name="x",
+        detector_distance=4.0, wavelength=10.0, frequency=60))
+    res = _run(handle_config(["delete", "4m10a"], st))
+    assert not res.success and "physical configuration" in res.message
+
+
+def test_config_delete_rejects_all_key():
+    from eqsanscli.commands.config import handle_config
+    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
+    st = SessionState()
+    st.configurations[ALL_CONFIGS_KEY] = {"numqbins": 33}
+    res = _run(handle_config(["delete", ALL_CONFIGS_KEY], st))
+    assert not res.success
+
+
 if __name__ == "__main__":
     tests = [(n, o) for n, o in sorted(globals().items())
              if n.startswith("test_") and callable(o)]

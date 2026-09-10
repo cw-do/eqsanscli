@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.37.0 | 2026-09-01 | `/config list` now shows a clone's normalized id in parentheses (`4m2.5a30hz_TR (4m2.5a30hztr)`) and flags **leftover** configs — a stored key that collapses to the same normalized id as another (e.g. a phantom from a `_`/case variant), which the dedup otherwise hid — with a `/config delete` hint. New `/config delete <id> [--force]`: deletes a clone/leftover config; refuses a config that is the *physical* configuration of rows; `--force` also reverts rows using a clone to their physical config (marking `done` rows `modified`). Rows are matched by exact override key, so deleting a phantom never touches the real clone. The reduction-table Config column is unchanged (per request). |
 | 0.36.6 | 2026-09-01 | Fix: `/set config <clone> <param> <val>` on a cloned config whose name has an underscore/uppercase (e.g. `4m2.5a30hz_TR`) silently wrote to a phantom key — `handle_set_config`/`handle_show_config` normalized the id (`4m2.5a30hz_TR` → `4m2.5a30hztr`), but clones are stored under their raw name, so the override landed on a non-existent config and the row's reduction never saw it (`usetimeslice` kept reading its old value; the confirmation even echoed the mangled name). Both now resolve the typed id to the existing config key (exact, then normalized-equal, preserving the stored casing) before read/write; the normalized spelling also maps back to the clone. New config ids still fall back to normalized. |
 | 0.36.5 | 2026-09-01 | `/reduce` in parallel mode now shows which sample each job is at **submission** (a `⟳ <sample> (config) → …json` line per row), instead of only naming samples on completion — so a single parallel job no longer sits at "Submitting 1 jobs to 3 workers…" with nothing identifying it until it finishes. Mirrors the single-core start line and autopilot. TUI (`app.py`) multi-core `/reduce` branch. |
 | 0.36.4 | 2026-09-01 | Fix: `/matchruns --update` kept using a run the user had reclassified to `ignore` (e.g. an old transmission remeasured after a bad wavelength). `--update` preserves existing rows' assignments verbatim, and never re-checked them against the fresh `ignore` set — so the stale transmission stayed assigned. It now reconciles preserved rows: rows whose scattering run is now `ignore` are removed, and any transmission/background/empty pointing at a now-ignored run is re-matched from the fresh table (rows marked `modified`), with a warning. Plain `/matchruns` (rebuild) already excluded `ignore`; only `--update` was affected. |
@@ -216,6 +217,36 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-01: /config list shows normalized ids + /config delete (v0.37.0)
+
+Follow-up to the config-name confusion. Two additions, chosen with the user.
+
+**`/config list` shows the normalized id and flags leftovers.** Config ids
+normalize (case and `_`/`.` are dropped), so `4m2.5a30hz_TR` and `4m2.5a30hztr`
+are one config. The list now annotates a clone with the id everything resolves to
+— `4m2.5a30hz_TR (4m2.5a30hztr)` — only where the stored name differs from its
+normalized form (plain ids like `4m10a` are unchanged). It also surfaces
+**leftover** configs: a stored key that collapses to the same normalized id as
+one already shown (e.g. a phantom `4m2.5a30hztr` left by the earlier bug) was
+being dedup'd out of both the in-use and stored-extra lists, so it was invisible
+and undeletable; it now appears under "Leftover configs — safe to delete" with a
+`/config delete` hint. The reduction-table Config column is left as-is (the user
+picked "name in the table, normalized only in the list").
+
+**`/config delete <id> [--force]`** (aliases remove/rm/del). Resolves the id to
+an existing key (clone-aware, like /set config). Refuses a config that is the
+*physical* configuration of rows — that is how the runs were measured. A clone or
+leftover with no rows is deleted; a clone with rows is refused unless `--force`,
+which clears those rows' `configuration_override` (reverting them to their
+physical config, `done` → `modified`) and deletes. Rows are matched by **exact**
+override key, not normalized, so deleting a phantom `4m2.5a30hztr` never counts —
+or touches — rows on the real clone `4m2.5a30hz_TR`. Refuses the `__all__` key.
+
+`tests/test_config_clone.py` (+6). 303 tests.
+
+**Files changed:** `commands/config.py`, `services/llm_handler.py`,
+`tests/test_config_clone.py`, SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-01: /set config resolves cloned config names (v0.36.6)
 
@@ -337,30 +368,4 @@ keeps overrides). `tests/test_knowledge.py` still green. 290 tests.
 **Files changed:** `services/autopilot.py`, `commands/autopilot.py`,
 `services/llm_handler.py`, `knowledge/instrument-files.md`,
 `tests/test_autopilot_tostep.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: launchers pin the bundled venv — fixes "No module named 'rich'" (v0.36.1)
-
-Some users hit `ModuleNotFoundError: No module named 'rich'` while others didn't.
-The venv (`.venv`, python3.11) is self-contained and world-readable and has rich,
-so it wasn't a permission or install problem. The launchers were the cause: they
-`source .venv/bin/activate` and then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`,
-**keeping the caller's PYTHONPATH**. On the SNS analysis nodes a user's PYTHONPATH
-(or PYTHONHOME, or `~/.local` user-site) frequently points at ANOTHER Python — a
-python3.9 conda env, drtsans/mantid — and PYTHONPATH entries are searched before a
-venv's own site-packages, so the python3.11 venv imported rich/textual from the
-wrong place and failed when that environment had no compatible copy. Reproduced
-directly: with `PYTHONPATH` set to a python3.9 site-packages, the venv python
-imported `rich` from `…/python3.9/site-packages/rich`.
-
-Fix: both `eqsanscli` and `eqsanscli-headless` now run the venv's python by
-absolute path (no reliance on `activate`) and do not inherit the user's Python
-search paths — `unset PYTHONHOME`, `export PYTHONNOUSERSITE=1`, and
-`PYTHONPATH="$SCRIPT_DIR/src"` (only our package). drtsans still resolves from the
-user's PATH as before (it is a separate subprocess). The `/SNS/EQSANS/shared/
-usertools/eqsanscli` entry point is a symlink to this launcher, so it inherits the
-fix. Verified by running the real launcher under a hostile PYTHONPATH+PYTHONHOME:
-boots and reports v0.36.0, rich loaded from the venv.
-
-**Files changed:** `eqsanscli`, `eqsanscli-headless`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
 

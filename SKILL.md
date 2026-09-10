@@ -405,7 +405,8 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 | Command | Purpose |
 |---------|---------|
-| `/config list` (alias `/list configs`) | List configs in the table + stored extras (clones) |
+| `/config list` (alias `/list configs`) | List configs in the table + stored extras (clones); shows the normalized id for clones and flags leftover duplicates |
+| `/config delete <id> [--force]` | Delete a clone/leftover config; refuses a physical config; `--force` reverts rows using a clone to their physical config |
 | `/config clone <src> <dst>` | Copy a config to a new name (editable independently). `<dst>` must contain `<src>`'s config ID |
 | `/config rows <id>` | List rows referencing `<id>` |
 | `/show config <id>` | Show all parameters for a config |

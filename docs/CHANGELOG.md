@@ -112,6 +112,32 @@ valid assignments untouched. 294 tests.
 **Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
 CLAUDE.md, `src/eqsanscli/__init__.py`.
 
+### 2026-09-01: launchers pin the bundled venv — fixes "No module named 'rich'" (v0.36.1)
+
+Some users hit `ModuleNotFoundError: No module named 'rich'` while others didn't.
+The venv (`.venv`, python3.11) is self-contained and world-readable and has rich,
+so it wasn't a permission or install problem. The launchers were the cause: they
+`source .venv/bin/activate` and then `export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"`,
+**keeping the caller's PYTHONPATH**. On the SNS analysis nodes a user's PYTHONPATH
+(or PYTHONHOME, or `~/.local` user-site) frequently points at ANOTHER Python — a
+python3.9 conda env, drtsans/mantid — and PYTHONPATH entries are searched before a
+venv's own site-packages, so the python3.11 venv imported rich/textual from the
+wrong place and failed when that environment had no compatible copy. Reproduced
+directly: with `PYTHONPATH` set to a python3.9 site-packages, the venv python
+imported `rich` from `…/python3.9/site-packages/rich`.
+
+Fix: both `eqsanscli` and `eqsanscli-headless` now run the venv's python by
+absolute path (no reliance on `activate`) and do not inherit the user's Python
+search paths — `unset PYTHONHOME`, `export PYTHONNOUSERSITE=1`, and
+`PYTHONPATH="$SCRIPT_DIR/src"` (only our package). drtsans still resolves from the
+user's PATH as before (it is a separate subprocess). The `/SNS/EQSANS/shared/
+usertools/eqsanscli` entry point is a symlink to this launcher, so it inherits the
+fix. Verified by running the real launcher under a hostile PYTHONPATH+PYTHONHOME:
+boots and reports v0.36.0, rich loaded from the venv.
+
+**Files changed:** `eqsanscli`, `eqsanscli-headless`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: --adapt — LLM revises the script for a config mismatch (v0.32.0)
 
 The fail-closed guard (v0.31.0) was safe but a dead end for the real case: a

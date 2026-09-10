@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.36.6</div>
+          data reduction tool &middot; v0.37.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -143,7 +143,8 @@
 <p class="summary">Copy a config to a new name (editable independently). <code>&lt;dst&gt;</code> must contain <code>&lt;src&gt;</code>&#x27;s config ID</p>
 <div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
 <tr><td><code>/config clone</code></td><td>Copy a config to a new name (editable independently). <code>&lt;dst&gt;</code> must contain <code>&lt;src&gt;</code>&#x27;s config ID</td></tr>
-<tr><td><code>/config list</code></td><td>List configs in the table + stored extras (clones)</td></tr>
+<tr><td><code>/config delete</code></td><td>Delete a clone/leftover config; refuses a physical config; <code>--force</code> reverts rows using a clone to their physical config</td></tr>
+<tr><td><code>/config list</code></td><td>List configs in the table + stored extras (clones); shows the normalized id for clones and flags leftover duplicates</td></tr>
 <tr><td><code>/config rows</code></td><td>List rows referencing <code>&lt;id&gt;</code></td></tr>
 </tbody></table></div>
 <pre class="example"><code>/config list
@@ -177,7 +178,7 @@
 </section>
 <section class="cmd" id="cmd-list-configs">
 <h3>/list configs<a class="anchor" href="#cmd-list-configs">#</a><span class="src">config.py</span></h3>
-<p class="summary">List configs in the table + stored extras (clones)</p>
+<p class="summary">List configs in the table + stored extras (clones); shows the normalized id for clones and flags leftover duplicates</p>
 </section>
 <section class="cmd" id="cmd-set-config">
 <h3>/set config<a class="anchor" href="#cmd-set-config">#</a><span class="src">config.py</span></h3>

@@ -235,6 +235,8 @@ CONFIGURATION:
     "clone the 8m config for the porsil row" → /config clone 8m10a 8m10a_porsil
     "clone 4m10a and call it mask2" → /config clone 4m10a 4m10a_mask2   (repair the name, don't pass "mask2")
 /config rows <id>               - List which working-table rows reference <id>
+/config delete <id> [--force]   - Delete a clone or leftover config. Refuses a config that is the physical configuration of rows; --force also reverts rows that use a clone to their physical config. "delete config 4m10a_v2" / "remove the 4m2.5a30hztr config" / "get rid of that leftover config" → /config delete <id>
+    (config ids normalize: 4m2.5a30hz_TR and 4m2.5a30hztr are the SAME config — /config list shows the normalized id in parentheses and flags leftovers)
 /show config <id>               - Show config params (id like 4m10a, 2.5m2.5a). Src column: * = you set it,
                                   blank = preset, d = drtsans default, mp:<cycle> = machine-physics calibration
 

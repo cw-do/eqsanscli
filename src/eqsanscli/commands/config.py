@@ -246,6 +246,15 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
     return CommandResult(success=ok, message=message)
 
 
+def _config_label(cfg: str) -> str:
+    """Display label: the stored name, plus its normalized id in parentheses when
+    they differ, so a clone like `4m2.5a30hz_TR` shows the `4m2.5a30hztr` id that
+    everything resolves to. Names already equal to their normalized form (e.g.
+    `4m10a`) are shown as-is."""
+    norm = normalize_config_id(cfg)
+    return f"{cfg} ({norm})" if norm != cfg else cfg
+
+
 async def handle_list_configs(args: list[str], state: SessionState) -> CommandResult:
     from eqsanscli.services.config_manager import ALL_CONFIGS_KEY
 
@@ -271,7 +280,7 @@ async def handle_list_configs(args: list[str], state: SessionState) -> CommandRe
                 f" [dim](clone of {base_config_id(cfg)})[/dim]"
                 if is_derived_config_id(cfg) and base_config_id(cfg) else ""
             )
-            lines.append(f"  {cfg:<24} {n_rows} rows{override_mark}{clone_mark}")
+            lines.append(f"  {_config_label(cfg):<30} {n_rows} rows{override_mark}{clone_mark}")
     else:
         lines.append("No configurations — working table is empty.")
 
@@ -288,8 +297,27 @@ async def handle_list_configs(args: list[str], state: SessionState) -> CommandRe
                 f" [dim](clone of {base_config_id(cfg)})[/dim]"
                 if is_derived_config_id(cfg) and base_config_id(cfg) else ""
             )
-            lines.append(f"  {cfg:<24} 0 rows [cyan]*[/cyan]{clone_mark}")
+            lines.append(f"  {_config_label(cfg):<30} 0 rows [cyan]*[/cyan]{clone_mark}")
         lines.append("  [dim]Assign with: /set <row> cfg <name>[/dim]")
+
+    # Leftover/duplicate configs: a stored key that isn't itself shown above but
+    # normalizes to the same id as one that is — e.g. a phantom `4m2.5a30hztr` from
+    # a punctuation/case variant of the clone `4m2.5a30hz_TR`. These are dedup'd out
+    # of both lists above, so surface them explicitly with a delete hint.
+    shown = set(in_use_configs) | set(stored_extras)
+    leftovers = sorted(
+        k for k in state.configurations
+        if k != ALL_CONFIGS_KEY and k not in shown
+    )
+    if leftovers:
+        lines.append("")
+        lines.append(f"[bold]Leftover configs — same id as another, safe to delete ({len(leftovers)}):[/bold]")
+        for k in leftovers:
+            norm = normalize_config_id(k)
+            canon = next((c for c in list(in_use_configs) + stored_extras
+                          if normalize_config_id(c) == norm), norm)
+            lines.append(f"  {k:<24} [yellow]⚠ duplicate of {canon}[/yellow] "
+                         f"[dim](/config delete {k})[/dim]")
 
     # Show pending "all" defaults (from /set config all <p> <v> before any matchruns)
     all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
@@ -312,6 +340,8 @@ _CONFIG_USAGE = (
     "                                       <dst> must contain <src>'s config ID (4m10a → 4m10a_v2)\n"
     "                                       (use /set <row> cfg <dst> to assign rows)\n"
     "  /config rows <id>                  — show rows assigned to <id>\n"
+    "  /config delete <id> [--force]      — delete a clone/leftover config; --force also\n"
+    "                                       reverts any rows using it to their physical config\n"
 )
 
 
@@ -344,7 +374,79 @@ async def handle_config(args: list[str], state: SessionState) -> CommandResult:
         return await handle_config_clone(rest, state)
     if sub == "rows":
         return await handle_config_rows(rest, state)
+    if sub in ("delete", "remove", "rm", "del"):
+        return await handle_config_delete(rest, state)
     return CommandResult(success=False, message=f"Unknown /config subcommand: {sub}\n\n{_CONFIG_USAGE}")
+
+
+async def handle_config_delete(args: list[str], state: SessionState) -> CommandResult:
+    """/config delete <id> [--force] — remove a stored config.
+
+    A config that is the *physical* configuration of rows cannot be deleted — it
+    is how those runs were measured. A clone (or an orphan/leftover) can: with no
+    rows using it, it is removed; with rows assigned via /set <row> cfg, --force
+    reverts them to their physical config (marking done rows modified) and deletes.
+    """
+    force = any(a.lower() == "--force" for a in args)
+    positional = [a for a in args if a.lower() != "--force"]
+    if not positional:
+        return CommandResult(
+            success=False,
+            message="Usage: /config delete <config_id> [--force]\n"
+            "  Deletes a clone or leftover config. See /config list for names.",
+        )
+
+    key = _resolve_config_key(positional[0], state)
+    if key == ALL_CONFIGS_KEY:
+        return CommandResult(success=False, message="Cannot delete the '__all__' defaults key.")
+
+    norm = normalize_config_id(key)
+    table = state.current_table
+
+    # Rows whose PHYSICAL config this is (not an override) — cannot delete.
+    physical = [r for r in table.rows
+                if not r.configuration_override
+                and normalize_config_id(r.physical_configuration) == norm]
+    if physical:
+        return CommandResult(
+            success=False,
+            message=f"'{key}' is the physical configuration of {len(physical)} row(s) — it is how "
+            f"those runs were measured, so it can't be deleted. Only clones and leftover configs can.",
+        )
+
+    # Rows that reference THIS exact key as an override (a clone assignment).
+    # Exact, not normalized: a phantom `4m2.5a30hztr` and the real clone
+    # `4m2.5a30hz_TR` share a normalized id, but a row references one key string —
+    # deleting the phantom must not count rows that use the clone.
+    using = [r for r in table.rows if r.configuration_override == key]
+
+    if key not in state.configurations and not using:
+        return CommandResult(
+            success=False,
+            message=f"No stored config '{positional[0]}' to delete. See /config list.",
+        )
+
+    if using and not force:
+        samples = ", ".join(sorted({r.sample_name for r in using}))
+        return CommandResult(
+            success=False,
+            message=f"'{key}' is assigned to {len(using)} row(s): {samples}.\n"
+            f"  Re-assign them first (/set <row> cfg none), or pass --force to delete and\n"
+            f"  revert those rows to their physical config.",
+        )
+
+    # Perform the delete.
+    reverted = 0
+    for r in using:
+        r.set_field("configuration_override", "")  # revert to physics; done → modified
+        reverted += 1
+    existed = state.configurations.pop(key, None) is not None
+
+    msg = f"Deleted config '{key}'." if existed else f"Cleared references to '{key}'."
+    if reverted:
+        msg += f"\n  {reverted} row(s) reverted to their physical config" + \
+               (" (done rows marked modified)." if any(r.status == "modified" for r in using) else ".")
+    return CommandResult(success=True, message=msg)
 
 
 async def handle_config_clone(args: list[str], state: SessionState) -> CommandResult:
