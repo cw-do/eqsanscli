@@ -35,6 +35,10 @@ class WorkingTableRow:
     # ID. Used after /config clone to point a row at a cloned config (e.g.
     # "4m10a_mask2"). Empty string means "use the derived ID" (default).
     configuration_override: str = ""
+    # Optional per-row output directory. When set, this row's reduction writes
+    # here instead of the session-wide output dir — used to keep a data-heavy
+    # (e.g. time-sliced) sample in its own folder. Empty = use session-wide.
+    output_override: str = ""
 
     # Fields that affect reduction output — changing any of these on a "done"
     # row means the previous output is stale and needs re-reduction.
@@ -98,6 +102,7 @@ class WorkingTableRow:
             "status": self.status,
             "output_file": self.output_file,
             "configuration_override": self.configuration_override,
+            "output_override": self.output_override,
         }
 
     @classmethod

@@ -229,7 +229,8 @@ Use `--force` to re-reduce all rows regardless of status.
 | `/set <row> cfg <name>` | Reassign a row to a different (typically cloned) config; `none` clears (aliases: `config`, `configuration`) |
 | `/set --sample <name> cfg <new>` | Bulk-reassign rows matching `<name>` |
 | `/show outputdir` | Show output directory |
-| `/set outputdir <path>` | Set output directory |
+| `/set outputdir <path>` | Set the session-wide output directory (propagates to all configs) |
+| `/set <rows> outputdir <path>` | Per-row output directory — these rows write here instead of the session-wide dir (e.g. a data-heavy/time-sliced sample in its own folder); `none` clears it. Downstream `/stitch`/`/plot`/`/list` still scan the session-wide dir |
 | `/set ipts <number>` | Set IPTS number |
 | `/set drtsans <version>` | Set drtsans version (`default`, `dev`, `qa`) |
 

@@ -224,6 +224,10 @@ SETTABLE_FIELDS = {
     "cfg": "configuration_override",
     "config": "configuration_override",
     "configuration": "configuration_override",
+    # Per-row output directory (data-heavy / time-sliced rows in their own folder).
+    "outputdir": "output_override",
+    "outdir": "output_override",
+    "output": "output_override",
 }
 
 
@@ -242,6 +246,7 @@ _FIELD_SHORT = {
     "thickness": "thickness",
     "sample_name": "sample",
     "configuration_override": "cfg",
+    "output_override": "outputdir",
 }
 
 
@@ -310,6 +315,11 @@ def _apply_field_set(
         for r in target_rows:
             r.set_field("configuration_override", resolved)
         return True, resolved, ""
+    if attr_names == ["output_override"]:
+        path = os.path.abspath(value_str.strip())
+        for r in target_rows:
+            r.set_field("output_override", path)
+        return True, path, ""
 
     # Run fields (and sample_name) — plain string value applied to every attr.
     for r in target_rows:
@@ -443,6 +453,9 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
         /set 4 cfg 4m10a_mask2          ← reassign row 4 to a (cloned) config
         /set 4 cfg none                 ← clear override → use physics-derived config
                                          ('cfg' is canonical; 'config'/'configuration' also work)
+        /set 5-10 outputdir /path/AAA   ← write these rows' reductions to /path/AAA
+                                         (data-heavy/time-sliced rows in their own folder);
+                                         'none' clears it → back to the session-wide dir
 
     Bulk selectors:
         /set --sample <name> <field> <value>   ← by sample name ('*' = all rows)
@@ -468,11 +481,17 @@ async def handle_set(args: list[str], state: SessionState) -> CommandResult:
                 state.configurations[cfg] = {}
             state.configurations[cfg]["outputdir"] = new_dir
         n = len(configs)
-        return CommandResult(
-            success=True,
-            message=f"Output directory set to: {new_dir}\n"
-            f"  Applied to {n} config(s): {', '.join(configs) if configs else 'none yet'}",
+        message = (
+            f"Output directory set to: {new_dir}\n"
+            f"  Applied to {n} config(s): {', '.join(configs) if configs else 'none yet'}"
         )
+        # Warn now — not mid-reduction — if it isn't writable. Not a hard block:
+        # the path may be created, or permissions granted, before you reduce.
+        from eqsanscli.services.reduction_service import output_dir_problem
+        problem = output_dir_problem(new_dir)
+        if problem:
+            message += f"\n  ⚠ Warning: {problem}. Reduction here will fail until fixed."
+        return CommandResult(success=True, message=message)
 
     if first == "ipts":
         if len(args) < 2:

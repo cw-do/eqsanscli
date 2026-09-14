@@ -326,7 +326,8 @@ before the run. Sensitivity is chosen per detector distance (1.3 m → 1o3m, 2.5
     "use mask4m.nxs for 4m configuration"         → /set config 4m maskfilename mask4m.nxs  (only if user names the specific config)
     "set sensitivity file to Sens_4m.nxs for 2m"  → /set config 2m sensitivityfilename Sens_4m.nxs
 /show outputdir                 - Show output directory
-/set outputdir <path>            - Set output directory
+/set outputdir <path>            - Set the session-wide output directory
+/set <rows> outputdir <path>     - Per-row output directory: these rows' reductions write here instead of the session-wide dir (for a data-heavy/time-sliced sample in its own folder). 'none' clears it. "put rows 5-10 output in /path/AAA" / "save sample X reduction to <dir>" → /set <rows> outputdir <path>
 /set ipts <number>              - Set IPTS number
 /set drtsans <version>          - Set drtsans version (default, dev, qa)
 /show ipts                      - Show IPTS number

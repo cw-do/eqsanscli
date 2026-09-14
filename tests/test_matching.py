@@ -26,6 +26,7 @@ from eqsanscli.commands.matching import handle_set
 from eqsanscli.models.session_state import SessionState
 from eqsanscli.models.working_table import WorkingTableRow
 from eqsanscli.services.matching_service import (
+    _extract_sample_name,
     add_run_class_column,
     classify_title,
     match_runs,
@@ -80,6 +81,34 @@ def test_update_leaves_valid_assignments_untouched():
     assert merged.rows[0].transmission_run == "200"
     assert merged.rows[0].status == "done"        # untouched
     assert not any("now-ignored" in w for w in warnings)
+
+
+# --- /matchruns --update back-fills a transmission measured after the match --
+# (you match while collecting — scattering done, no transmission yet — then
+#  measure the transmission later, so it gets a HIGHER run number.)
+
+def test_update_backfills_later_measured_transmission():
+    scatter_only = add_run_class_column(pd.DataFrame([
+        dict(run_number=100, title="S-poly 4m 10A", detector_distance=4.0, wavelength=10.0, frequency=60),
+    ]))
+    table, _ = match_runs(scatter_only, ipts=1)
+    assert not table.rows[0].transmission_run     # nothing to match yet
+    table.rows[0].status = "done"
+
+    fresh = _poly_catalog(with_new_trans=False)   # trans 200 now present (higher run#)
+    merged, warnings, _, _ = merge_new_runs(table, fresh, ipts=1)
+    assert merged.rows[0].transmission_run == "200"   # back-filled
+    assert merged.rows[0].status == "modified"        # re-reduction needed
+    assert any("newly-available" in w for w in warnings)
+
+
+def test_update_backfill_does_not_overwrite_existing_assignment():
+    table, _ = match_runs(_poly_catalog(with_new_trans=False), ipts=1)
+    table.rows[0].set_field("transmission_run", "999")   # user override
+    # a second transmission appears; back-fill must not touch the set field
+    merged, warnings, _, _ = merge_new_runs(table, _poly_catalog(with_new_trans=True), ipts=1)
+    assert merged.rows[0].transmission_run == "999"
+    assert not any("newly-available" in w for w in warnings)
 
 
 # --- empty-beam classification (IPTS-38659: "T-emptyBeam_4m 10A") ----------
@@ -248,6 +277,80 @@ def test_single_field_set_unchanged():
     res = _run(handle_set(["187234", "trans", "187233"], st))
     assert res.success
     assert st.current_table.rows[0].transmission_run == "187233"
+
+
+# --- per-row output directory (data-heavy / time-sliced rows) ---------------
+
+def test_set_per_row_outputdir_stores_abspath():
+    st = _state_one_row()
+    res = _run(handle_set(["187234", "outputdir", "sub/AAA"], st))
+    assert res.success, res.message
+    import os
+    assert st.current_table.rows[0].output_override == os.path.abspath("sub/AAA")
+
+
+def test_set_per_row_outputdir_clear_falls_back():
+    st = _state_one_row()
+    _run(handle_set(["187234", "outputdir", "/tmp/AAA"], st))
+    _run(handle_set(["187234", "outputdir", "none"], st))
+    assert st.current_table.rows[0].output_override == ""   # → session-wide
+
+
+def test_outputdir_cannot_combine_with_run_fields():
+    st = _state_one_row()
+    res = _run(handle_set(["187234", "trans,outputdir", "x"], st))
+    assert not res.success
+    assert "outputdir" in res.message
+
+
+def test_output_override_round_trips():
+    from eqsanscli.models.working_table import WorkingTableRow
+    row = WorkingTableRow(index=1, scattering_run="1", sample_name="s",
+                          output_override="/data/AAA")
+    back = WorkingTableRow.from_dict(row.to_dict())
+    assert back.output_override == "/data/AAA"
+
+
+def test_output_override_change_does_not_mark_done_row_modified():
+    # Changing WHERE output is written must not invalidate a done reduction
+    # (an hour-long time-slice run should not silently re-run).
+    st = _state_one_row()
+    st.current_table.rows[0].status = "done"
+    _run(handle_set(["187234", "outputdir", "/tmp/AAA"], st))
+    assert st.current_table.rows[0].status == "done"
+
+
+# --- frame-skipping "fs" suffix in transmission titles (IPTS-38151) ----------
+# Samples titled "S-porsil 4m 2.5a"; transmissions re-measured in frame-skipping
+# mode titled "T-porsil 4m 2.5afs". The "fs" glued to the wavelength leaked into
+# the sample name ("porsil_fs"), so no transmission matched its sample.
+
+def test_frame_skip_suffix_stripped_from_sample_name():
+    assert _extract_sample_name("T-porsil 4m 2.5afs") == "porsil"
+    assert _extract_sample_name("S-porsil 4m 2.5a") == "porsil"
+    assert _extract_sample_name("T-a0ss 4m 2.5a fs") == "a0ss"       # spaced variant
+    assert _extract_sample_name("T-c10ds 4m 2.5afs 30hz") == "c10ds"  # fs + frequency
+
+
+def test_frame_skip_transmission_matches_plain_sample():
+    recs = [
+        dict(run_number=188021, title="S-porsil 4m 2.5a", detector_distance=4.0, wavelength=2.5, frequency=30),
+        dict(run_number=188022, title="S-a0ss 4m 2.5a",   detector_distance=4.0, wavelength=2.5, frequency=30),
+        dict(run_number=188029, title="T-emptybeam 4m 2.5afs", detector_distance=4.0, wavelength=2.5, frequency=30),
+        dict(run_number=188031, title="T-porsil 4m 2.5afs", detector_distance=4.0, wavelength=2.5, frequency=30),
+        dict(run_number=188032, title="T-a0ss 4m 2.5afs",   detector_distance=4.0, wavelength=2.5, frequency=30),
+    ]
+    table, _ = match_runs(add_run_class_column(pd.DataFrame(recs)), ipts=38151)
+    by_sample = {r.sample_name: r for r in table.rows}
+    assert by_sample["porsil"].transmission_run == "188031"
+    assert by_sample["a0ss"].transmission_run == "188032"
+    assert by_sample["porsil"].empty_beam == "188029"
+
+
+def test_plain_60hz_title_still_strips():
+    # Regression: frequency-only titles unaffected by the fs addition.
+    assert _extract_sample_name("S-poly 4m 10a 60Hz") == "poly"
+    assert _extract_sample_name("S-abc 4m 10A 1.5C") == "abc"
 
 
 if __name__ == "__main__":

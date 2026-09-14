@@ -58,7 +58,7 @@ def test_cancelled_before_start_does_not_launch_drtsans(monkeypatch):
 def test_not_cancelled_still_runs(monkeypatch, tmp_path):
     calls = []
 
-    def _fake_run(json_path, cancel_event=None, drtsans_version="default"):
+    def _fake_run(json_path, cancel_event=None, drtsans_version="default", progress_cb=None):
         calls.append(json_path)
         return ReductionResult(
             success=True, json_path=json_path, output_file="",

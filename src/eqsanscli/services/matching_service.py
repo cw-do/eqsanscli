@@ -234,9 +234,18 @@ def _extract_sample_name(title: str) -> str:
         temp = m.group(1) + "C"
         s = s[:m.start()] + s[m.end():]
 
-    # Strip detector/wavelength/frequency config: "4m 10A", "2.5m 2.5a", "4m 10a 60Hz", etc.
+    # Strip detector/wavelength/frequency config: "4m 10A", "2.5m 2.5a",
+    # "4m 10a 60Hz", plus a frame-skipping mode suffix that may be glued to the
+    # wavelength ("4m 2.5afs") or spaced ("4m 2.5a fs"). Without consuming "fs"
+    # a transmission titled "T-porsil 4m 2.5afs" would parse to "porsil_fs" and
+    # never match the sample "S-porsil 4m 2.5a" → "porsil" (IPTS-38151).
     # Handles various orderings and is non-greedy (stops at next token boundary).
-    s = re.sub(r"\s*\d+\.?\d*\s*m\s+\d+\.?\d*\s*[aA]\s*(?:\d+Hz)?", " ", s)
+    s = re.sub(
+        r"\s*\d+\.?\d*\s*m\s+\d+\.?\d*\s*[aA]"   # distance + wavelength: "4m 2.5a"
+        r"(?:\s*fs)?"                            # frame-skipping, attached or spaced
+        r"(?:\s*\d+\s*[hH]z)?"                   # frequency: "60Hz" / "30hz"
+        r"(?:\s*fs)?",                           # fs may also trail the frequency
+        " ", s, flags=re.IGNORECASE)
 
     # Strip thickness: small decimals at end like "1.5C", "0.1C" (≤10.0, at least one digit after dot or 0.x).
     s = re.sub(r"\s+\d+\.\d+\s*[cC]\s*$", "", s)
@@ -480,6 +489,9 @@ def merge_new_runs(
     # bad wavelength) would otherwise keep being used. Drop rows whose scattering
     # run is now ignored, and re-match any ignored trans/bkg/empty from the fresh
     # table (falling back to blank).
+    fresh_by_scatt = {r.scattering_run: r for r in fresh_table.rows}
+    run_fields = ("transmission_run", "background_scatt", "background_trans", "empty_beam")
+
     ignored_runs: set[str] = set()
     if "run_class" in fresh_catalog.columns and "run_number" in fresh_catalog.columns:
         for _, r in fresh_catalog.iterrows():
@@ -490,9 +502,6 @@ def merge_new_runs(
         def _uses(value: str) -> bool:
             return any(p.strip() in ignored_runs
                        for p in str(value or "").replace("+", ",").split(","))
-
-        fresh_by_scatt = {r.scattering_run: r for r in fresh_table.rows}
-        run_fields = ("transmission_run", "background_scatt", "background_trans", "empty_beam")
 
         removed = [row.index for row in existing_table.rows if _uses(row.scattering_run)]
         for idx in sorted(removed, reverse=True):
@@ -515,6 +524,28 @@ def merge_new_runs(
                 f"Re-matched {n_fixed} assignment(s) that pointed at now-ignored runs; "
                 f"affected rows were marked 'modified' for re-reduction."
             )
+
+    # Back-fill assignments that only became available since the first match. Common
+    # case: you match while collecting (scattering done, transmission not yet), then
+    # measure the transmission later — it gets a HIGHER run number and appears in the
+    # fresh catalog. --update preserves existing rows verbatim, so an EMPTY field
+    # would otherwise never fill. Copy the fresh match's value into any field that is
+    # still blank (never overwriting a value already set — those may be user edits).
+    n_filled = 0
+    for row in existing_table.rows:
+        fresh = fresh_by_scatt.get(row.scattering_run)
+        if fresh is None:
+            continue
+        for f in run_fields:
+            if not getattr(row, f, "") and getattr(fresh, f, ""):
+                row.set_field(f, getattr(fresh, f))  # done → modified
+                n_filled += 1
+    if n_filled:
+        warnings.append(
+            f"Filled {n_filled} newly-available assignment(s) on existing rows "
+            f"(e.g. a transmission measured after the first match); affected rows "
+            f"were marked 'modified' for re-reduction."
+        )
 
     return existing_table, warnings, len(new_rows), sorted(new_config_ids)
 

@@ -105,6 +105,26 @@ class EQSANSApp(App):
         footer = self.query_one("#footer-bar", FooterBar)
         footer.set_job_running(running)
 
+    def _reject_if_busy(self, log, what: str) -> bool:
+        """Refuse to launch a second batch while one is running.
+
+        Reductions run in a background worker thread, so the input stays live and
+        a second /reduce or /autopilot could be submitted. Without this guard it
+        would start a *concurrent* batch — a second thread pool (up to 2× the
+        worker count of drtsans processes), a shared cancel event (one Cancel
+        stops both), interleaved output, and — if a row is in both — the same
+        run reduced twice at once, both writing the same output files. Refuse
+        instead; the user waits for it or cancels first.
+        """
+        if self._job_running:
+            log.write(Text.from_markup(
+                f"[yellow]⚠ A job is already running — not starting another {what}.[/yellow]\n"
+                f"  [dim]Wait for it to finish, or press [bold]^X[/bold] / click "
+                f"[bold]✕ Cancel[/bold] to stop it first.[/dim]"
+            ))
+            return True
+        return False
+
     def _register_commands(self) -> None:
         """Register command handlers with the router.
 
@@ -248,7 +268,10 @@ class EQSANSApp(App):
     def run_reduction_batch(self, table, indices: list[int], state) -> None:
         import time
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        from eqsanscli.services.reduction_service import reduce_row
+        from eqsanscli.services.config_manager import get_config
+        from eqsanscli.services.reduction_service import (
+            make_slice_progress, reduce_row, timeslice_estimate,
+        )
         from eqsanscli.commands.reduction import _format_time, _summarize_error
 
         log = self.query_one("#output", RichLog)
@@ -256,6 +279,16 @@ class EQSANSApp(App):
 
         def write(msg: str) -> None:
             self.call_from_thread(log.write, Text.from_markup(msg))
+
+        def slice_cb_for(row):
+            """A live slice-progress callback, only for a time-slicing row."""
+            est = timeslice_estimate(
+                get_config(row.configuration, state.configurations),
+                state.run_duration(row.scattering_run),
+            )
+            if est is None:
+                return None
+            return make_slice_progress(write, label=row.sample_name, total=est["slices"])
             self.call_from_thread(scroll.scroll_end)
 
         self.call_from_thread(self._set_job_running, True)
@@ -298,10 +331,11 @@ class EQSANSApp(App):
                     bkg_info = f"  bkg={row.background_scatt}" + (f" [dim]({bkg_title})[/dim]" if bkg_title else "")
                 else:
                     bkg_info = "  [yellow]no bkg[/yellow]"
+                dir_info = f"  [dim]@ {row.output_override}[/dim]" if row.output_override else ""
                 write(
                     f"  [dim][{i+1}/{total}][/dim] [yellow]⟳[/yellow] "
                     f"[bold]{row.sample_name}[/bold] ({row.configuration}){bkg_info} "
-                    f"→ {output_name}.json  "
+                    f"→ {output_name}.json{dir_info}  "
                     f"[dim]{remaining} left{eta_str}[/dim]"
                 )
 
@@ -310,6 +344,7 @@ class EQSANSApp(App):
                     user_configs=state.configurations, output_dir=output_dir,
                     cancel_event=self._cancel_event,
                     drtsans_version=state.drtsans_version,
+                    progress_cb=slice_cb_for(row),
                 )
 
                 elapsed_times.append(result.elapsed_seconds)
@@ -330,9 +365,11 @@ class EQSANSApp(App):
                         f"— {_format_time(result.elapsed_seconds)}  "
                         f"[dim]→ {output_name}_Iq.dat[/dim]"
                     )
+                    if result.note:
+                        write(f"      [dim yellow]⚠ {result.note}[/dim yellow]")
                 else:
                     n_fail += 1
-                    error_summary = _summarize_error(result.log_file, result.err_file)
+                    error_summary = _summarize_error(result.log_file, result.err_file, result.stderr)
                     write(
                         f"  [dim][{i+1}/{total}][/dim] [red]✗[/red] "
                         f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
@@ -349,33 +386,44 @@ class EQSANSApp(App):
                     rows_to_reduce.append((idx, row))
 
             completed_count = 0
+            # Ordinal of the next job to START (not submit) — a job only starts when
+            # a worker frees up, so the ⟳ lines appear paced by worker availability
+            # instead of all at once. Guarded because worker threads race on it.
+            started_count = 0
+            started_lock = threading.Lock()
 
             def _do_reduce(idx_row):
                 idx, row = idx_row
-                return idx, row, reduce_row(
-                    row=row, ipts=state.ipts,
-                    user_configs=state.configurations, output_dir=output_dir,
-                    cancel_event=self._cancel_event,
-                    drtsans_version=state.drtsans_version,
-                )
-
-            for idx, row in rows_to_reduce:
-                row.status = "reducing"
-
-            write(f"  [dim]Submitting {len(rows_to_reduce)} jobs to {max_workers} workers...[/dim]")
-            # Show which sample each job is — otherwise a parallel run only prints
-            # sample names on completion, so mid-run you can't see what is going.
-            for i, (idx, row) in enumerate(rows_to_reduce, 1):
+                # Printed from inside the worker: this runs only when a slot frees,
+                # so at most max_workers jobs show as ⟳ (in progress) at any time.
                 if row.background_scatt:
                     bkg_title = state.run_title(row.background_scatt)
                     bkg_info = f"  bkg={row.background_scatt}" + (f" [dim]({bkg_title})[/dim]" if bkg_title else "")
                 else:
                     bkg_info = "  [yellow]no bkg[/yellow]"
+                nonlocal started_count
+                with started_lock:
+                    started_count += 1
+                    n = started_count
+                dir_info = f"  [dim]@ {row.output_override}[/dim]" if row.output_override else ""
                 write(
-                    f"  [dim][{i}/{total}][/dim] [yellow]⟳[/yellow] "
+                    f"  [dim][{n}/{total}][/dim] [yellow]⟳[/yellow] "
                     f"[bold]{row.sample_name}[/bold] ({row.configuration}){bkg_info} "
-                    f"→ {row.output_stem}.json"
+                    f"→ {row.output_stem}.json{dir_info}"
                 )
+                return idx, row, reduce_row(
+                    row=row, ipts=state.ipts,
+                    user_configs=state.configurations, output_dir=output_dir,
+                    cancel_event=self._cancel_event,
+                    drtsans_version=state.drtsans_version,
+                    progress_cb=slice_cb_for(row),
+                )
+
+            for idx, row in rows_to_reduce:
+                row.status = "reducing"
+
+            write(f"  [dim]Submitting {len(rows_to_reduce)} jobs to {max_workers} workers "
+                  f"({max_workers} at a time)...[/dim]")
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
@@ -421,9 +469,11 @@ class EQSANSApp(App):
                             f"— {_format_time(result.elapsed_seconds)}  "
                             f"[dim]{remaining} left{eta_str}[/dim]"
                         )
+                        if result.note:
+                            write(f"      [dim yellow]⚠ {result.note}[/dim yellow]")
                     else:
                         n_fail += 1
-                        error_summary = _summarize_error(result.log_file, result.err_file)
+                        error_summary = _summarize_error(result.log_file, result.err_file, result.stderr)
                         write(
                             f"  [dim][{completed_count}/{total}][/dim] [red]✗[/red] "
                             f"[bold]{row.sample_name}[/bold] ({row.configuration}) "
@@ -485,6 +535,12 @@ class EQSANSApp(App):
             footer.model_name = data["model"]
 
         elif data_type == "start_reduction":
+            if self._reject_if_busy(log, "reduction"):
+                return
+            # Claim the busy flag now, on the main thread, before the worker
+            # thread starts — otherwise two fast submissions could both pass the
+            # guard before the first worker sets it.
+            self._set_job_running(True)
             self.run_reduction_batch(
                 self.state.current_table,
                 data["indices"],
@@ -492,6 +548,9 @@ class EQSANSApp(App):
             )
 
         elif data_type == "start_autopilot":
+            if self._reject_if_busy(log, "autopilot"):
+                return
+            self._set_job_running(True)
             self.run_autopilot_worker(
                 data["ipts"], data.get("samples"), data.get("excludes"),
                 data.get("thickness"), data.get("bkg_sample"), data.get("config_filter"),

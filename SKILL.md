@@ -181,6 +181,8 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 | All fields matched (trans, bkg, emp all N/N) | proceed |
 | Missing transmission | `/set --sample <name> trans <run>` or `/set <row> trans <run>` |
 | Displacement series (`_d0`, `_d2`, …) shares one transmission | `/matchruns` handles it: the `_dX` suffix is ignored, and a config with a single transmission assigns it to all its samples (warns that it matched by configuration) |
+| Transmission title has a frame-skipping suffix (`T-poly 4m 2.5a`**`fs`**) while the sample is `S-poly 4m 2.5a` | Handled automatically — the `fs` suffix is stripped from the sample key so it still matches. No action needed |
+| Transmission measured *after* the first match (higher run number, empty field now) | `/refresh catalog` then `/matchruns --update` back-fills it; or plain `/matchruns` (rebuild) always finds it (matches by sample name, order-independent) |
 | Missing background | `/assign bkg <sample_name>` — PREFERRED, handles config matching |
 | Missing empty beam | `/set <row> emp <run>`, or `/set --config <id> emp <run>` for a whole configuration |
 | Mislabeled run (title says T- but it is scattering) | `/reclass <runs> scatt`, then `/matchruns` again |
@@ -236,6 +238,19 @@ If any config shows "no matching preset found", tell the user — they may need 
 /set outputdir /SNS/EQSANS/IPTS-<number>/shared/output/
 ```
 
+**Per-row output directory** (optional): a data-heavy sample — e.g. a time-sliced
+run that writes hundreds of files — can go in its own folder:
+
+```
+/set 5-10 outputdir /SNS/EQSANS/IPTS-<number>/shared/output/batchA
+/set 5 outputdir none          # clear → back to the session-wide dir
+```
+
+Precedence is **row override → session-wide**. Caveat: downstream discovery
+(`/stitch`, `/list iq`, `/plot`, `/share`) scans the *session-wide* dir, so
+outputs written to a per-row override are not auto-found — point at them
+explicitly with `/list iq <dir>` or `/plot <dir>/<file>`.
+
 #### Step 4b: Calibrate with Porsil (if porsil is available)
 
 If the working table contains porsil samples, calibrate absolute scale
@@ -270,7 +285,31 @@ If you want to skip already-reduced porsil, use `/reduce --sample <name>` for sp
 non-porsil samples, or just accept the small overhead.
 
 **Check `data.results`** — each entry has `status: "done"` or `status: "error"`.
-If any failed, report the error messages to the user.
+If any failed, report the error messages to the user. A `done` entry may also
+carry a `note` (e.g. drtsans exited non-zero on a GUI/display teardown *after*
+writing all its files — the reduction is complete and is reported `done`, not
+`error`; relay the note but do not re-reduce).
+
+#### Time-slicing (kinetics) — mind the slice count
+
+If a config has `usetimeslice=True`, drtsans runs one **full, independent
+reduction per time slice** — one `_Iq.dat`/`_Iqxqy.dat`/`_processed.nxs` set each.
+`/reduce` prints an estimate up front, e.g.:
+
+```
+⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)
+```
+
+720 slices is hours of compute and thousands of files. **Sanity-check the interval
+against the kinetic timescale** before launching — set it with
+`/set config <id> timesliceinterval <seconds>` (relay the estimate to the user and
+confirm if it is very large, >200 slices). Consider a per-row output directory
+(Step 4) to keep each sample's slices in their own folder.
+
+**Progress:** a long time-slice run streams a throttled heartbeat
+(`⏳ <sample>: slice N/720 (P%)`). The drtsans `.out`/`.err` logs are written
+**live** (line-buffered), so they can be followed with `tail -f <outdir>/<name>.out`
+while the job runs.
 
 #### Step 6: Stitch (if multiple configs)
 
@@ -387,7 +426,7 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n) |
 | `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`) |
 | `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog. REBUILDS table |
-| `/matchruns --update` | Append new scattering runs only; preserves status=done rows. Use after `/refresh catalog` |
+| `/matchruns --update` | Append new scattering runs, preserving existing rows (incl. status=done and your edits). Also **back-fills** any still-empty trans/bkg/emp on existing rows from the refreshed catalog — so a transmission measured *after* the first match (higher run number) gets picked up — and drops/re-matches rows whose runs you later reclassified to `ignore`. Use after `/refresh catalog` |
 | `/show table` | Display full working table |
 | `/show table --rows <spec>` | Filter view by index/range (e.g. `50-100`, `1,3,5`) |
 | `/show table --name <text>` | Filter to rows whose sample name contains `<text>` (case-insensitive) |
@@ -423,7 +462,8 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 | `/apply preset auto` | Auto-match closest preset to each config |
 | `/apply preset <name> <config_id>` | Apply a preset (from preset_configs/) to a config |
 | `/apply preset <file.json> <config_id>` | Copy all params from your own reduction .json into a config |
-| `/set outputdir <path>` | Set output directory (propagates to all configs) |
+| `/set outputdir <path>` | Set the session-wide output directory (propagates to all configs) |
+| `/set <rows> outputdir <path>` | Per-row output directory: these rows write here instead of the session-wide dir (a data-heavy/time-sliced sample in its own folder); `none` clears it |
 | `/set drtsans <version>` | Set drtsans version: default, dev, qa |
 
 Config IDs: `4m10a`, `2.5m2.5a`, `8m12a`, `4m10a30hz` (distance + wavelength + frequency)
@@ -655,6 +695,8 @@ different output), use `--force`:
 | `/matchruns` shows missing trans/bkg/emp | Runs misclassified or don't follow naming convention | `/show catalog` to check Class column; `/reclass <runs> scatt` or `/reclass <runs> sample` to fix, then `/matchruns` |
 | `/matchruns` warns multiple empty beams or bkg per config | Multiple runs classified as same role | User should pick one; use `/set <row> emp <run>` or `/assign bkg <sample>` |
 | `/reduce` fails for some rows | Check `data.results` for `status: "error"` | Fix missing fields with `/set`, re-reduce failed rows |
+| `/reduce` refuses before starting: "Cannot reduce — output directory permission denied / not a directory" | The session-wide or a per-row outputdir is not writable | `/set outputdir <path>` (writable), or fix the per-row one with `/set <rows> outputdir <path>`. Checked up front per distinct dir — it will not crash mid-run |
+| A row reduced for a long time then shows a GUI/Qt/X11 error but all files exist | drtsans exited non-zero on display teardown *after* the science finished | Not a real failure — it is reported `status: "done"` with a `note`. Do **not** re-reduce |
 | Autopilot skips rows (status "done") | Parameters changed but status not reset | Should auto-reset; if not, use `--force` |
 | "No scattering runs found" | Empty catalog or wrong IPTS | Verify IPTS number, `/show catalog` |
 | Preset not found | No matching preset in preset_configs/ | `/show presets` to list available, apply manually |
@@ -695,10 +737,16 @@ Two more failure signatures, from the TUI side:
 {sample}_{config}_Iq.dat        # 1D reduced I(Q)
 {sample}_{config}_Iqxqy.dat     # 2D reduced I(Qx,Qy)
 {sample}_{config}.json          # drtsans reduction input
+{sample}_{config}.out/.err      # drtsans stdout/stderr (streamed live during the run)
 merged_{sample}_Iq.txt          # Stitched I(Q) across configs
 ```
 
-All written to the configured output directory (`/set outputdir` or `./output/` default).
+Time-slicing adds a slice index per file:
+`{sample}_{config}_{slice}_frame_{0,1}_Iq.dat`, one set per slice.
+
+All written to the configured output directory (`/set outputdir` or `./output/`
+default), unless a row has a per-row override (`/set <rows> outputdir <path>`),
+which wins for that row.
 
 ---
 
@@ -857,3 +905,10 @@ Agent: "Done. 47 out of 50 succeeded. Here are plots: <URL>"
 - Session auto-saves after every command and after background jobs (`/reduce`, `/autopilot`). Use `/continue` on restart to resume.
 - Reduction can take minutes per row. Monitor stderr for progress and relay to user.
 - Default thickness is 0.1 cm. Only set `--thickness` if the user specifies differently.
+- Only one reduction/autopilot job runs at a time. In the TUI a second `/reduce` or
+  `/autopilot` while one is running is refused ("A job is already running"); headless
+  reduces synchronously (each command finishes before the next is read), so wait for
+  the current one to return before sending another.
+- Time-slicing multiplies work and disk (one full reduction per slice). Always relay
+  the `⏱` slice estimate `/reduce` prints, and confirm with the user before a run of
+  many hundreds of slices. See "Time-slicing" under the workflow.

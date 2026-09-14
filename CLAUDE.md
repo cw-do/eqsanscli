@@ -97,6 +97,13 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.43.1 | 2026-09-10 | Fix: a frame-skipping mode suffix in a transmission title stopped it matching its sample. IPTS-38151 samples were titled `S-porsil 4m 2.5a` but the re-measured transmissions `T-porsil 4m 2.5a`**`fs`** — the `fs` glued to the wavelength leaked past the config-stripping regex into the extracted sample name (`porsil_fs`), so it never matched `porsil` and every sample came out with no transmission. `_extract_sample_name`'s config regex now also consumes a `fs` suffix (attached `2.5afs` or spaced `2.5a fs`) and a following frequency token, so `T-…fs` transmissions match their plain `S-…` samples. Classification was already correct; only name extraction was wrong. |
+| 0.43.0 | 2026-09-10 | **Per-row output directory: `/set <rows> outputdir <path>`.** For data-heavy (time-sliced) reductions the user wanted each sample in its own folder. New per-row `output_override` field on `WorkingTableRow` (mirrors `configuration_override`); precedence is **row override → session-wide** (the row override also wins over the config's own `outputdir`, which `build_reduction_json` otherwise uses). `reduce_row` computes an `effective_dir` used consistently for the JSON `outputDir`, the `mkdir`, and the produced-file glob. `none` clears the override (back to session-wide). `/reduce` and autopilot's up-front output-dir writability check now validates *each distinct* effective dir (a bad per-row path is caught before launch, not per row). The `⟳` reduce line shows `@ <dir>` when a row overrides. Changing `output_override` deliberately does **not** mark a `done` row `modified` — where output is written doesn't invalidate the science (an hour-long time-slice run won't silently re-run). Persisted in `to_dict`; NL routes "put rows 5-10 output in /path" → `/set 5-10 outputdir /path`. |
+| 0.42.0 | 2026-09-10 | **Time-slice reductions now show a slice estimate up front and a live progress heartbeat.** A user reducing a 1-hour run at a 5 s interval (720 slices) had no idea that was 720× the work and saw no progress for an hour. Two fixes: (1) `/reduce` (and autopilot) now print a per-config line — `⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)` — computed from the config's `timesliceinterval` and the run's catalog `duration`, with a caution above 200 slices; new `timeslice_estimate()` + `SessionState.run_duration()`. (2) `run_reduction` now **streams** drtsans stdout/stderr to the `.out`/`.err` files as it arrives (line-buffered, `PYTHONUNBUFFERED=1`, reader threads) instead of buffering until the end — so the log can be watched with `tail -f`, cancellation stays responsive (~0.2 s poll), and an optional `progress_cb` counts drtsans's per-slice `SaveNexus …_processed.nxs` lines to emit a throttled `⏳ <sample>: slice N/720 (P%)` heartbeat in the TUI (`make_slice_progress`, ≤1 line per 25 slices / 30 s). |
+| 0.41.0 | 2026-09-10 | **A second `/reduce` or `/autopilot` while one is running is now refused instead of launching a concurrent batch.** Reductions run in a background worker thread, so the TUI input stays live; before this, a second `/reduce` started a *second* thread pool — up to 2× the worker count of drtsans processes, a shared cancel event (one Cancel stopped both), interleaved output, and — if a row was in both batches — the same run reduced twice at once, both writing the same output files. The `_job_running` flag existed but was only read by the Cancel binding. New `_reject_if_busy()` guard at both worker launch sites in `_render_data` refuses with `⚠ A job is already running — not starting another <reduction/autopilot>. Wait … or press ^X / ✕ Cancel`. The flag is now claimed synchronously on the main thread at launch (not only inside the worker) so two fast submissions can't both pass. TUI-only (headless reduces synchronously, so it can't overlap). |
+| 0.40.0 | 2026-09-10 | **A GUI/display crash *after* a complete reduction is no longer reported as a failure.** A 62-min time-slice reduction (IPTS-38151 a20a0-1_fs) wrote all 242 I(Q) files, then drtsans exited nonzero on a teardown error — an interactive Qt plot attempted under `--simple-prompt` (`Cannot install event loop hook for "qt"`) with a dropped X11 connection (`ICE default IO error handler doing an exit(), errno = 32`). Since success was decided purely by exit code, the row was marked `error` and would be needlessly re-reduced. `reduce_row` now **rescues** such a run: if I(Q) output files exist (glob, so time-slice layouts count), the log tail carries a recognizable display-teardown signature, and there is no Python traceback, it sets `success=True`, marks the row `done`, and attaches a `note` (shown as a `⚠` line in `/reduce`/autopilot, included in headless JSON) explaining the non-fatal exit. A genuine crash (traceback) or a run that produced no output still fails. Also fixes `output_file` detection for time-slice runs (was pointing at a non-existent `<name>_Iq.dat`). |
+| 0.39.0 | 2026-09-10 | **A non-writable output directory no longer crashes eqsanscli.** Setting `/set outputdir` to a folder without write permission crashed the app mid-reduction — `Path(output_dir).mkdir()` raised `PermissionError` inside the reduction worker and took the whole TUI down. Now three layers: `/set outputdir` **warns immediately** if the path isn't writable; `/reduce` and autopilot **refuse up front** with one clear line (`Cannot reduce — output directory permission denied … Set a writable one with /set outputdir <path>`) instead of failing every row; and `reduce_row` **catches `OSError`** so any per-row write failure becomes a failed result (`row.status=error`, clear stderr) rather than an escaped exception. New `output_dir_problem()` helper checks the nearest existing ancestor (the dir need not exist yet). `_summarize_error` gained a stderr fallback so the message surfaces even with no `.out`/`.err` file. |
+| 0.38.0 | 2026-09-10 | Two things found driving a real reduction. **`/matchruns --update` now back-fills a transmission (or background/empty) measured *after* the first match** — you match while collecting (scattering done, no transmission yet), measure the transmission later so it lands at a higher run number, and `--update` (which preserves existing rows verbatim) would leave the field empty forever. It now fills any *empty* run field on an existing row from the fresh match, marking the row `modified`; a value already set (incl. user overrides) is never touched. Plain `/matchruns` was always order-independent (matches by sample name). **Parallel `/reduce` now prints each `⟳ <sample>` line when a worker actually starts that job**, not all upfront — a 10-run batch on 3 workers no longer shows 10 "submitted" lines at once (which read as 10 running); the `[n/total]` ordinal counts job *starts*, so at most `max_workers` show as in-progress. |
 | 0.37.0 | 2026-09-01 | `/config list` now shows a clone's normalized id in parentheses (`4m2.5a30hz_TR (4m2.5a30hztr)`) and flags **leftover** configs — a stored key that collapses to the same normalized id as another (e.g. a phantom from a `_`/case variant), which the dedup otherwise hid — with a `/config delete` hint. New `/config delete <id> [--force]`: deletes a clone/leftover config; refuses a config that is the *physical* configuration of rows; `--force` also reverts rows using a clone to their physical config (marking `done` rows `modified`). Rows are matched by exact override key, so deleting a phantom never touches the real clone. The reduction-table Config column is unchanged (per request). |
 | 0.36.6 | 2026-09-01 | Fix: `/set config <clone> <param> <val>` on a cloned config whose name has an underscore/uppercase (e.g. `4m2.5a30hz_TR`) silently wrote to a phantom key — `handle_set_config`/`handle_show_config` normalized the id (`4m2.5a30hz_TR` → `4m2.5a30hztr`), but clones are stored under their raw name, so the override landed on a non-existent config and the row's reduction never saw it (`usetimeslice` kept reading its old value; the confirmation even echoed the mangled name). Both now resolve the typed id to the existing config key (exact, then normalized-equal, preserving the stored casing) before read/write; the normalized spelling also maps back to the clone. New config ids still fall back to normalized. |
 | 0.36.5 | 2026-09-01 | `/reduce` in parallel mode now shows which sample each job is at **submission** (a `⟳ <sample> (config) → …json` line per row), instead of only naming samples on completion — so a single parallel job no longer sits at "Submitting 1 jobs to 3 workers…" with nothing identifying it until it finishes. Mirrors the single-core start line and autopilot. TUI (`app.py`) multi-core `/reduce` branch. |
@@ -218,154 +225,211 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
-### 2026-09-01: /config list shows normalized ids + /config delete (v0.37.0)
+### 2026-09-10: frame-skipping "fs" suffix broke transmission matching (v0.43.1)
 
-Follow-up to the config-name confusion. Two additions, chosen with the user.
+Reported on IPTS-38151: the first transmissions (188011–188019) were measured at
+λ=0 and ignored; re-measured ones (188029+) were titled with a frame-skipping
+suffix — `T-porsil 4m 2.5afs`, `T-a0ss 4m 2.5afs` — while the samples stayed
+`S-porsil 4m 2.5a`. After `/matchruns` every sample had no transmission.
 
-**`/config list` shows the normalized id and flags leftovers.** Config ids
-normalize (case and `_`/`.` are dropped), so `4m2.5a30hz_TR` and `4m2.5a30hztr`
-are one config. The list now annotates a clone with the id everything resolves to
-— `4m2.5a30hz_TR (4m2.5a30hztr)` — only where the stored name differs from its
-normalized form (plain ids like `4m10a` are unchanged). It also surfaces
-**leftover** configs: a stored key that collapses to the same normalized id as
-one already shown (e.g. a phantom `4m2.5a30hztr` left by the earlier bug) was
-being dedup'd out of both the in-use and stored-extra lists, so it was invisible
-and undeletable; it now appears under "Leftover configs — safe to delete" with a
-`/config delete` hint. The reduction-table Config column is left as-is (the user
-picked "name in the table, normalized only in the list").
+Cause: `_extract_sample_name` strips the config token so a title reduces to a
+bare sample key ("S-porsil 4m 2.5a" → "porsil"). Its regex matched distance +
+wavelength + an optional `\d+Hz`, but not a `fs` (frame-skipping) suffix glued to
+the wavelength. So "T-porsil 4m 2.5afs" stripped only "4m 2.5a", leaving "fs" →
+sample key "porsil_fs", which matched nothing (the transmission lookup and its
+temperature/displacement-stripped fallback both keyed on the mismatched name).
+Classification was fine — 188029/188030/188031 were correctly EmpT/BkgT/T — the
+failure was purely the name key.
 
-**`/config delete <id> [--force]`** (aliases remove/rm/del). Resolves the id to
-an existing key (clone-aware, like /set config). Refuses a config that is the
-*physical* configuration of rows — that is how the runs were measured. A clone or
-leftover with no rows is deleted; a clone with rows is refused unless `--force`,
-which clears those rows' `configuration_override` (reverting them to their
-physical config, `done` → `modified`) and deletes. Rows are matched by **exact**
-override key, not normalized, so deleting a phantom `4m2.5a30hztr` never counts —
-or touches — rows on the real clone `4m2.5a30hz_TR`. Refuses the `__all__` key.
+Fix: the config regex now also consumes an optional `fs` (attached `2.5afs` or
+spaced `2.5a fs`), an optional frequency, and a trailing `fs`, case-insensitive.
+`T-porsil 4m 2.5afs` → "porsil", matching `S-porsil 4m 2.5a`. Verified end to end
+on the IPTS-38151 titles: porsil/a0ss/… each get their `…fs` transmission, empty
+beam, and background. Frequency-only and temperature/thickness titles are
+unchanged.
 
-`tests/test_config_clone.py` (+6). 303 tests.
+`tests/test_matching.py` (+3: fs stripped from the name attached/spaced/with
+frequency; the fs transmission matches its plain sample end-to-end; 60Hz and
+thickness titles still strip). 332 tests.
 
-**Files changed:** `commands/config.py`, `services/llm_handler.py`,
-`tests/test_config_clone.py`, SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /set config resolves cloned config names (v0.36.6)
-
-Reported: `/set config 4m2.5a30hz_TR usetimeslice True` reported success but the
-value kept reading `False`, and the confirmation echoed a different name
-(`4m2.5a30hztr`) than was typed.
-
-`4m2.5a30hz_TR` is a clone, stored in `state.configurations` under that exact
-name. But `handle_set_config` and `handle_show_config` ran the typed id through
-`normalize_config_id`, which strips underscores and lowercases —
-`4m2.5a30hz_TR` → `4m2.5a30hztr`. So `/set config` wrote the override to a
-*phantom* `4m2.5a30hztr` key that no config or row uses, while the real clone (and
-row 11, whose `configuration_override` is `4m2.5a30hz_TR`) kept the old value.
-`get_config` for the row looks up the exact key, so the reduction never saw the
-change. Reproduced: the set created a second key and the row still read `False`.
-
-Fix: a `_resolve_config_key()` maps the typed id to an existing config key —
-exact match first, then a normalized-equal match (preserving the stored
-casing/underscores of clones) — used by both `/set config` and `/show config`.
-`4m2.5a30hz_TR` now updates the clone directly, the row's reduction sees it, and
-the confirmation echoes the name typed. The normalized spelling `4m2.5a30hztr`
-also resolves back to the clone (no phantom). A genuinely new config id (nothing
-matches) still falls back to the normalized form. Any orphan phantom key a user
-already created is harmless (no row references it).
-
-`tests/test_config_clone.py` (+3): set on the clone name lands on the clone and
-the row sees it, the normalized form resolves to the clone, and /show reads it.
-297 tests.
-
-**Files changed:** `commands/config.py`, `tests/test_config_clone.py`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /reduce names the sample at submission, not on completion (v0.36.5)
-
-Reported: running `/reduce` in parallel mode, "it doesn't show which sample I'm
-reducing" — the sample name "appeared after done". Autopilot showed it.
-
-Cause: the TUI `/reduce` worker has two branches. Single-core prints a
-`⟳ <sample> (config) → …json` line at the START of each row. The multi-core
-(parallel) branch — the default when `/settings multiprocessing > 1` — marked
-rows "reducing" silently, printed only "Submitting N jobs to M workers…", and
-named samples solely on the completion line inside the `as_completed` loop. So a
-lone parallel job sat at "Submitting 1 jobs to 3 workers…" with nothing
-identifying it until it finished a minute later.
-
-Fix: the multi-core branch now writes the same `⟳ <sample>` start line for every
-row right after submitting (before the executor runs), so each sample appears
-immediately; the existing ✓/✗/⊘ completion lines are unchanged. Matches
-single-core and autopilot.
-
-TUI-only display change (no test — the reduction worker is a Textual `@work`
-thread); the line mirrors the proven single-core one. 294 tests.
-
-**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-01: /autopilot --from 9 no longer re-reduces done rows (v0.36.3)
-
-Reported: `/autopilot --from 9` on IPTS-38151 re-reduced all 9 sample rows even
-though 8 were `done`. The log was the giveaway — steps 1–5 said "Skipped
-(--from 9)" but steps 6, 7, 8 ran, and step 8 logged "Applying absolute scale
-factors ✓ 4m2.5a30hz: 0.4145807".
-
-Cause: the standard/calibrate/apply-scale block (steps 6–8) was guarded only by
-`continue_mode`, not by `from_step`. So `--from 9` fell into the `elif has_porsil`
-branch and re-applied the scale with `/set config <cfg> standardabsolutescale …`.
-That call runs `_mark_config_rows_modified`, which flips every `done` row in the
-config to `modified`. Step 9 then skips only rows whose status is exactly `done`
-— and there were none left — so it reduced all 9. The done-skip logic was fine;
-it was being sabotaged one step earlier.
-
-Fix: the "skip 6–8, reuse existing scale" branch now triggers on
-`continue_mode or from_step >= 9`, and it only *reports* the current
-`standardabsolutescale` — it does not re-run `/set config`, so `done` rows stay
-`done`. This matches `--from 9`'s own documented meaning ("skip
-standard/calibrate/apply-scale; reduce samples with existing scales"). `--from
-6/7/8` still run the whole scale block (unchanged); `--force` still redoes all.
-
-`tests/test_autopilot_tostep.py` (+1): --from 9 with a scale-bearing config and
-8 done rows reduces only the one non-done row, and never re-applies the scale
-(the stub simulates the modified-marking side effect that the earlier repro
-missed). 291 tests.
-
-**Files changed:** `services/autopilot.py`, `tests/test_autopilot_tostep.py`,
+**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
 CLAUDE.md, `src/eqsanscli/__init__.py`.
 
-### 2026-09-01: autopilot --from 2, step-4b snapshot, calibration knowledge (v0.36.2)
+### 2026-09-10: per-row output directory — /set <rows> outputdir <path> (v0.43.0)
 
-Three things found while driving real reductions.
+Asked: time-slice reductions generate a lot of data, so the user wants each
+sample written to its own folder — "if a per-sample outputdir is defined use it,
+otherwise the session-wide one." Chosen design (with the user): a per-row
+override, two-tier fallback, no auto-magic.
 
-**1 — `/autopilot --from 2` was rejected.** The `--from` validation demanded a
-populated working table for any `from_step >= 2`, but step 2 *is* match-runs — the
-step that builds the table — so `--from 2` refused before it could run. Fixed:
-`--from 2` needs only a loaded catalog (step 1 = load is what it skips); the
-populated-table requirement now applies to `--from 3+`, which skip matching. Help
-text corrected; it wrongly said `--from` always needs a table.
+New `output_override: str = ""` on `WorkingTableRow`, alongside
+`configuration_override` and persisted in `to_dict` (`from_dict` already drops
+unknown keys / keeps dataclass fields, so old sessions load with `""`).
+Deliberately **not** in `_REDUCTION_FIELDS`: changing where output is written
+does not invalidate a `done` reduction, so it never silently marks a done row
+`modified` (an hour-long time-slice run must not re-run just because you moved
+its folder).
 
-**2 — Step 4b mislabelled machine-physics files as "user-set".** Step 4b
-re-applies the parameters you set before autopilot so they win over presets. Its
-snapshot kept every value differing from the preset — and a prior `/matchruns`
-leaves the resolved dark/flood/flux/offset files in the config, which also differ
-from the preset, so they were captured and printed under "user-set parameters per
-config". The snapshot now also excludes resolver-owned values (still equal to what
-the resolver recorded in `instrument_provenance`), so only genuine `/set config`
-edits appear there; step 4c still resolves the calibration. A user override of a
-resolved param (e.g. `sampleoffset` differing from the cycle value) is kept.
-Extracted as `_user_param_snapshot()` for testing.
+`/set <rows> outputdir <path>` sets it (registered in `SETTABLE_FIELDS` as
+`outputdir`/`outdir`/`output` → `output_override`, echoed as `outputdir`); the
+value is stored as an abspath; `none` clears it. Combining with run fields is
+rejected by the existing non-run-field guard. `/set outputdir <path>` (no rows)
+is unchanged — still the session-wide setter.
 
-**3 — Calibration-procedure knowledge.** `knowledge/instrument-files.md` and the
-LLM routing now state when instrument files resolve (`/matchruns`, autopilot 4c —
-NOT `/export script`, which emits what's already in the config), preset precedence
-(`/apply preset` without `--force` preserves them; `--force` can clobber them →
-recover with `/instrument apply --force`), and that `sampleoffset` changes
-experiment-to-experiment, overridden with `/set config <id> sampleoffset <mm>`.
+Precedence in `reduce_row`: `effective_dir = row.output_override or output_dir`.
+Crucially the row override also beats the config's own `outputdir` (which
+`build_reduction_json` reads via `config_params["outputdir"]`, and which
+`/set outputdir` populates) — so `reduce_row` overlays
+`config_params["outputdir"] = effective_dir` when the row overrides. `effective_dir`
+is then used for the JSON `outputDir`, the `mkdir`, the `json_path`, and the
+produced-file glob, so all four agree. A row with no override behaves exactly as
+before.
 
-`tests/test_autopilot_tostep.py` (+6: --from 2 builds the table / needs catalog,
---from 3 still needs a table, and the snapshot excludes resolver-owned params but
-keeps overrides). `tests/test_knowledge.py` still green. 290 tests.
+`handle_reduce`'s up-front writability check (v0.39.0) now iterates the *distinct*
+effective dirs of the selected rows, so a bad per-row path is caught before
+launch with a fix that names both `/set outputdir` and `/set <rows> outputdir`.
+The `⟳` reduce line (both `/reduce` branches) shows `@ <dir>` when a row
+overrides. NL routing + SKILL updated.
 
-**Files changed:** `services/autopilot.py`, `commands/autopilot.py`,
-`services/llm_handler.py`, `knowledge/instrument-files.md`,
-`tests/test_autopilot_tostep.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+Not yet: downstream discovery (`/show data`, `/plot`, `/stitch`,
+`merge_service._scan_output_dir`) still scans the session-wide dir, so outputs in
+an override dir aren't auto-found — view them with `/plot <file>` or
+`/show iq <dir>`, which take an explicit path. Descending into override dirs is
+the planned follow-up.
 
+`tests/test_matching.py` (+5: set stores abspath, `none` clears, can't combine
+with run fields, round-trips, and doesn't mark a done row modified);
+`tests/test_reduce_preflight.py` (+2: the override wins over session-wide *and*
+the config outputdir in the JSON + on disk; an unwritable override is refused up
+front). 329 tests.
+
+**Files changed:** `models/working_table.py`, `commands/matching.py`,
+`services/reduction_service.py`, `commands/reduction.py`, `app.py`,
+`services/llm_handler.py`, SKILL.md, `tests/test_matching.py`,
+`tests/test_reduce_preflight.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-10: time-slice slice estimate up front + live progress heartbeat (v0.42.0)
+
+Reported: reducing a 1-hour run with a 5 s time-slice interval, "the job was
+running too long and I have no way of knowing how far it is." Two gaps: no sense
+of scale (5 s on 3600 s = **720 slices**, each a full independent reduction), and
+no progress — drtsans output was captured only when the process ended.
+
+**1 — Up-front estimate.** `/reduce` (and autopilot) now print a per-config line
+before launching: `⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)`, with
+a bold caution above 200 slices ("that is a lot of slices; check the interval
+matches the timescale you care about") and a note that drtsans writes a full
+I(Q)/I(Qx,Qy)/NeXus set per slice. New pure `timeslice_estimate(config, duration)`
+→ `{slices, interval_s, duration_s}` or None (off / interval ≤ 0 / duration
+unknown), fed by new `SessionState.run_duration(run)` (catalog `duration`, mirrors
+`run_title`). The count is per distinct config in the selection.
+
+**2 — Live output + progress.** `run_reduction` no longer buffers with
+`proc.communicate()` until the end; it Popens drtsans with `PYTHONUNBUFFERED=1`
+and drains stdout/stderr on two reader threads that write each line to the
+`.out`/`.err` files and flush. So the log now **grows during the run** (watchable
+with `tail -f`), cancellation is a responsive `poll()`/0.2 s loop (kill → threads
+join → append "Cancelled by user."), and an optional `progress_cb(line)` sees
+output live. `make_slice_progress(emit, label, total)` builds a callback that
+counts drtsans's one-per-slice `SaveNexus …_processed.nxs` lines and emits a
+throttled `⏳ <sample>: slice N/720 (P%)` heartbeat (≤ 1 line per 25 slices AND
+30 s, so a 720-slice run gives a readable trickle, not 720 lines). Wired through
+`reduce_row(progress_cb=…)` into both `/reduce` branches and both autopilot
+branches; attached only for a time-slicing row (a plain run also writes one
+processed.nxs, which would otherwise read as "slice 1").
+
+Verified against a fake drtsans: the `.out` file grows mid-run, stderr stays
+separate, a mid-run cancel returns in ~0.4 s, and the progress callback fires per
+slice.
+
+`tests/test_timeslice_progress.py` (new, +6: estimate counts/rounds-up and is
+None when off/unknown; progress parses `SaveNexus`, formats `N/total (P%)`, caps
+at 100%, and throttles by count; `run_duration` from the catalog). Two existing
+`run_reduction` fakes gained the `progress_cb=None` kwarg. 322 tests.
+
+**Files changed:** `integrations/drtsans_runner.py`,
+`services/reduction_service.py`, `commands/reduction.py`,
+`models/session_state.py`, `app.py`, `services/autopilot.py`,
+`tests/test_timeslice_progress.py`, `tests/test_reduce_preflight.py`,
+`tests/test_reduce_cancel.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-10: a second /reduce while one runs is refused, not run concurrently (v0.41.0)
+
+Asked: "what happens if I `/reduce` while the previous reduce is not completed?"
+The answer was: nothing stopped it. Reductions run in a background worker thread
+(the UI even says "Running in background — press ^X … to stop"), so the input
+stays live and a second `/reduce` (or `/autopilot`) dispatched mid-batch launched
+a **second concurrent worker**. Consequences: a second `ThreadPoolExecutor`, so up
+to 2× `max_workers` drtsans processes at once (node overload); a shared
+`_cancel_event`, so one Cancel stopped *both* batches; interleaved log output; and
+worst, if a row appeared in both selections it was reduced **twice at the same
+time**, both writing the same `.json`/`.nxs`/`_Iq.dat` — a file race.
+
+The `_job_running` flag already existed but was only read by the Cancel key
+binding, never checked before launching. New `_reject_if_busy(log, what)` guards
+both launch sites (`start_reduction`, `start_autopilot`) in `_render_data`: if a
+job is running it writes `⚠ A job is already running — not starting another
+<what>. Wait for it to finish, or press ^X / click ✕ Cancel to stop it first.`
+and returns True so the caller does not launch. The flag is now also claimed
+synchronously on the main thread at the launch site (`_set_job_running(True)`
+before `run_reduction_batch`/`run_autopilot_worker`), not only inside the worker
+thread — closing the small window where two fast submissions could both pass the
+guard before the first worker set it. The workers still set/clear the flag as
+before (idempotent).
+
+Headless is unaffected: it reduces synchronously in the stdin loop, so a command
+finishes before the next is read — batches can't overlap.
+
+`tests/test_reduce_concurrency.py` (new, +3): busy → refused with a message that
+names the job type and how to stop it; idle → allowed and silent. The guard is
+exercised directly (app built via `__new__`, no Textual event loop); textual/rich
+import fine under the test interpreter.
+
+**Files changed:** `app.py`, `tests/test_reduce_concurrency.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
+### 2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)
+
+Reported from a real run: `/reduce 17` (IPTS-38151, a20a0-1_fs, a time-slice
+reduction) ran 62 minutes, wrote **all** its output — 242 `_Iq.dat`, every
+`_Iqxqy.dat`, `_processed.nxs`, and `.png` across 121 slices — and was then shown
+as `✗ FAILED` with `Cannot install event loop hook for "qt" when running with
+--simple-prompt`. The user asked whether it was critical. It was not: the science
+was complete.
+
+Cause: `run_reduction` sets `success = (proc.returncode == 0)`, nothing else. At
+the very end of the script drtsans tried to bring up an interactive Qt plot under
+`--simple-prompt` and the X11 connection dropped — the `.err` held `ICE default
+IO error handler doing an exit(), pid = …, errno = 32` (EPIPE). That made the
+process exit nonzero *after* all files were written, so a complete reduction was
+flagged `error`. Two harms: the user thinks it failed, and the row status `error`
+means `/reduce --new` and autopilot would **re-reduce it** — another hour — for
+nothing. (`_summarize_error` also surfaced the benign qt line because it contains
+"cannot".)
+
+Fix in `reduce_row`, the single choke point all front ends share. After a
+nonzero, non-cancelled exit it checks three things and, if all hold, rescues the
+run to success: (1) I(Q) output files exist — found by glob
+`<name>*_Iq.dat`, which also fixed detection for time-slice layouts
+(`<name>_0_frame_0_Iq.dat`, …) that the old exact-path check missed; (2) the log
+tail carries a recognizable **display-teardown signature** (`cannot install event
+loop hook`, `ice default io error handler`, `xio: fatal io error`, `could not
+connect to display`, `qxcbconnection`, `qt.qpa`); and (3) there is **no** Python
+`Traceback (most recent call last)` — a real crash that merely also touched the
+GUI is not masked. On rescue it sets `success=True`, marks the row `done`, and
+attaches `result.note` ("drtsans exited N on a non-fatal GUI/display error after
+writing K I(Q) file(s) — reduction is complete"), shown as a dim `⚠` line under
+the `✓` in `/reduce` and autopilot and included in the headless JSON detail. A
+run that produced no output, or that has a traceback, still fails as before.
+
+New `note` field on `ReductionResult`. `_summarize_error` already falls back to
+stderr (v0.39.0), so a true failure still reads well.
+
+`tests/test_reduce_preflight.py` (+3: the qt/ICE signature with outputs present
+rescues to done+note; the same signature plus a traceback stays `error`; the
+signature with no output files stays `error`). 313 tests.
+
+**Files changed:** `services/reduction_service.py`,
+`integrations/drtsans_runner.py`, `app.py`, `services/autopilot.py`,
+`headless.py`, `tests/test_reduce_preflight.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.

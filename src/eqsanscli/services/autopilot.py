@@ -110,8 +110,30 @@ def _reduce_phase(
 
     Returns (n_success, n_fail). Stops early on cancellation.
     """
-    from eqsanscli.services.reduction_service import blocking_problems, reduce_row
+    from eqsanscli.services.reduction_service import (
+        blocking_problems, make_slice_progress, output_dir_problem, reduce_row,
+        timeslice_estimate,
+    )
+    from eqsanscli.services.config_manager import get_config
     from eqsanscli.commands.reduction import _summarize_error
+
+    def slice_cb_for(row):
+        est = timeslice_estimate(
+            get_config(row.configuration, state.configurations),
+            state.run_duration(row.scattering_run),
+        )
+        if est is None:
+            return None
+        return make_slice_progress(write, label=row.sample_name, total=est["slices"])
+
+    # Output directory must be writable, else every row fails identically (and,
+    # before reduce_row's guard, the app crashed). Report once and stop the phase.
+    problem = output_dir_problem(output_dir)
+    if problem:
+        write(f"  [red]✗ Cannot reduce — output directory {problem}.[/red]")
+        write(f"  [dim]Set a writable one with /set outputdir <path>, "
+              f"then resume with /autopilot --from 9.[/dim]")
+        return 0, len(rows)
 
     # Never hand drtsans a row that cannot reduce (no empty beam = no beam
     # centre). Step 3 normally catches these; this also covers --from 4+, where
@@ -142,7 +164,7 @@ def _reduce_phase(
             else:
                 bkg_info = "  [yellow]no bkg[/yellow]"
             write(f"  [{i+1}/{total}] [yellow]⟳[/yellow] {row.sample_name} ({row.configuration}){bkg_info}  [dim]{remaining} left{eta}[/dim]")
-            result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event, drtsans_version=state.drtsans_version)
+            result = reduce_row(row=row, ipts=state.ipts, user_configs=state.configurations, output_dir=output_dir, cancel_event=cancel_event, drtsans_version=state.drtsans_version, progress_cb=slice_cb_for(row))
             elapsed_times.append(result.elapsed_seconds)
             if result.cancelled:
                 write(f"  [{i+1}/{total}] [yellow]⊘[/yellow] {row.sample_name} — cancelled")
@@ -151,9 +173,11 @@ def _reduce_phase(
                 n_ok += 1
                 state.reduced_files.append(result.output_file)
                 write(f"  [{i+1}/{total}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}")
+                if result.note:
+                    write(f"      [dim yellow]⚠ {result.note}[/dim yellow]")
             else:
                 n_fail += 1
-                err = _summarize_error(result.log_file, result.err_file)
+                err = _summarize_error(result.log_file, result.err_file, result.stderr)
                 write(f"  [{i+1}/{total}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
     else:
         write(f"  [dim]Running {total} jobs on {max_workers} workers...[/dim]")
@@ -166,6 +190,7 @@ def _reduce_phase(
                 user_configs=state.configurations, output_dir=output_dir,
                 cancel_event=cancel_event,
                 drtsans_version=state.drtsans_version,
+                progress_cb=slice_cb_for(row),
             )
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -195,9 +220,11 @@ def _reduce_phase(
                         avg = sum(elapsed_times_p) / len(elapsed_times_p)
                         eta = f"  ETA ~{_fmt(avg * remaining / max_workers)}"
                     write(f"  [{completed}/{total}] [green]✓[/green] {row.sample_name} ({row.configuration}) — {_fmt(result.elapsed_seconds)}  [dim]{remaining} left{eta}[/dim]")
+                    if result.note:
+                        write(f"      [dim yellow]⚠ {result.note}[/dim yellow]")
                 else:
                     n_fail += 1
-                    err = _summarize_error(result.log_file, result.err_file)
+                    err = _summarize_error(result.log_file, result.err_file, result.stderr)
                     write(f"  [{completed}/{total}] [red]✗[/red] {row.sample_name} ({row.configuration}) — {err}")
 
     return n_ok, n_fail

@@ -7,6 +7,238 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: a non-writable output directory no longer crashes eqsanscli (v0.39.0)
+
+Reported: the user set `/set outputdir` to a folder they didn't have permission
+for (by accident), and eqsanscli **crashed during reduction**.
+
+Cause: `reduce_row` did `Path(output_dir).mkdir(parents=True, exist_ok=True)`
+followed by `save_reduction_json(...)` with no guard. On a read-only directory
+the `mkdir` raises `PermissionError`; that ran inside the reduction worker (the
+TUI `@work` thread, the parallel executor, autopilot, and headless all call
+`reduce_row`), so the exception escaped and took the app down instead of failing
+one row.
+
+Fixed in three layers, so the problem is caught as early as possible and never
+fatal:
+
+1. **`reduce_row` catches `OSError`** around the mkdir + JSON write and returns a
+   failed `ReductionResult` (`return_code=-98`, `row.status="error"`, stderr
+   `Cannot write to output directory <dir>: <reason>`). This is the safety net —
+   whatever the front end, a write failure is now a failed row, not a crash.
+2. **`/reduce` and autopilot refuse up front.** A new
+   `output_dir_problem(output_dir)` returns a human message (permission denied /
+   not a directory / uncreatable) or `None`. `handle_reduce` checks it before
+   emitting the `start_reduction` payload and returns one clean line
+   (`Cannot reduce — output directory permission denied … Set a writable one with
+   /set outputdir <path>`); autopilot's `_reduce_phase` reports it and stops the
+   phase. So a bad dir fails once, not once per row. The helper checks the nearest
+   **existing ancestor** (the dir need not exist yet — `reduce_row` creates it).
+3. **`/set outputdir` warns immediately** if the path isn't writable, so you learn
+   at set time, not mid-run. Not a hard block — the path may be created or
+   permissions granted before you reduce.
+
+Also: `_summarize_error(out, err, fallback="")` now falls back to the result's
+stderr when there is no `.out`/`.err` file yet (a job that failed before drtsans
+launched), so the permission message actually surfaces in the ✗ line; all four
+call sites pass `result.stderr`.
+
+`tests/test_reduce_preflight.py` (+5: the helper on writable/creatable vs
+read-only/file paths; `reduce_row` fails-not-raises on a read-only dir; `/reduce`
+refuses up front; autopilot's phase stops). 310 tests.
+
+**Files changed:** `services/reduction_service.py`, `commands/reduction.py`,
+`commands/matching.py`, `services/autopilot.py`, `app.py`, `headless.py`,
+`tests/test_reduce_preflight.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-10: --update back-fills a later transmission; parallel /reduce paces its ⟳ (v0.38.0)
+
+Two things found driving a real reduction.
+
+**1 — `/matchruns --update` back-fills an assignment measured after the match.**
+The common field workflow: match while still collecting — the scattering run is
+done and reduced, but its transmission hasn't been measured yet — then measure
+the transmission later, so it gets a *higher* run number and shows up in the next
+catalog. Plain `/matchruns` matches transmission by sample name and is fully
+order-independent, so a rebuild always found it; but `--update` preserves existing
+rows verbatim (that's the point — it keeps your edits and `done` status), and so
+the empty transmission field was never revisited. It now, after the ignore
+reconciliation, fills any *empty* run field (`transmission_run`,
+`background_scatt`, `background_trans`, `empty_beam`) on an existing row from the
+fresh match keyed by scattering run — via `set_field`, so a `done` row flips to
+`modified` for re-reduction — and warns. A field that already has a value
+(including a user override) is never overwritten; if the fresh match also has
+nothing, nothing changes. `fresh_by_scatt`/`run_fields` were hoisted out of the
+`if ignored_runs:` block so both reconciliation and back-fill share them.
+
+**2 — Parallel `/reduce` prints each `⟳` when the job starts, not all upfront.**
+v0.36.5 printed one `⟳ <sample>` line per row *before* submitting — so a 10-run
+batch on 3 workers showed all ten "submitted" lines immediately, reading as ten
+running at once (autopilot's parallel branch had the opposite problem: nothing
+until completion). The `⟳` line now prints from inside `_do_reduce`, which a
+worker only enters when a slot frees, so lines appear paced by worker availability
+and at most `max_workers` show as in-progress. A lock-guarded `started_count`
+gives the `[n/total]` ordinal by job *start* order. `write` was already
+thread-safe (`call_from_thread`).
+
+`tests/test_matching.py` (+2: back-fill fills an empty transmission measured at a
+higher run number and marks the row `modified`; back-fill never overwrites an
+existing/user-set value). 305 tests. The `/reduce` change is TUI display only.
+
+**Files changed:** `services/matching_service.py`, `app.py`,
+`tests/test_matching.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-01: /config list shows normalized ids + /config delete (v0.37.0)
+
+Follow-up to the config-name confusion. Two additions, chosen with the user.
+
+**`/config list` shows the normalized id and flags leftovers.** Config ids
+normalize (case and `_`/`.` are dropped), so `4m2.5a30hz_TR` and `4m2.5a30hztr`
+are one config. The list now annotates a clone with the id everything resolves to
+— `4m2.5a30hz_TR (4m2.5a30hztr)` — only where the stored name differs from its
+normalized form (plain ids like `4m10a` are unchanged). It also surfaces
+**leftover** configs: a stored key that collapses to the same normalized id as
+one already shown (e.g. a phantom `4m2.5a30hztr` left by the earlier bug) was
+being dedup'd out of both the in-use and stored-extra lists, so it was invisible
+and undeletable; it now appears under "Leftover configs — safe to delete" with a
+`/config delete` hint. The reduction-table Config column is left as-is (the user
+picked "name in the table, normalized only in the list").
+
+**`/config delete <id> [--force]`** (aliases remove/rm/del). Resolves the id to
+an existing key (clone-aware, like /set config). Refuses a config that is the
+*physical* configuration of rows — that is how the runs were measured. A clone or
+leftover with no rows is deleted; a clone with rows is refused unless `--force`,
+which clears those rows' `configuration_override` (reverting them to their
+physical config, `done` → `modified`) and deletes. Rows are matched by **exact**
+override key, not normalized, so deleting a phantom `4m2.5a30hztr` never counts —
+or touches — rows on the real clone `4m2.5a30hz_TR`. Refuses the `__all__` key.
+
+`tests/test_config_clone.py` (+6). 303 tests.
+
+**Files changed:** `commands/config.py`, `services/llm_handler.py`,
+`tests/test_config_clone.py`, SKILL.md, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-01: /set config resolves cloned config names (v0.36.6)
+
+Reported: `/set config 4m2.5a30hz_TR usetimeslice True` reported success but the
+value kept reading `False`, and the confirmation echoed a different name
+(`4m2.5a30hztr`) than was typed.
+
+`4m2.5a30hz_TR` is a clone, stored in `state.configurations` under that exact
+name. But `handle_set_config` and `handle_show_config` ran the typed id through
+`normalize_config_id`, which strips underscores and lowercases —
+`4m2.5a30hz_TR` → `4m2.5a30hztr`. So `/set config` wrote the override to a
+*phantom* `4m2.5a30hztr` key that no config or row uses, while the real clone (and
+row 11, whose `configuration_override` is `4m2.5a30hz_TR`) kept the old value.
+`get_config` for the row looks up the exact key, so the reduction never saw the
+change. Reproduced: the set created a second key and the row still read `False`.
+
+Fix: a `_resolve_config_key()` maps the typed id to an existing config key —
+exact match first, then a normalized-equal match (preserving the stored
+casing/underscores of clones) — used by both `/set config` and `/show config`.
+`4m2.5a30hz_TR` now updates the clone directly, the row's reduction sees it, and
+the confirmation echoes the name typed. The normalized spelling `4m2.5a30hztr`
+also resolves back to the clone (no phantom). A genuinely new config id (nothing
+matches) still falls back to the normalized form. Any orphan phantom key a user
+already created is harmless (no row references it).
+
+`tests/test_config_clone.py` (+3): set on the clone name lands on the clone and
+the row sees it, the normalized form resolves to the clone, and /show reads it.
+297 tests.
+
+**Files changed:** `commands/config.py`, `tests/test_config_clone.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
+### 2026-09-01: /reduce names the sample at submission, not on completion (v0.36.5)
+
+Reported: running `/reduce` in parallel mode, "it doesn't show which sample I'm
+reducing" — the sample name "appeared after done". Autopilot showed it.
+
+Cause: the TUI `/reduce` worker has two branches. Single-core prints a
+`⟳ <sample> (config) → …json` line at the START of each row. The multi-core
+(parallel) branch — the default when `/settings multiprocessing > 1` — marked
+rows "reducing" silently, printed only "Submitting N jobs to M workers…", and
+named samples solely on the completion line inside the `as_completed` loop. So a
+lone parallel job sat at "Submitting 1 jobs to 3 workers…" with nothing
+identifying it until it finished a minute later.
+
+Fix: the multi-core branch now writes the same `⟳ <sample>` start line for every
+row right after submitting (before the executor runs), so each sample appears
+immediately; the existing ✓/✗/⊘ completion lines are unchanged. Matches
+single-core and autopilot.
+
+TUI-only display change (no test — the reduction worker is a Textual `@work`
+thread); the line mirrors the proven single-core one. 294 tests.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-01: /autopilot --from 9 no longer re-reduces done rows (v0.36.3)
+
+Reported: `/autopilot --from 9` on IPTS-38151 re-reduced all 9 sample rows even
+though 8 were `done`. The log was the giveaway — steps 1–5 said "Skipped
+(--from 9)" but steps 6, 7, 8 ran, and step 8 logged "Applying absolute scale
+factors ✓ 4m2.5a30hz: 0.4145807".
+
+Cause: the standard/calibrate/apply-scale block (steps 6–8) was guarded only by
+`continue_mode`, not by `from_step`. So `--from 9` fell into the `elif has_porsil`
+branch and re-applied the scale with `/set config <cfg> standardabsolutescale …`.
+That call runs `_mark_config_rows_modified`, which flips every `done` row in the
+config to `modified`. Step 9 then skips only rows whose status is exactly `done`
+— and there were none left — so it reduced all 9. The done-skip logic was fine;
+it was being sabotaged one step earlier.
+
+Fix: the "skip 6–8, reuse existing scale" branch now triggers on
+`continue_mode or from_step >= 9`, and it only *reports* the current
+`standardabsolutescale` — it does not re-run `/set config`, so `done` rows stay
+`done`. This matches `--from 9`'s own documented meaning ("skip
+standard/calibrate/apply-scale; reduce samples with existing scales"). `--from
+6/7/8` still run the whole scale block (unchanged); `--force` still redoes all.
+
+`tests/test_autopilot_tostep.py` (+1): --from 9 with a scale-bearing config and
+8 done rows reduces only the one non-done row, and never re-applies the scale
+(the stub simulates the modified-marking side effect that the earlier repro
+missed). 291 tests.
+
+**Files changed:** `services/autopilot.py`, `tests/test_autopilot_tostep.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-01: autopilot --from 2, step-4b snapshot, calibration knowledge (v0.36.2)
+
+Three things found while driving real reductions.
+
+**1 — `/autopilot --from 2` was rejected.** The `--from` validation demanded a
+populated working table for any `from_step >= 2`, but step 2 *is* match-runs — the
+step that builds the table — so `--from 2` refused before it could run. Fixed:
+`--from 2` needs only a loaded catalog (step 1 = load is what it skips); the
+populated-table requirement now applies to `--from 3+`, which skip matching. Help
+text corrected; it wrongly said `--from` always needs a table.
+
+**2 — Step 4b mislabelled machine-physics files as "user-set".** Step 4b
+re-applies the parameters you set before autopilot so they win over presets. Its
+snapshot kept every value differing from the preset — and a prior `/matchruns`
+leaves the resolved dark/flood/flux/offset files in the config, which also differ
+from the preset, so they were captured and printed under "user-set parameters per
+config". The snapshot now also excludes resolver-owned values (still equal to what
+the resolver recorded in `instrument_provenance`), so only genuine `/set config`
+edits appear there; step 4c still resolves the calibration. A user override of a
+resolved param (e.g. `sampleoffset` differing from the cycle value) is kept.
+Extracted as `_user_param_snapshot()` for testing.
+
+**3 — Calibration-procedure knowledge.** `knowledge/instrument-files.md` and the
+LLM routing now state when instrument files resolve (`/matchruns`, autopilot 4c —
+NOT `/export script`, which emits what's already in the config), preset precedence
+(`/apply preset` without `--force` preserves them; `--force` can clobber them →
+recover with `/instrument apply --force`), and that `sampleoffset` changes
+experiment-to-experiment, overridden with `/set config <id> sampleoffset <mm>`.
+
+`tests/test_autopilot_tostep.py` (+6: --from 2 builds the table / needs catalog,
+--from 3 still needs a table, and the snapshot excludes resolver-owned params but
+keeps overrides). `tests/test_knowledge.py` still green. 290 tests.
+
+**Files changed:** `services/autopilot.py`, `commands/autopilot.py`,
+`services/llm_handler.py`, `knowledge/instrument-files.md`,
+`tests/test_autopilot_tostep.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-08-31: empty beam matches camelCase names; /show preset stitch_overlaps (v0.33.0)
 
 **1 — empty beam not assigned (IPTS-38659).** `/matchruns` left every row without

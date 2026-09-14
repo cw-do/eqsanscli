@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.reduction_service import (
-    format_preflight, parse_row_selection, preflight, reduce_row,
+    format_preflight, output_dir_problem, parse_row_selection, preflight,
+    reduce_row, timeslice_estimate,
 )
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ def _format_time(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
-def _summarize_error(out_file: str, err_file: str) -> str:
+def _summarize_error(out_file: str, err_file: str, fallback: str = "") -> str:
     for path in [out_file, err_file]:
         if not path or not os.path.exists(path):
             continue
@@ -33,6 +34,10 @@ def _summarize_error(out_file: str, err_file: str) -> str:
                     return stripped[:150]
         except Exception:
             continue
+    # No log/err file yet — e.g. the job failed before drtsans launched (a
+    # non-writable output dir). Surface the result's own stderr in that case.
+    if fallback.strip():
+        return fallback.strip()[:150]
     return "unknown error (check .out and .err files)"
 
 
@@ -119,8 +124,63 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
     elif advisory:
         prefix = report + "\n"
 
+    # Every output directory in play must be writable, or those rows would fail
+    # the same way (or, before the guard, crash the app). Rows can each target a
+    # different dir now (per-row `/set <rows> outputdir`), so check each distinct
+    # effective dir once, up front, with a fix.
+    checked: set[str] = set()
+    for idx in indices:
+        row = table.get_row(idx)
+        if row is None:
+            continue
+        eff = (row.output_override or "").strip() or state.output_directory
+        if eff in checked:
+            continue
+        checked.add(eff)
+        problem = output_dir_problem(eff)
+        if problem:
+            where = f" for row(s) → {os.path.abspath(eff)}" if row.output_override else ""
+            return CommandResult(
+                success=False,
+                message=f"[red]Cannot reduce — output directory {problem}{where}.[/red]\n"
+                f"  Set a writable one with [cyan]/set outputdir <path>[/cyan] "
+                f"(session-wide) or [cyan]/set <rows> outputdir <path>[/cyan] (per row).",
+            )
+
+    # Time-slicing multiplies the work: one full reduction per slice. Tell the
+    # user the slice count up front (per config) so a too-fine interval is caught
+    # before an hours-long run, and so the long runtime is expected.
+    prefix += _timeslice_notice(indices, table, state)
+
     return CommandResult(
         success=True,
         message=prefix,
         data={"type": "start_reduction", "indices": indices},
     )
+
+
+def _timeslice_notice(indices, table, state) -> str:
+    """A per-config line for any selected row whose config uses time-slicing."""
+    from eqsanscli.services.config_manager import get_config
+    seen: set[str] = set()
+    lines: list[str] = []
+    for idx in indices:
+        row = table.get_row(idx)
+        if row is None or row.configuration in seen:
+            continue
+        cfg = get_config(row.configuration, state.configurations)
+        est = timeslice_estimate(cfg, state.run_duration(row.scattering_run))
+        if est is None:
+            continue
+        seen.add(row.configuration)
+        n, interval, dur = est["slices"], est["interval_s"], est["duration_s"]
+        colour = "yellow" if n > 200 else "cyan"
+        caution = ("  [bold]— that is a lot of slices; check the interval matches "
+                   "the timescale you care about[/bold]" if n > 200 else "")
+        lines.append(
+            f"[{colour}]⏱ Time-slicing {row.configuration}: ~{n} slices/run "
+            f"({dur}s ÷ {interval:g}s){caution}[/{colour}]\n"
+            f"  [dim]drtsans writes a full I(Q)/I(Qx,Qy)/NeXus set per slice; "
+            f"this run will take a while and produce {n}× the files.[/dim]"
+        )
+    return ("\n".join(lines) + "\n") if lines else ""

@@ -124,15 +124,19 @@ def _run_reduction_sync(
         if result.success:
             n_success += 1
             state.reduced_files.append(result.output_file)
-            results_detail.append({
+            detail = {
                 "row": idx, "sample": row.sample_name, "config": row.configuration,
                 "status": "done", "output_file": result.output_file,
                 "elapsed": result.elapsed_seconds,
-            })
-            _progress(f"[{i+1}/{total}] done {row.sample_name} ({row.configuration}) {_format_time(result.elapsed_seconds)}")
+            }
+            if result.note:
+                detail["note"] = result.note
+            results_detail.append(detail)
+            note_suffix = f" ({result.note})" if result.note else ""
+            _progress(f"[{i+1}/{total}] done {row.sample_name} ({row.configuration}) {_format_time(result.elapsed_seconds)}{note_suffix}")
         else:
             n_fail += 1
-            err = _summarize_error(result.log_file, result.err_file)
+            err = _summarize_error(result.log_file, result.err_file, result.stderr)
             results_detail.append({
                 "row": idx, "sample": row.sample_name, "config": row.configuration,
                 "status": "error", "error": err,

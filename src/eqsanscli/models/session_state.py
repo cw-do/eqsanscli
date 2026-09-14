@@ -118,6 +118,27 @@ class SessionState:
                 continue
         return ""
 
+    def run_duration(self, run_number: str) -> int:
+        """Measured duration (seconds) of a run from the catalog, 0 if unknown.
+
+        Used to estimate how many time slices a reduction will produce. Accepts
+        comma-separated run numbers (uses the first).
+        """
+        if not run_number or self.catalog_data is None:
+            return 0
+        first = run_number.split(",")[0].strip()
+        try:
+            first_int = int(first)
+        except ValueError:
+            return 0
+        for record in self.catalog_data:
+            try:
+                if int(record.get("run_number", 0)) == first_int:
+                    return int(record.get("duration", 0) or 0)
+            except (ValueError, TypeError):
+                continue
+        return 0
+
     @property
     def current_table(self) -> WorkingTable:
         """Get the currently active working table."""
