@@ -150,6 +150,9 @@ Use `--force` to re-reduce all rows regardless of status.
 | `/show table --sample <name>` | Show only rows matching sample name (read-only filter) |
 | `/reclass <runs> <class>` | Override run classification. Classes: `scatt`, `trans`, `bkg`, `bkgtrans`, `empty`, `emptyscatt`, `sample`, `ignore` (aliases `i`, `n`) |
 | `/reclass --sample <name> <class>` | Reclass all runs whose title contains `<name>` (e.g. `--sample BkgG sample`, `--sample banjo i`) |
+| `/retitle <run> <new title>` | Correct a run's whole title in this session (e.g. `/retitle 181470 T-L62_0 4m 10A`). ONCat is not changed; survives `/refresh catalog`. Fixes what `/matchruns` pairs on when the ONCat label is wrong |
+| `/retitle <old> <new> [--runs <spec>] [--regex]` | Swap a word in every title (e.g. `/retitle s1 L62_0`). Whole-word by default (`s1` won't touch `s10`); `--runs` limits it, `--regex` treats `<old>` as a pattern |
+| `/retitle show` / `/retitle clear [<runs>]` | List corrections, or restore the ONCat title(s). Always follow a `/retitle` with `/matchruns` |
 | `/matchruns` | Auto-match transmission/background/empty runs using `run_class`. REBUILDS the table (resets row status) |
 | `/matchruns --update` | Add only new scattering runs to the EXISTING table; preserves `done` rows and assignments. Use after `/refresh catalog` |
 | `/assign bkg <sample>` | Reassign background sample for all rows (config-aware, sets bkg+bkgtrans) |

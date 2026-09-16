@@ -170,6 +170,18 @@ WORKING TABLE:
   table has rows already reduced and a rebuild is unwanted ("just set the empty beam on the 4m rows").
   Note /matchruns REBUILDS the table (row status resets); /matchruns --update adds new runs but does NOT
   back-fill empty/bkg on existing rows — for that use /set --config <id> emp <run>.
+/retitle <run> <new title>      - Correct a run's whole title in this session (ONCat is not changed)
+/retitle <old> <new> [--runs <spec>] [--regex] - Swap a word in every title (whole-word by default; --runs limits it; --regex for patterns)
+/retitle show                   - List the title corrections made this session
+/retitle clear [<runs>]         - Restore the ONCat title(s)
+  WHEN: use /retitle for a wrong TITLE (the sample name in the ONCat label is wrong, so /matchruns pairs the
+  wrong runs); use /reclass for a wrong CLASS (scatt/trans/bkg/etc). /set fixes one row and is thrown away by the
+  next /matchruns; /retitle fixes the pairing for every affected run at its source and SURVIVES /matchruns.
+    "rename 181470 title to be T-L62_0 4m 10A" → /retitle 181470 T-L62_0 4m 10A
+    "replace s1 with L62_0 in the titles" → /retitle s1 L62_0
+    "replace s1 with L62_0 in the titles of runs 181470-181480" → /retitle s1 L62_0 --runs 181470-181480
+    "the transmissions are labelled by slot, fix the names" → one /retitle <slot> <name> per slot
+  Whole-word by default: "s1" will NOT touch "s10"/"s11". ALWAYS follow /retitle with /matchruns to rebuild.
 /matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog) — REBUILDS table (resets row status)
 /matchruns --update             - Add new scattering runs to the EXISTING working table without disrupting reduced rows. Use after /refresh catalog.
   IMPORTANT: Mid-experiment incremental flow when new runs arrive:

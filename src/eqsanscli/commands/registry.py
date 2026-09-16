@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING
 from eqsanscli.commands.autopilot import handle_autopilot
 from eqsanscli.commands.calibrate import handle_calibrate
 from eqsanscli.commands.catalog import (
-    handle_list_ipts, handle_reclass, handle_refresh_catalog, handle_show, handle_show_table,
+    handle_list_ipts, handle_reclass,
+    handle_retitle, handle_refresh_catalog, handle_show, handle_show_table,
 )
 from eqsanscli.commands.config import (
     handle_config, handle_list_configs, handle_set_config, handle_show_config,
@@ -69,6 +70,7 @@ def register_all(router: CommandRouter) -> None:
     router.register("show table", handle_show_table)
     router.register("list ipts", handle_list_ipts)
     router.register("reclass", handle_reclass)
+    router.register("retitle", handle_retitle)
     router.register("refresh catalog", handle_refresh_catalog)
     router.register("refresh", handle_refresh_catalog)  # bare /refresh = catalog
 

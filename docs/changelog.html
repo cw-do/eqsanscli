@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.43.1</div>
+          data reduction tool &middot; v0.44.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,13 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-10-a-gui-crash-after-a-complete-reduction-is-no-longer-a-failure-v0400">2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)<a class="anchor" href="#2026-09-10-a-gui-crash-after-a-complete-reduction-is-no-longer-a-failure-v0400">#</a></h3>
+<p>Reported from a real run: <code><a href="commands.html#cmd-reduce">/reduce 17</a></code> (IPTS-38151, a20a0-1_fs, a time-slice reduction) ran 62 minutes, wrote <strong>all</strong> its output — 242 <code>_Iq.dat</code>, every <code>_Iqxqy.dat</code>, <code>_processed.nxs</code>, and <code>.png</code> across 121 slices — and was then shown as <code>✗ FAILED</code> with <code>Cannot install event loop hook for &quot;qt&quot; when running with --simple-prompt</code>. The user asked whether it was critical. It was not: the science was complete.</p>
+<p>Cause: <code>run_reduction</code> sets <code>success = (proc.returncode == 0)</code>, nothing else. At the very end of the script drtsans tried to bring up an interactive Qt plot under <code>--simple-prompt</code> and the X11 connection dropped — the <code>.err</code> held <code>ICE default IO error handler doing an exit(), pid = …, errno = 32</code> (EPIPE). That made the process exit nonzero <em>after</em> all files were written, so a complete reduction was flagged <code>error</code>. Two harms: the user thinks it failed, and the row status <code>error</code> means <code><a href="commands.html#cmd-reduce">/reduce --new</a></code> and autopilot would <strong>re-reduce it</strong> — another hour — for nothing. (<code>_summarize_error</code> also surfaced the benign qt line because it contains &quot;cannot&quot;.)</p>
+<p>Fix in <code>reduce_row</code>, the single choke point all front ends share. After a nonzero, non-cancelled exit it checks three things and, if all hold, rescues the run to success: (1) I(Q) output files exist — found by glob <code>&lt;name&gt;*_Iq.dat</code>, which also fixed detection for time-slice layouts (<code>&lt;name&gt;_0_frame_0_Iq.dat</code>, …) that the old exact-path check missed; (2) the log tail carries a recognizable <strong>display-teardown signature</strong> (<code>cannot install event loop hook</code>, <code>ice default io error handler</code>, <code>xio: fatal io error</code>, <code>could not connect to display</code>, <code>qxcbconnection</code>, <code>qt.qpa</code>); and (3) there is <strong>no</strong> Python <code>Traceback (most recent call last)</code> — a real crash that merely also touched the GUI is not masked. On rescue it sets <code>success=True</code>, marks the row <code>done</code>, and attaches <code>result.note</code> (&quot;drtsans exited N on a non-fatal GUI/display error after writing K I(Q) file(s) — reduction is complete&quot;), shown as a dim <code>⚠</code> line under the <code>✓</code> in <code><a href="commands.html#cmd-reduce">/reduce</a></code> and autopilot and included in the headless JSON detail. A run that produced no output, or that has a traceback, still fails as before.</p>
+<p>New <code>note</code> field on <code>ReductionResult</code>. <code>_summarize_error</code> already falls back to stderr (v0.39.0), so a true failure still reads well.</p>
+<p><code>tests/test_reduce_preflight.py</code> (+3: the qt/ICE signature with outputs present rescues to done+note; the same signature plus a traceback stays <code>error</code>; the signature with no output files stays <code>error</code>). 313 tests.</p>
+<p><strong>Files changed:</strong> <code>services/reduction_service.py</code>, <code>integrations/drtsans_runner.py</code>, <code>app.py</code>, <code>services/autopilot.py</code>, <code>headless.py</code>, <code>tests/test_reduce_preflight.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-10-a-non-writable-output-directory-no-longer-crashes-eqsanscli-v0390">2026-09-10: a non-writable output directory no longer crashes eqsanscli (v0.39.0)<a class="anchor" href="#2026-09-10-a-non-writable-output-directory-no-longer-crashes-eqsanscli-v0390">#</a></h3>
 <p>Reported: the user set <code><a href="commands.html#cmd-set">/set outputdir</a></code> to a folder they didn&#x27;t have permission for (by accident), and eqsanscli <strong>crashed during reduction</strong>.</p>
 <p>Cause: <code>reduce_row</code> did <code>Path(output_dir).mkdir(parents=True, exist_ok=True)</code> followed by <code>save_reduction_json(...)</code> with no guard. On a read-only directory the <code>mkdir</code> raises <code>PermissionError</code>; that ran inside the reduction worker (the TUI <code>@work</code> thread, the parallel executor, autopilot, and headless all call <code>reduce_row</code>), so the exception escaped and took the app down instead of failing one row.</p>
@@ -603,7 +610,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-14 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-16 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

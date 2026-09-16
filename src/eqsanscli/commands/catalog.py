@@ -27,14 +27,17 @@ def _format_counts(n: int) -> str:
     return str(n)
 
 
-def _build_catalog_rows(df) -> list[dict]:
+def _build_catalog_rows(df, overrides: dict | None = None) -> list[dict]:
+    """Display rows for /show catalog. A title corrected with /retitle is marked
+    with a trailing `*` — what is shown then differs from the ONCat record."""
     rows = []
     for _, row in df.iterrows():
         run_class = str(row.get("run_class", ""))
         class_label = RUN_CLASS_SHORT.get(run_class, run_class[:6])
         rows.append({
             "Run #": str(int(row["run_number"])),
-            "Title": str(row["title"])[:40],
+            "Title": str(row["title"])[:40]
+            + ("*" if overrides and str(int(row["run_number"])) in overrides else ""),
             "Class": class_label,
             "Dist (m)": f"{row['detector_distance']:.1f}",
             "λ (Å)": f"{row['wavelength']:.1f}",
@@ -120,13 +123,21 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
         return CommandResult(success=True, message=f"No runs found for IPTS-{ipts}.")
 
     add_run_class_column(df)
+    # A different experiment's run numbers have nothing to do with this one's
+    # title corrections — drop them rather than risk applying them by accident.
+    if state.ipts and state.ipts != ipts:
+        state.title_overrides = {}
     state.ipts = ipts
     state.catalog = df
 
-    rows = _build_catalog_rows(df)
+    # ONCat brings back the original titles; /retitle corrections go back on top.
+    n_titles = state.apply_title_overrides()
+    title_note = f"\n  Re-applied {n_titles} /retitle correction(s)." if n_titles else ""
+
+    rows = _build_catalog_rows(state.catalog, state.title_overrides)
     return CommandResult(
         success=True,
-        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs){inferred_note}",
+        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs){inferred_note}{title_note}",
         data={"type": "catalog", "rows": rows, "ipts": ipts},
     )
 
@@ -178,13 +189,17 @@ async def handle_refresh_catalog(args: list[str], state: SessionState) -> Comman
 
     state.catalog = fresh_df
 
-    rows = _build_catalog_rows(fresh_df)
+    n_titles = state.apply_title_overrides()
+
+    rows = _build_catalog_rows(state.catalog, state.title_overrides)
     summary = (
         f"Refreshed IPTS-{state.ipts} catalog from ONCat.\n"
         f"  Total runs: {len(fresh_df)}  (previously: {len(old_runs)})\n"
         f"  New runs:   {len(new_runs)}\n"
         f"  Preserved {len(old_runs)} existing run_class values"
     )
+    if n_titles:
+        summary += f"\n  Re-applied {n_titles} /retitle correction(s)"
     if new_runs:
         new_run_list = ", ".join(str(r) for r in sorted(new_runs)[:20])
         if len(new_runs) > 20:
@@ -209,7 +224,7 @@ async def handle_show_catalog(args: list[str], state: SessionState) -> CommandRe
             message="No catalog loaded. Use /load ipts <number> first.",
         )
 
-    rows = _build_catalog_rows(catalog)
+    rows = _build_catalog_rows(catalog, state.title_overrides)
     return CommandResult(
         success=True,
         message=f"IPTS-{state.ipts} Catalog ({len(catalog)} runs)",
@@ -495,6 +510,204 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
         success=True,
         message=f"Reclassified {updated} run(s):\n{detail}\n\n"
         "Run /matchruns to rebuild the working table with updated classes.",
+    )
+
+
+_RETITLE_USAGE = (
+    "Usage: /retitle <run> <new title>            — set one run's title\n"
+    "       /retitle <old> <new> [--runs <spec>]  — swap a word in many titles\n"
+    "       /retitle show                         — list corrections made here\n"
+    "       /retitle clear [<runs>]               — restore the ONCat title(s)\n\n"
+    "  <spec>  run number, range (181470-181480) or comma-separated list\n"
+    "  --regex treat <old> as a regular expression instead of a whole word\n\n"
+    "Examples:\n"
+    "  /retitle 181470 T-L62_0 4m 10A\n"
+    "  /retitle s1 L62_0                  (whole word: s1 never matches s10)\n"
+    "  /retitle s1 L62_0 --runs 181470-181480\n"
+    "  /retitle clear 181470"
+)
+
+
+async def handle_retitle(args: list[str], state: SessionState) -> CommandResult:
+    """/retitle — correct a run title in this session so /matchruns can pair it.
+
+    Titles come from ONCat, and /matchruns derives the sample name from the
+    title: a transmission labelled `T-s1 4m 10A` can never be paired with
+    `S-L62_0 4m 10A` by name, and no amount of /set fixes the *next* /matchruns.
+    Correcting the title fixes the pairing at its source, for every run at once.
+
+    The ONCat record is not touched — corrections live in the session
+    (state.title_overrides) and are re-applied after /load ipts and
+    /refresh catalog, which would otherwise bring the wrong titles straight
+    back. /show catalog marks a corrected title with a trailing `*`.
+
+    Two forms, told apart by whether the first argument is a run number:
+        /retitle 181470 T-L62_0 4m 10A     — set this run's whole title
+        /retitle s1 L62_0 [--runs <spec>]  — swap a word in every title
+
+    The swap is whole-word by default; `s1` must not also rewrite `s10` and
+    `s11` (IPTS-36552, where exactly that would have mislabelled two samples).
+    Use --regex for anything more elaborate.
+    """
+    if not args:
+        return CommandResult(success=False, message=_RETITLE_USAGE)
+
+    sub = args[0].lower()
+    if sub in ("show", "list"):
+        return _retitle_show(state)
+    if sub in ("clear", "reset", "undo"):
+        return _retitle_clear(args[1:], state)
+
+    if state.catalog_data is None:
+        return CommandResult(
+            success=False,
+            message="No catalog loaded. Use /load ipts <number> first.",
+        )
+
+    regex = False
+    rest = []
+    runs_spec = ""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.lower() == "--regex":
+            regex = True
+        elif a.lower() == "--runs":
+            i += 1
+            if i >= len(args):
+                return CommandResult(success=False, message="--runs needs a run spec, e.g. --runs 181470-181480")
+            runs_spec = args[i]
+        else:
+            rest.append(a)
+        i += 1
+
+    if len(rest) < 2:
+        return CommandResult(success=False, message=_RETITLE_USAGE)
+
+    # Form 1: first token is a run number → the remainder is that run's title.
+    if re.fullmatch(r"\d{4,}", rest[0]) and not runs_spec:
+        return _retitle_one(int(rest[0]), " ".join(rest[1:]), state)
+
+    # Form 2: word swap across titles.
+    old, new = rest[0], " ".join(rest[1:])
+    limit = set(_parse_run_numbers(runs_spec)) if runs_spec else None
+    pattern = old if regex else r"\b%s\b" % re.escape(old)
+    try:
+        matcher = re.compile(pattern)
+    except re.error as e:
+        return CommandResult(success=False, message=f"Bad regex {old!r}: {e}")
+
+    changes = []
+    for record in state.catalog_data:
+        try:
+            rn = int(record.get("run_number", 0))
+        except (ValueError, TypeError):
+            continue
+        if limit is not None and rn not in limit:
+            continue
+        title = str(record.get("title", ""))
+        updated = matcher.sub(new, title)
+        if updated != title:
+            changes.append((rn, title, updated))
+
+    if not changes:
+        where = f" in runs {runs_spec}" if runs_spec else ""
+        return CommandResult(
+            success=False,
+            message=f"No title contains the whole word {old!r}{where}.\n"
+            "  /show catalog lists the titles; --regex matches more loosely.",
+        )
+
+    for rn, title, updated in changes:
+        _record_override(state, rn, title, updated)
+    return _retitle_result(changes, len(changes))
+
+
+def _retitle_one(run: int, new_title: str, state: SessionState) -> CommandResult:
+    for record in state.catalog_data:
+        try:
+            rn = int(record.get("run_number", 0))
+        except (ValueError, TypeError):
+            continue
+        if rn != run:
+            continue
+        old = str(record.get("title", ""))
+        if old == new_title:
+            return CommandResult(success=True, message=f"Run {run} already titled {new_title!r}.")
+        _record_override(state, run, old, new_title)
+        return _retitle_result([(run, old, new_title)], 1)
+    return CommandResult(success=False, message=f"Run {run} is not in the catalog.")
+
+
+def _record_override(state: SessionState, run: int, old: str, new: str) -> None:
+    """Write the new title into the catalog and remember it for later reloads.
+
+    'original' keeps ONCat's own title — the first one we saw, not the result of
+    an earlier /retitle — so /retitle clear always restores the real record.
+    """
+    key = str(run)
+    original = state.title_overrides.get(key, {}).get("original", old)
+    state.title_overrides[key] = {"title": new, "original": original}
+    for record in state.catalog_data:
+        try:
+            if int(record.get("run_number", 0)) == run:
+                record["title"] = new
+        except (ValueError, TypeError):
+            continue
+
+
+def _retitle_result(changes: list[tuple[int, str, str]], n: int) -> CommandResult:
+    detail = "\n".join(f"  {rn}  {old!r}\n        → {new!r}" for rn, old, new in changes[:40])
+    if len(changes) > 40:
+        detail += f"\n  ... and {len(changes) - 40} more"
+    return CommandResult(
+        success=True,
+        message=f"Retitled {n} run(s):\n{detail}\n\n"
+        "The ONCat record is unchanged; the correction lives in this session and\n"
+        "survives /refresh catalog. Run /matchruns to rebuild the working table\n"
+        "with the corrected titles.",
+    )
+
+
+def _retitle_show(state: SessionState) -> CommandResult:
+    if not state.title_overrides:
+        return CommandResult(success=True, message="No title corrections in this session.")
+    lines = [f"Title corrections ({len(state.title_overrides)}):"]
+    for run in sorted(state.title_overrides, key=lambda r: int(r)):
+        entry = state.title_overrides[run]
+        lines.append(f"  {run}  {entry['original']!r}\n        → {entry['title']!r}")
+    lines.append("\nONCat still holds the original titles. /retitle clear [<runs>] restores them.")
+    return CommandResult(success=True, message="\n".join(lines))
+
+
+def _retitle_clear(args: list[str], state: SessionState) -> CommandResult:
+    if not state.title_overrides:
+        return CommandResult(success=True, message="No title corrections to clear.")
+    if args:
+        wanted = {str(r) for r in _parse_run_numbers(args[0])}
+        targets = [r for r in state.title_overrides if r in wanted]
+        if not targets:
+            return CommandResult(success=False, message=f"No title correction for: {args[0]}")
+    else:
+        targets = list(state.title_overrides)
+
+    restored = []
+    for run in targets:
+        original = state.title_overrides.pop(run)["original"]
+        restored.append((int(run), original))
+        if state.catalog_data is not None:
+            for record in state.catalog_data:
+                try:
+                    if int(record.get("run_number", 0)) == int(run):
+                        record["title"] = original
+                except (ValueError, TypeError):
+                    continue
+
+    detail = "\n".join(f"  {rn}  → {title!r}" for rn, title in sorted(restored))
+    return CommandResult(
+        success=True,
+        message=f"Restored the ONCat title for {len(restored)} run(s):\n{detail}\n\n"
+        "Run /matchruns to rebuild the working table.",
     )
 
 

@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.44.0 | 2026-09-16 | **New `/retitle` command — correct a wrong ONCat run title in-session so `/matchruns` can pair it.** `/matchruns` derives the sample name from the title, so a transmission mislabeled by sample-changer slot (`T-s1 4m 10A`) can never pair with `S-L62_0 4m 10A` — and `/reclass` (fixes *class*), `/set <row> sample` (renames *after* matching) and per-row `/set … trans` (thrown away by the next `/matchruns`) couldn't fix it. `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title; `/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across titles (**whole-word by default** so `s1` never rewrites `s10`/`s11`); `/retitle show` / `/retitle clear [<runs>]`. Corrections live in the session (`state.title_overrides`, `{run: {title, original}}`), never touch ONCat, and are re-applied after `/load ipts`/`/refresh catalog` (which would bring the wrong titles back); `/show catalog` marks a corrected title with a trailing `*`; `original` always keeps ONCat's own title so `clear` restores the real record. Motivated by IPTS-36552 (11 slots × 2 configs; verified against each NeXus `SampleId`/`SampleTable:Position`). |
 | 0.43.1 | 2026-09-10 | Fix: a frame-skipping mode suffix in a transmission title stopped it matching its sample. IPTS-38151 samples were titled `S-porsil 4m 2.5a` but the re-measured transmissions `T-porsil 4m 2.5a`**`fs`** — the `fs` glued to the wavelength leaked past the config-stripping regex into the extracted sample name (`porsil_fs`), so it never matched `porsil` and every sample came out with no transmission. `_extract_sample_name`'s config regex now also consumes a `fs` suffix (attached `2.5afs` or spaced `2.5a fs`) and a following frequency token, so `T-…fs` transmissions match their plain `S-…` samples. Classification was already correct; only name extraction was wrong. |
 | 0.43.0 | 2026-09-10 | **Per-row output directory: `/set <rows> outputdir <path>`.** For data-heavy (time-sliced) reductions the user wanted each sample in its own folder. New per-row `output_override` field on `WorkingTableRow` (mirrors `configuration_override`); precedence is **row override → session-wide** (the row override also wins over the config's own `outputdir`, which `build_reduction_json` otherwise uses). `reduce_row` computes an `effective_dir` used consistently for the JSON `outputDir`, the `mkdir`, and the produced-file glob. `none` clears the override (back to session-wide). `/reduce` and autopilot's up-front output-dir writability check now validates *each distinct* effective dir (a bad per-row path is caught before launch, not per row). The `⟳` reduce line shows `@ <dir>` when a row overrides. Changing `output_override` deliberately does **not** mark a `done` row `modified` — where output is written doesn't invalidate the science (an hour-long time-slice run won't silently re-run). Persisted in `to_dict`; NL routes "put rows 5-10 output in /path" → `/set 5-10 outputdir /path`. |
 | 0.42.0 | 2026-09-10 | **Time-slice reductions now show a slice estimate up front and a live progress heartbeat.** A user reducing a 1-hour run at a 5 s interval (720 slices) had no idea that was 720× the work and saw no progress for an hour. Two fixes: (1) `/reduce` (and autopilot) now print a per-config line — `⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)` — computed from the config's `timesliceinterval` and the run's catalog `duration`, with a caution above 200 slices; new `timeslice_estimate()` + `SessionState.run_duration()`. (2) `run_reduction` now **streams** drtsans stdout/stderr to the `.out`/`.err` files as it arrives (line-buffered, `PYTHONUNBUFFERED=1`, reader threads) instead of buffering until the end — so the log can be watched with `tail -f`, cancellation stays responsive (~0.2 s poll), and an optional `progress_cb` counts drtsans's per-slice `SaveNexus …_processed.nxs` lines to emit a throttled `⏳ <sample>: slice N/720 (P%)` heartbeat in the TUI (`make_slice_progress`, ≤1 line per 25 slices / 30 s). |
@@ -224,6 +225,52 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-16: /retitle — correct a wrong ONCat run title in-session (v0.44.0)
+
+Asked, in the user's words: "if I can say 'rename 181470 title to be T-L62_0 4m
+10A' … or 'replace s1 with L62_0 in the titles of run xxxx-xxxx' … it will be a
+lot easier."
+
+Why it was needed: `/matchruns` pairs a scattering run with its transmission /
+background / empty-beam runs by parsing the **sample name out of the ONCat title**
+(`matching_service._extract_sample_name`). When the titles are wrong, nothing
+downstream could fix it — `/reclass` changes a run's *class*, `/set <row> sample`
+renames a row *after* matching, and per-row `/set … trans` patches one row and is
+discarded by the next `/matchruns`. IPTS-36552 was the case: transmissions titled
+by sample-changer slot (`T-s1`, `T-s2`, …) while samples carried real names
+(`S-L62_0`), so every transmission failed to pair.
+
+Command surface: `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title;
+`/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across all titles;
+`/retitle show`; `/retitle clear [<runs>]`. Design decisions worth keeping:
+
+- **Whole-word swap by default** — `s1` must not also rewrite `s10`/`s11` (in
+  IPTS-36552 that would have mislabeled two samples). `--regex` is the escape
+  hatch. Pinned by `test_word_swap_does_not_touch_s10_or_s11`.
+- **ONCat is never written.** Corrections live in `state.title_overrides`
+  (`{run: {"title": corrected, "original": what ONCat says}}`), persisted in the
+  session, and re-applied after `/load ipts` and `/refresh catalog` (which would
+  otherwise bring the wrong titles straight back via `apply_title_overrides()`).
+  `/load ipts <different N>` drops them.
+- **`original` keeps ONCat's own title**, not the result of an earlier `/retitle`,
+  so `clear` always restores the real record.
+- **`*` marker** on a corrected title in `/show catalog`.
+- Every path ends by telling the user to run `/matchruns`.
+
+Simulating the rename + `/matchruns` on the IPTS-36552 session pairs 260/261 rows
+(the leftover is `--- all samples 1mm.`, not a sample). The slot→name mapping was
+verified against each NeXus `entry/DASlogs/SampleId` and `SampleTable:Position`,
+not guessed.
+
+`tests/test_retitle.py` (new, +9); `tests/test_load_ipts.py` stub updated for the
+new `_build_catalog_rows(df, overrides)` signature. NL routing in `llm_handler`,
+README, SKILL all updated. 341 tests.
+
+**Files changed:** `commands/catalog.py`, `models/session_state.py`,
+`commands/registry.py`, `services/llm_handler.py`, `tests/test_retitle.py`,
+`tests/test_load_ipts.py`, SKILL.md, README.md, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
 
 ### 2026-09-10: frame-skipping "fs" suffix broke transmission matching (v0.43.1)
 
@@ -386,50 +433,4 @@ exercised directly (app built via `__new__`, no Textual event loop); textual/ric
 import fine under the test interpreter.
 
 **Files changed:** `app.py`, `tests/test_reduce_concurrency.py`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)
-
-Reported from a real run: `/reduce 17` (IPTS-38151, a20a0-1_fs, a time-slice
-reduction) ran 62 minutes, wrote **all** its output — 242 `_Iq.dat`, every
-`_Iqxqy.dat`, `_processed.nxs`, and `.png` across 121 slices — and was then shown
-as `✗ FAILED` with `Cannot install event loop hook for "qt" when running with
---simple-prompt`. The user asked whether it was critical. It was not: the science
-was complete.
-
-Cause: `run_reduction` sets `success = (proc.returncode == 0)`, nothing else. At
-the very end of the script drtsans tried to bring up an interactive Qt plot under
-`--simple-prompt` and the X11 connection dropped — the `.err` held `ICE default
-IO error handler doing an exit(), pid = …, errno = 32` (EPIPE). That made the
-process exit nonzero *after* all files were written, so a complete reduction was
-flagged `error`. Two harms: the user thinks it failed, and the row status `error`
-means `/reduce --new` and autopilot would **re-reduce it** — another hour — for
-nothing. (`_summarize_error` also surfaced the benign qt line because it contains
-"cannot".)
-
-Fix in `reduce_row`, the single choke point all front ends share. After a
-nonzero, non-cancelled exit it checks three things and, if all hold, rescues the
-run to success: (1) I(Q) output files exist — found by glob
-`<name>*_Iq.dat`, which also fixed detection for time-slice layouts
-(`<name>_0_frame_0_Iq.dat`, …) that the old exact-path check missed; (2) the log
-tail carries a recognizable **display-teardown signature** (`cannot install event
-loop hook`, `ice default io error handler`, `xio: fatal io error`, `could not
-connect to display`, `qxcbconnection`, `qt.qpa`); and (3) there is **no** Python
-`Traceback (most recent call last)` — a real crash that merely also touched the
-GUI is not masked. On rescue it sets `success=True`, marks the row `done`, and
-attaches `result.note` ("drtsans exited N on a non-fatal GUI/display error after
-writing K I(Q) file(s) — reduction is complete"), shown as a dim `⚠` line under
-the `✓` in `/reduce` and autopilot and included in the headless JSON detail. A
-run that produced no output, or that has a traceback, still fails as before.
-
-New `note` field on `ReductionResult`. `_summarize_error` already falls back to
-stderr (v0.39.0), so a true failure still reads well.
-
-`tests/test_reduce_preflight.py` (+3: the qt/ICE signature with outputs present
-rescues to done+note; the same signature plus a traceback stays `error`; the
-signature with no output files stays `error`). 313 tests.
-
-**Files changed:** `services/reduction_service.py`,
-`integrations/drtsans_runner.py`, `app.py`, `services/autopilot.py`,
-`headless.py`, `tests/test_reduce_preflight.py`, CLAUDE.md,
 `src/eqsanscli/__init__.py`.

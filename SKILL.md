@@ -180,6 +180,7 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 |-----------|--------|
 | All fields matched (trans, bkg, emp all N/N) | proceed |
 | Missing transmission | `/set --sample <name> trans <run>` or `/set <row> trans <run>` |
+| Transmissions named by slot, not by sample (`T-s1` vs `S-L62_0`) — *no* row matches | Fix the titles, not the rows: `/retitle s1 L62_0`, then `/matchruns`. `/set` patches one row and the next `/matchruns` loses it |
 | Displacement series (`_d0`, `_d2`, …) shares one transmission | `/matchruns` handles it: the `_dX` suffix is ignored, and a config with a single transmission assigns it to all its samples (warns that it matched by configuration) |
 | Transmission title has a frame-skipping suffix (`T-poly 4m 2.5a`**`fs`**) while the sample is `S-poly 4m 2.5a` | Handled automatically — the `fs` suffix is stripped from the sample key so it still matches. No action needed |
 | Transmission measured *after* the first match (higher run number, empty field now) | `/refresh catalog` then `/matchruns --update` back-fills it; or plain `/matchruns` (rebuild) always finds it (matches by sample name, order-independent) |
@@ -425,6 +426,9 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 |---------|---------|
 | `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n) |
 | `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`) |
+| `/retitle <run> <new title>` | Correct one run's title in this session, e.g. `/retitle 181470 T-L62_0 4m 10A`. `/matchruns` pairs **by title**, so this is how a mislabeled transmission is fixed at the source |
+| `/retitle <old> <new> [--runs <spec>]` | Swap a whole word in every title, or only in those runs (`/retitle s1 L62_0`). Whole-word by default — `s1` never rewrites `s10`; `--regex` for anything looser |
+| `/retitle show` / `/retitle clear [<runs>]` | List the corrections made here / restore the ONCat title |
 | `/matchruns` | Auto-match trans/bkg/empty runs using `run_class` from catalog. REBUILDS table |
 | `/matchruns --update` | Append new scattering runs, preserving existing rows (incl. status=done and your edits). Also **back-fills** any still-empty trans/bkg/emp on existing rows from the refreshed catalog — so a transmission measured *after* the first match (higher run number) gets picked up — and drops/re-matches rows whose runs you later reclassified to `ignore`. Use after `/refresh catalog` |
 | `/show table` | Display full working table |

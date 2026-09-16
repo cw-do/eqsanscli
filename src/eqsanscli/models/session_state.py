@@ -78,6 +78,11 @@ class SessionState:
     auto_instrument_files: bool = True
     instrument_cycle_pin: str = ""
     instrument_provenance: dict[str, dict] = field(default_factory=dict)
+    # Local title corrections (/retitle): run number -> {"title": corrected,
+    # "original": what ONCat says}. The ONCat record is never changed; these are
+    # re-applied after every catalog load/refresh, because /matchruns keys on the
+    # title and a mislabeled transmission cannot be paired any other way.
+    title_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
     llm_tokens_used: int = 0
     llm_calls: int = 0
 
@@ -95,6 +100,22 @@ class SessionState:
             self.catalog_data = None
         else:
             self.catalog_data = df.to_dict("records")
+
+    def apply_title_overrides(self) -> int:
+        """Re-apply /retitle corrections to the catalog. Returns how many landed.
+
+        Called after any catalog fetch (/load ipts, /refresh catalog), which
+        otherwise brings ONCat's original — wrong — titles straight back.
+        """
+        if not self.title_overrides or self.catalog_data is None:
+            return 0
+        applied = 0
+        for record in self.catalog_data:
+            override = self.title_overrides.get(str(record.get("run_number", "")))
+            if override and record.get("title") != override["title"]:
+                record["title"] = override["title"]
+                applied += 1
+        return applied
 
     def run_title(self, run_number: str) -> str:
         """Look up the title for a run number from the catalog.
@@ -190,6 +211,7 @@ class SessionState:
             "auto_instrument_files": self.auto_instrument_files,
             "instrument_cycle_pin": self.instrument_cycle_pin,
             "instrument_provenance": self.instrument_provenance,
+            "title_overrides": self.title_overrides,
             "command_history": self.command_history[-500:],  # keep last 500
         }
         with open(path, "w") as f:
@@ -237,6 +259,7 @@ class SessionState:
             plot_linestyle=data.get("plot_linestyle", "line+marker"),
             max_workers=data.get("max_workers", 1),
             drtsans_version=data.get("drtsans_version", "default"),
+            title_overrides=data.get("title_overrides", {}),
             auto_instrument_files=data.get("auto_instrument_files", True),
             instrument_cycle_pin=data.get("instrument_cycle_pin", ""),
             instrument_provenance=data.get("instrument_provenance", {}) or {},

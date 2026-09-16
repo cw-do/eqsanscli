@@ -7,6 +7,52 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)
+
+Reported from a real run: `/reduce 17` (IPTS-38151, a20a0-1_fs, a time-slice
+reduction) ran 62 minutes, wrote **all** its output — 242 `_Iq.dat`, every
+`_Iqxqy.dat`, `_processed.nxs`, and `.png` across 121 slices — and was then shown
+as `✗ FAILED` with `Cannot install event loop hook for "qt" when running with
+--simple-prompt`. The user asked whether it was critical. It was not: the science
+was complete.
+
+Cause: `run_reduction` sets `success = (proc.returncode == 0)`, nothing else. At
+the very end of the script drtsans tried to bring up an interactive Qt plot under
+`--simple-prompt` and the X11 connection dropped — the `.err` held `ICE default
+IO error handler doing an exit(), pid = …, errno = 32` (EPIPE). That made the
+process exit nonzero *after* all files were written, so a complete reduction was
+flagged `error`. Two harms: the user thinks it failed, and the row status `error`
+means `/reduce --new` and autopilot would **re-reduce it** — another hour — for
+nothing. (`_summarize_error` also surfaced the benign qt line because it contains
+"cannot".)
+
+Fix in `reduce_row`, the single choke point all front ends share. After a
+nonzero, non-cancelled exit it checks three things and, if all hold, rescues the
+run to success: (1) I(Q) output files exist — found by glob
+`<name>*_Iq.dat`, which also fixed detection for time-slice layouts
+(`<name>_0_frame_0_Iq.dat`, …) that the old exact-path check missed; (2) the log
+tail carries a recognizable **display-teardown signature** (`cannot install event
+loop hook`, `ice default io error handler`, `xio: fatal io error`, `could not
+connect to display`, `qxcbconnection`, `qt.qpa`); and (3) there is **no** Python
+`Traceback (most recent call last)` — a real crash that merely also touched the
+GUI is not masked. On rescue it sets `success=True`, marks the row `done`, and
+attaches `result.note` ("drtsans exited N on a non-fatal GUI/display error after
+writing K I(Q) file(s) — reduction is complete"), shown as a dim `⚠` line under
+the `✓` in `/reduce` and autopilot and included in the headless JSON detail. A
+run that produced no output, or that has a traceback, still fails as before.
+
+New `note` field on `ReductionResult`. `_summarize_error` already falls back to
+stderr (v0.39.0), so a true failure still reads well.
+
+`tests/test_reduce_preflight.py` (+3: the qt/ICE signature with outputs present
+rescues to done+note; the same signature plus a traceback stays `error`; the
+signature with no output files stays `error`). 313 tests.
+
+**Files changed:** `services/reduction_service.py`,
+`integrations/drtsans_runner.py`, `app.py`, `services/autopilot.py`,
+`headless.py`, `tests/test_reduce_preflight.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: a non-writable output directory no longer crashes eqsanscli (v0.39.0)
 
 Reported: the user set `/set outputdir` to a folder they didn't have permission

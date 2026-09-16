@@ -38,7 +38,7 @@ def test_ipts_from_cwd_variants(monkeypatch):
 def _stub_fetch(monkeypatch):
     monkeypatch.setattr(cat._catalog_service, "fetch",
                         lambda ipts: pd.DataFrame([dict(run_number=1, title="S-x 4m 10A")]))
-    monkeypatch.setattr(cat, "_build_catalog_rows", lambda df: [])
+    monkeypatch.setattr(cat, "_build_catalog_rows", lambda df, overrides=None: [])
 
 
 def test_load_no_arg_infers_from_cwd(monkeypatch):
