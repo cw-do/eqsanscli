@@ -114,7 +114,10 @@ detector configurations, transmission measurements, background subtraction, and 
 Available commands:
 
 CATALOG:
-/load ipts <number>             - Fetch catalog from ONCat
+/oncat status                   - Show whether the user is signed in to ONCat (access is per-user)
+/oncat login                    - Sign in to ONCat (device flow: approve a URL in a browser). "sign in to oncat" / "log in to oncat" / "authenticate oncat" → /oncat login
+/oncat logout                   - Remove the cached ONCat token. "sign out of oncat" → /oncat logout
+/load ipts <number>             - Fetch catalog from ONCat (only IPTS the signed-in user can access; if not signed in, tell them to /oncat login)
 /load ipts                      - Same, inferring the IPTS from the current folder (/SNS/EQSANS/IPTS-NNNNN/...). "load the current ipts" / "load this experiment" / "load the ipts I'm in" → /load ipts
 /refresh catalog                - Re-fetch the current IPTS catalog while preserving any /reclass overrides; reports number of new runs since last fetch
 /list ipts *                    - List all EQSANS experiments (cached after first fetch)

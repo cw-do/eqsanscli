@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from eqsanscli.commands.autopilot import handle_autopilot
 from eqsanscli.commands.calibrate import handle_calibrate
 from eqsanscli.commands.catalog import (
-    handle_list_ipts, handle_reclass,
+    handle_list_ipts, handle_oncat, handle_reclass,
     handle_retitle, handle_refresh_catalog, handle_show, handle_show_table,
 )
 from eqsanscli.commands.config import (
@@ -107,6 +107,7 @@ def register_all(router: CommandRouter) -> None:
     # --- Session persistence ------------------------------------------------
     router.register("save", handle_save)
     router.register("load", handle_load)
+    router.register("oncat", handle_oncat)
     router.register("list tables", handle_list_tables)
     router.register("continue", handle_continue)
     router.register("session", handle_session)

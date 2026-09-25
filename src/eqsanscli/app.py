@@ -559,6 +559,42 @@ class EQSANSApp(App):
                 data.get("fresh", False), data.get("to_step"),
             )
 
+        elif data_type == "oncat_login":
+            self.run_oncat_login()
+
+    @work(thread=True)
+    def run_oncat_login(self) -> None:
+        """ONCat device sign-in in a worker thread — it blocks polling for the
+        browser approval, so it must not run on the event loop. The verification
+        URL is posted into the output log from within the flow."""
+        from eqsanscli.integrations import oncat
+
+        log = self.query_one("#output", RichLog)
+
+        def _write(msg: str) -> None:
+            self.call_from_thread(log.write, Text.from_markup(msg))
+            self.call_from_thread(self.query_one("#output-scroll", VerticalScroll).scroll_end)
+
+        def _handler(challenge) -> None:
+            link = getattr(challenge, "verification_uri_complete", None) or challenge.verification_uri
+            _write("\n[bold yellow]ONCat sign-in — open this URL and approve in your browser:[/bold yellow]")
+            _write(f"  [bold cyan]{link}[/bold cyan]")
+            if not getattr(challenge, "verification_uri_complete", None):
+                _write(f"  code: [bold]{challenge.user_code}[/bold]")
+            _write("  [dim]Sign in with your UCAMS/XCAMS and approve. Waiting...[/dim]")
+
+        oncat.set_verification_handler(_handler)
+        try:
+            me = oncat.login()
+        except Exception as exc:  # noqa: BLE001
+            _write(f"[red]ONCat sign-in failed: {exc}[/red]")
+            return
+        finally:
+            oncat.set_verification_handler(None)
+        name = me.get("name") or me.get("id") or "you"
+        _write(f"[green]✓ Signed in to ONCat as {name}.[/green] "
+               "[dim]You can now /load ipts and /list ipts.[/dim]")
+
     def action_cancel_job(self) -> None:
         self.cancel_job()
 

@@ -1,17 +1,198 @@
-"""ONCat API wrapper — fetches experiment catalog data via pyoncat."""
+"""ONCat API wrapper — per-user catalog access via pyoncat.
+
+Authentication (see ORNL's ONCat docs, reviewed 2026-09-25):
+
+  * **Device Authorization Grant** (recommended, the default here). A *public*
+    client id, no secret. The user approves sign-in once in a browser; a per-user
+    token is cached in their home and reused silently afterwards, so ONCat returns
+    only the experiments THAT user may access. `login()` performs the sign-in;
+    data calls never trigger a browser prompt themselves (token-first).
+  * **Password Grant** (deprecated, browser-free fallback for services such as
+    NDIP/Galaxy). Enabled only when the deployment sets `ONCAT_USERNAME`,
+    `ONCAT_PASSWORD`, `ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET` in the environment —
+    nothing secret is committed.
+
+Precedence per call: a cached/refreshable token → env password-grant credentials →
+(for `login()` only) an interactive device sign-in. A data call with none of these
+raises `OncatAuthRequired`, which the front ends turn into "run sign-in first".
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+import os
+from typing import Any, Callable
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Machine-to-machine credentials for ONCat
-CLIENT_ID = "17ddcb3e-a727-41a2-aec5-43533988ab69"
-CLIENT_SECRET = "3027a2b1-da09-4e13-bf97-f389ff1a747f"
+ONCAT_URL = "https://oncat.ornl.gov"
+
+# Public OAuth client id ONCat publishes for human users. Safe to commit — it is
+# NOT a secret and carries no access on its own; each user authenticates as
+# themselves. (Replaces the committed machine-to-machine client id + secret.)
+PUBLIC_CLIENT_ID = "eaeb036a-2602-4bb9-8530-0bb5812da7a1"
+SCOPES = ["api:read", "data:read", "openid"]
+
+
+class OncatAuthRequired(RuntimeError):
+    """No usable ONCat token and no way to get one without user interaction."""
+
+
+def _token_path() -> str:
+    """Per-user token cache. Override with EQSANSCLI_ONCAT_TOKEN for tests/NDIP."""
+    return os.path.expanduser(
+        os.environ.get("EQSANSCLI_ONCAT_TOKEN", "~/.eqsanscli/oncat_token.json")
+    )
+
+
+def _token_store():
+    import pyoncat
+
+    path = _token_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        os.chmod(os.path.dirname(path), 0o700)
+    except OSError:
+        pass
+    return pyoncat.FileSystemTokenStore(path)
+
+
+# A front end (the TUI) can register how the device-flow verification URL/code is
+# shown; the default prints to stderr, which is right for a plain terminal and for
+# the standalone login step, and stays out of the headless JSON on stdout.
+_verification_handler: Callable[[Any], None] | None = None
+
+
+def set_verification_handler(handler: Callable[[Any], None] | None) -> None:
+    global _verification_handler
+    _verification_handler = handler
+
+
+def _default_verification_handler(challenge: Any) -> None:
+    import sys
+
+    link = getattr(challenge, "verification_uri_complete", None) or challenge.verification_uri
+    print("\n" + "=" * 70, file=sys.stderr)
+    print("  ONCat sign-in required — open this URL in a browser:", file=sys.stderr)
+    print(f"    {link}", file=sys.stderr)
+    if not getattr(challenge, "verification_uri_complete", None):
+        print(f"  and enter the code: {challenge.user_code}", file=sys.stderr)
+    print("  Sign in with your UCAMS/XCAMS and approve. Waiting...", file=sys.stderr)
+    print("=" * 70 + "\n", file=sys.stderr)
+
+
+def _env_password_credentials() -> tuple[str, str, str, str] | None:
+    """(user, password, client_id, client_secret) if the deployment set all four,
+    else None. Lets a browserless service (NDIP/Galaxy) use the Password Grant
+    without any secret living in the code."""
+    user = os.environ.get("ONCAT_USERNAME")
+    pw = os.environ.get("ONCAT_PASSWORD")
+    cid = os.environ.get("ONCAT_CLIENT_ID")
+    secret = os.environ.get("ONCAT_CLIENT_SECRET")
+    if user and pw and cid and secret:
+        return user, pw, cid, secret
+    return None
+
+
+def _make_client(*, interactive: bool):
+    """Build an ONCat client.
+
+    interactive=False (data calls): token-first, never prompts. Uses the env
+    password grant if configured; otherwise a device-flow client pinned to
+    REAUTH_NEVER so an expired/absent token raises instead of popping a browser.
+    interactive=True (`login()`): allows the device browser flow.
+    """
+    try:
+        import pyoncat
+    except ImportError as exc:
+        raise ImportError(
+            "pyoncat>=2.6 is required for ONCat access. Install it with: "
+            "pip install 'pyoncat>=2.6'"
+        ) from exc
+
+    store = _token_store()
+    creds = _env_password_credentials()
+    if creds:
+        user, pw, cid, secret = creds
+        logger.info("ONCat: using env Password Grant for user %s (browserless).", user)
+        return pyoncat.ONCat(
+            ONCAT_URL,
+            client_id=cid,
+            client_secret=secret,
+            token_getter=store.read_token,
+            token_setter=store.write_token,
+            login_prompt=lambda: (user, pw),
+            flow=pyoncat.RESOURCE_OWNER_CREDENTIALS_FLOW,
+        )
+
+    if not interactive and not os.path.exists(_token_path()):
+        raise OncatAuthRequired(
+            "Not signed in to ONCat. Run the one-time sign-in "
+            "(in the TUI: /oncat login; or the command line: eqsanscli-oncat-login), "
+            "approve in your browser, then retry. Unattended services can instead set "
+            "ONCAT_USERNAME/ONCAT_PASSWORD/ONCAT_CLIENT_ID/ONCAT_CLIENT_SECRET."
+        )
+
+    return pyoncat.ONCat(
+        ONCAT_URL,
+        client_id=PUBLIC_CLIENT_ID,
+        scopes=SCOPES,
+        token_getter=store.read_token,
+        token_setter=store.write_token,
+        flow=pyoncat.DEVICE_AUTHORIZATION_FLOW,
+        verification_handler=_verification_handler or _default_verification_handler,
+        reauth_on_expired=(pyoncat.REAUTH_PROMPT if interactive else pyoncat.REAUTH_NEVER),
+    )
+
+
+def login() -> dict:
+    """Perform an interactive ONCat sign-in and cache the token. Returns the
+    signed-in user's summary (id, name, entitlements). Safe to call when already
+    signed in — it just refreshes/validates and returns the summary."""
+    import getpass
+
+    client = _make_client(interactive=True)
+    client.login()
+    try:
+        me = client.User.retrieve(getpass.getuser()).to_dict()
+    except Exception:  # noqa: BLE001 - identity is informational
+        me = {"id": getpass.getuser()}
+    logger.info("ONCat sign-in complete for %s.", me.get("id"))
+    return me
+
+
+def is_signed_in() -> bool:
+    """True if a cached token exists or env credentials are configured. Does not
+    hit the network (a stored token may still turn out to be expired)."""
+    return _env_password_credentials() is not None or os.path.exists(_token_path())
+
+
+def sign_out() -> bool:
+    """Delete the cached token. Returns True if one was removed."""
+    path = _token_path()
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+def _translate_auth_error(exc: Exception) -> Exception:
+    """Map pyoncat auth failures to OncatAuthRequired with actionable text."""
+    import pyoncat
+
+    if isinstance(exc, (
+        getattr(pyoncat, "InvalidRefreshTokenError", ()),
+        getattr(pyoncat, "LoginRequired", ()),
+        getattr(pyoncat, "InteractionRequiredError", ()),
+    )):
+        return OncatAuthRequired(
+            "ONCat session expired. Sign in again (/oncat login, or "
+            "eqsanscli-oncat-login), then retry."
+        )
+    return exc
+
 
 # Fields to fetch from ONCat
 PROJECTION = [
@@ -59,37 +240,30 @@ def _extract_field(record: Any, dotted_path: str) -> Any:
 
 
 def fetch_catalog(ipts: int) -> pd.DataFrame:
-    """Fetch all runs for an IPTS number from ONCat.
+    """Fetch all runs for an IPTS number from ONCat, as the signed-in user.
 
     Returns a DataFrame with columns:
         run_number, title, detector_distance, wavelength,
         total_counts, duration, proton_charge, experiment, location
-    """
-    try:
-        import pyoncat
-    except ImportError:
-        raise ImportError(
-            "pyoncat is required for ONCat access. "
-            "Install it with: pip install pyoncat"
-        )
 
-    logger.info("Connecting to ONCat for IPTS-%d...", ipts)
-    oncat = pyoncat.ONCat(
-        "https://oncat.ornl.gov",
-        flow=pyoncat.CLIENT_CREDENTIALS_FLOW,
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-    )
-    oncat.login()
+    Raises OncatAuthRequired if there is no usable token (front ends prompt the
+    user to sign in). Note: the user only sees IPTS they are entitled to, so an
+    inaccessible IPTS comes back empty just like a nonexistent one.
+    """
+    oncat = _make_client(interactive=False)
 
     logger.info("Fetching catalog for IPTS-%d...", ipts)
-    datafiles = oncat.Datafile.list(
-        facility="SNS",
-        instrument="EQSANS",
-        experiment=f"IPTS-{ipts}",
-        projection=PROJECTION,
-        exts=[".nxs.h5"],
-    )
+    try:
+        oncat.login()
+        datafiles = oncat.Datafile.list(
+            facility="SNS",
+            instrument="EQSANS",
+            experiment=f"IPTS-{ipts}",
+            projection=PROJECTION,
+            exts=[".nxs.h5"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _translate_auth_error(exc) from exc
 
     if not datafiles:
         logger.warning("No datafiles found for IPTS-%d", ipts)
@@ -148,25 +322,18 @@ _experiment_cache: list[dict] | None = None
 
 
 def _fetch_all_experiments() -> list[dict]:
-    try:
-        import pyoncat
-    except ImportError:
-        raise ImportError("pyoncat is required for ONCat access.")
-
-    oncat = pyoncat.ONCat(
-        "https://oncat.ornl.gov",
-        flow=pyoncat.CLIENT_CREDENTIALS_FLOW,
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-    )
-    oncat.login()
+    oncat = _make_client(interactive=False)
 
     logger.info("Fetching EQSANS experiment list from ONCat...")
-    experiments = oncat.Experiment.list(
-        facility="SNS",
-        instrument="EQSANS",
-        projection=_EXPERIMENT_PROJECTION,
-    )
+    try:
+        oncat.login()
+        experiments = oncat.Experiment.list(
+            facility="SNS",
+            instrument="EQSANS",
+            projection=_EXPERIMENT_PROJECTION,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _translate_auth_error(exc) from exc
 
     results = []
     for exp in experiments:
@@ -193,7 +360,7 @@ def _fetch_all_experiments() -> list[dict]:
 
 
 def list_experiments(search: str = "", refresh: bool = False) -> tuple[list[dict], bool]:
-    """List EQSANS experiments, optionally filtered by text.
+    """List EQSANS experiments the signed-in user can access, optionally filtered.
 
     Results are cached in memory after the first fetch. Subsequent calls with
     a different search term filter the cache without hitting the network.

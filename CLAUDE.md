@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.46.0 | 2026-09-25 | **Per-user ONCat login (Device Authorization Grant).** The old code authenticated with a committed machine-to-machine `client_id`+`client_secret` (`CLIENT_CREDENTIALS_FLOW`) — one shared identity for everyone, and the **secret was in the public repo** — which ORNL's docs say must not be used for a distributed CLI. Now each user signs in as themselves: a **public** client id (no secret), device flow, per-user token cached in `~/.eqsanscli/oncat_token.json` (0600), so `/load ipts` and `/list ipts` return **only the IPTS that user can access**. New `/oncat login|status|logout`, an `eqsanscli-oncat-login` console entry, and a launcher hook that runs the one-time sign-in before the TUI. Works over SSH: the verification URL is shown (TUI pane or terminal), the user approves it in their own browser. Data calls are **token-first and never pop a browser** (raise `OncatAuthRequired` → "run /oncat login"); the TUI runs the sign-in in a worker thread. Browserless services (NDIP/Galaxy) can set `ONCAT_USERNAME`/`ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` (deprecated Password Grant, no secret committed) or pre-seed a token. Requires `pyoncat>=2.6` (2.7 installed on the cluster venv). **The leaked m2m secret must be revoked by the ONCat admin** — it stays in git history. |
 | 0.45.2 | 2026-09-25 | Fix: a **retired sensitivity file kept beside its replacement** could be chosen over the live one. On 2026B a new 4 m flood `…_186200.nxs` was added and the old one renamed `…_186200.OLD_nominal_geometry.nxs` and kept "just in case"; both parsed to the same `(variant, plain, run)`, and on that tie `_pick_sensitivity`'s `max()` returned the alphabetically-first candidate — and `.OLD_…` sorts before `.nxs` — so 4 m reductions silently used the old map. `SensitivityFile` gains a `deprecated` flag (name contains a delimited marker token: `OLD`/`bak`/`backup`/`deprecated`/`superseded`/`donotuse`/…), and `not deprecated` is now the top-priority ranking key: a live file always beats a marked sibling, but a marked file is still used if it is the only map for that distance (deprioritize, don't exclude — a cycle never loses its sensitivity). Protocol CAL-06. The live 2026B test was de-literal'd (asserts a live 4 m map the folder holds, never an `OLD` one) per the "no pinned machine-physics literals" rule. |
 | 0.45.1 | 2026-09-25 | `/load ipts` now **suggests** the conventional output folder. It still does not change the cwd or the output dir (deliberately safe — reduced files default to `./output/` next to the cwd), but the load message now shows where output currently points and a ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. The nudge is suppressed when the current output dir is already inside this experiment's tree (contains `IPTS-<N>`), so a configured session isn't nagged. Suggestion only — nothing is set for you. |
 | 0.45.0 | 2026-09-25 | **Title tokens name each sample's background and thickness.** A background titled `bkg<N>_…` is background N; a sample titled `…_bg<N>_…` gets that background from its own config at the same temperature token (else the only `bkg<N>` there; never guessed — unresolved keeps the default and warns); `…_th<X>mm_…` sets thickness (`th0p5mm` = 0.05 cm). The pointer is `bg`, not `bkg`, because any title containing "bkg" is a background. Before, every sample got the config's lowest-numbered background, so contrast and per-temperature solvent series were mis-paired. `--update` keeps a title-named background; `/matchruns --no-title-tokens` restores the old behaviour. Existing titles unaffected: identical tables and warnings vs 0.44.0 on IPTS-36552/38603. BKG-04, TBL-08. |
@@ -228,6 +229,60 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-25: per-user ONCat login via the Device Authorization Grant (v0.46.0)
+
+Asked to review ORNL's ONCat auth docs against our integration. Two problems: the
+CLI authenticated with a committed machine-to-machine `client_id`+`client_secret`
+(`CLIENT_CREDENTIALS_FLOW`) — (1) one shared *application* identity for everyone,
+so `/load ipts`/`/list ipts` couldn't reflect per-user entitlement (the stated
+requirement), and (2) the **secret is in the public GitHub repo**. ORNL's docs are
+explicit that client-credentials is not for user-facing/distributed CLIs and that
+the **Device Authorization Grant** is the recommended flow for exactly this case.
+
+Investigated feasibility: `pyoncat>=2.6` is needed for the device flow; 2.7 is
+available on ORNL's repoman index and installs cleanly into the app venv (pure
+Python, needs only `requests`). Prototyped it end to end with a real sign-in —
+confirmed per-user access (identity + the user's own EQSANS experiment list) and
+silent token reuse on the second run.
+
+`integrations/oncat.py` rewritten:
+- Public device-flow client id (`eaeb036a-…`, no secret), scopes
+  `api:read data:read openid`, per-user `FileSystemTokenStore` at
+  `~/.eqsanscli/oncat_token.json` (dir 0700, file 0600).
+- **Token-first, non-interactive data calls**: `fetch_catalog`/`list_experiments`
+  build the client with `REAUTH_NEVER` and never pop a browser; with no usable
+  token they raise `OncatAuthRequired` (front ends turn it into "run /oncat
+  login"). `_translate_auth_error` maps pyoncat expiry errors to the same.
+- Explicit `login()` (device flow, `REAUTH_PROMPT`) + `is_signed_in()` /
+  `sign_out()`. An injectable `set_verification_handler` lets each front end show
+  the verification URL/code where it belongs (default: stderr).
+- **Browserless fallback for services (NDIP/Galaxy):** if `ONCAT_USERNAME`/
+  `ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` are all set, use the
+  (deprecated) Password Grant — no secret committed, the deployment provides it.
+  Precedence: env password grant → cached token → (login only) device browser.
+
+Front ends: new `/oncat status|login|logout` (`handle_oncat`, registered); the TUI
+runs `login()` in a `@work` thread (`run_oncat_login`) and posts the URL into the
+output pane — works over SSH (approve in your own browser); headless refuses
+`oncat_login` with guidance (can't browser-sign-in mid-JSON); the `eqsanscli`
+launcher runs the one-time sign-in in the plain terminal before the TUI when no
+token exists; new `eqsanscli-oncat-login` console entry. `pyproject` pins
+`pyoncat>=2.6` and adds the entry point.
+
+**Security:** the previously committed m2m secret is removed from the code but
+remains in git history — it must be **revoked/rotated by the ONCat admin**.
+
+`tests/test_oncat_auth.py` (+6: no secret in source; token file drives
+`is_signed_in`/`sign_out`; a data call without a token raises `OncatAuthRequired`
+and `/load ipts` surfaces it; `/oncat` status/login/logout; env creds select the
+Password Grant). SKILL + LLM routing + docs updated. 363 tests.
+
+**Files changed:** `integrations/oncat.py`, `commands/catalog.py`,
+`commands/registry.py`, `app.py`, `headless.py`, `oncat_login_cli.py` (new),
+`eqsanscli` (launcher), `pyproject.toml`, `services/llm_handler.py`, SKILL.md,
+`tests/test_oncat_auth.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
 
 ### 2026-09-25: a retired sensitivity file no longer wins over its replacement (v0.45.2)
 
@@ -381,33 +436,3 @@ README, SKILL all updated. 341 tests.
 `commands/registry.py`, `services/llm_handler.py`, `tests/test_retitle.py`,
 `tests/test_load_ipts.py`, SKILL.md, README.md, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-10: frame-skipping "fs" suffix broke transmission matching (v0.43.1)
-
-Reported on IPTS-38151: the first transmissions (188011–188019) were measured at
-λ=0 and ignored; re-measured ones (188029+) were titled with a frame-skipping
-suffix — `T-porsil 4m 2.5afs`, `T-a0ss 4m 2.5afs` — while the samples stayed
-`S-porsil 4m 2.5a`. After `/matchruns` every sample had no transmission.
-
-Cause: `_extract_sample_name` strips the config token so a title reduces to a
-bare sample key ("S-porsil 4m 2.5a" → "porsil"). Its regex matched distance +
-wavelength + an optional `\d+Hz`, but not a `fs` (frame-skipping) suffix glued to
-the wavelength. So "T-porsil 4m 2.5afs" stripped only "4m 2.5a", leaving "fs" →
-sample key "porsil_fs", which matched nothing (the transmission lookup and its
-temperature/displacement-stripped fallback both keyed on the mismatched name).
-Classification was fine — 188029/188030/188031 were correctly EmpT/BkgT/T — the
-failure was purely the name key.
-
-Fix: the config regex now also consumes an optional `fs` (attached `2.5afs` or
-spaced `2.5a fs`), an optional frequency, and a trailing `fs`, case-insensitive.
-`T-porsil 4m 2.5afs` → "porsil", matching `S-porsil 4m 2.5a`. Verified end to end
-on the IPTS-38151 titles: porsil/a0ss/… each get their `…fs` transmission, empty
-beam, and background. Frequency-only and temperature/thickness titles are
-unchanged.
-
-`tests/test_matching.py` (+3: fs stripped from the name attached/spaced/with
-frequency; the fs transmission matches its plain sample end-to-end; 60Hz and
-thickness titles still strip). 332 tests.
-
-**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
-CLAUDE.md, `src/eqsanscli/__init__.py`.

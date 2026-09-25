@@ -412,14 +412,27 @@ Accepted formats for `<row>`: index (`3`), run number (`172815`), range (`1-5`, 
 
 ### Catalog & Loading
 
+ONCat access is **per-user**: each user signs in once with their own ORNL
+credentials and sees only the IPTS they are entitled to. The TUI launcher runs the
+one-time sign-in automatically on first use; otherwise sign in with
+`/oncat login` (or the `eqsanscli-oncat-login` command in a terminal). The token
+is cached in `~/.eqsanscli/` and reused, so later launches need no prompt. In
+**headless** mode a browser sign-in can't run mid-protocol — cache a token first
+with `eqsanscli-oncat-login`, or set `ONCAT_USERNAME`/`ONCAT_PASSWORD`/
+`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` for unattended use. A data command run
+before sign-in returns "Not signed in to ONCat".
+
 | Command | Purpose |
 |---------|---------|
-| `/load ipts <N>` | Fetch experiment catalog from ONCat (REPLACES current catalog) |
+| `/oncat status` | Show whether you are signed in to ONCat |
+| `/oncat login` | Sign in to ONCat (device flow — approve a URL in your browser; over SSH, copy the URL to your local browser) |
+| `/oncat logout` | Remove the cached ONCat token |
+| `/load ipts <N>` | Fetch experiment catalog from ONCat (REPLACES current catalog) — only IPTS you can access |
 | `/load ipts` | Same, using the IPTS of the current folder (when under `/SNS/EQSANS/IPTS-NNNNN/…`) |
 | `/refresh catalog` | Re-fetch current IPTS catalog while preserving `/reclass` overrides; reports new runs |
 | `/show catalog` | Display all runs with metadata |
 | `/show ipts` | Show current IPTS number |
-| `/list ipts *` | List all EQSANS experiments |
+| `/list ipts *` | List all EQSANS experiments you can access |
 | `/list ipts <text>` | Search experiments by title |
 
 ### Working Table

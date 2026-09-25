@@ -7,6 +7,36 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: frame-skipping "fs" suffix broke transmission matching (v0.43.1)
+
+Reported on IPTS-38151: the first transmissions (188011–188019) were measured at
+λ=0 and ignored; re-measured ones (188029+) were titled with a frame-skipping
+suffix — `T-porsil 4m 2.5afs`, `T-a0ss 4m 2.5afs` — while the samples stayed
+`S-porsil 4m 2.5a`. After `/matchruns` every sample had no transmission.
+
+Cause: `_extract_sample_name` strips the config token so a title reduces to a
+bare sample key ("S-porsil 4m 2.5a" → "porsil"). Its regex matched distance +
+wavelength + an optional `\d+Hz`, but not a `fs` (frame-skipping) suffix glued to
+the wavelength. So "T-porsil 4m 2.5afs" stripped only "4m 2.5a", leaving "fs" →
+sample key "porsil_fs", which matched nothing (the transmission lookup and its
+temperature/displacement-stripped fallback both keyed on the mismatched name).
+Classification was fine — 188029/188030/188031 were correctly EmpT/BkgT/T — the
+failure was purely the name key.
+
+Fix: the config regex now also consumes an optional `fs` (attached `2.5afs` or
+spaced `2.5a fs`), an optional frequency, and a trailing `fs`, case-insensitive.
+`T-porsil 4m 2.5afs` → "porsil", matching `S-porsil 4m 2.5a`. Verified end to end
+on the IPTS-38151 titles: porsil/a0ss/… each get their `…fs` transmission, empty
+beam, and background. Frequency-only and temperature/thickness titles are
+unchanged.
+
+`tests/test_matching.py` (+3: fs stripped from the name attached/spaced/with
+frequency; the fs transmission matches its plain sample end-to-end; 60Hz and
+thickness titles still strip). 332 tests.
+
+**Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
+CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: per-row output directory — /set <rows> outputdir <path> (v0.43.0)
 
 Asked: time-slice reductions generate a lot of data, so the user wants each

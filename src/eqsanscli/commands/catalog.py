@@ -5,6 +5,7 @@ import re
 from typing import TYPE_CHECKING
 
 from eqsanscli.commands.router import CommandResult
+from eqsanscli.integrations.oncat import OncatAuthRequired
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.catalog_service import CatalogService
 from eqsanscli.services.matching_service import (
@@ -116,6 +117,8 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
         df = _catalog_service.fetch(ipts)
     except ImportError as e:
         return CommandResult(success=False, message=str(e))
+    except OncatAuthRequired as e:
+        return CommandResult(success=False, message=str(e))
     except Exception as e:
         return CommandResult(success=False, message=f"ONCat error: {e}")
 
@@ -173,6 +176,8 @@ async def handle_refresh_catalog(args: list[str], state: SessionState) -> Comman
     try:
         fresh_df = _catalog_service.fetch(state.ipts)
     except ImportError as e:
+        return CommandResult(success=False, message=str(e))
+    except OncatAuthRequired as e:
         return CommandResult(success=False, message=str(e))
     except Exception as e:
         return CommandResult(success=False, message=f"ONCat error: {e}")
@@ -328,6 +333,8 @@ async def handle_list_ipts(args: list[str], state: SessionState) -> CommandResul
         from eqsanscli.integrations.oncat import list_experiments
         experiments, from_cache = list_experiments(search, refresh=refresh)
     except ImportError as e:
+        return CommandResult(success=False, message=str(e))
+    except OncatAuthRequired as e:
         return CommandResult(success=False, message=str(e))
     except Exception as e:
         return CommandResult(success=False, message=f"ONCat error: {e}")
@@ -806,3 +813,56 @@ async def handle_show_table(args: list[str], state: SessionState) -> CommandResu
         message=label,
         data={"type": "working_table", "rows": rows},
     )
+
+
+# --------------------------------------------------------------------------
+# /oncat — per-user ONCat sign-in (Device Authorization Grant)
+# --------------------------------------------------------------------------
+
+_ONCAT_USAGE = (
+    "Usage: /oncat status | /oncat login | /oncat logout\n"
+    "  ONCat access is per-user. Sign in once (a browser approval); the token is\n"
+    "  cached in ~/.eqsanscli/ and reused, so /load ipts shows only IPTS you can\n"
+    "  access. Unattended services set ONCAT_USERNAME/ONCAT_PASSWORD/\n"
+    "  ONCAT_CLIENT_ID/ONCAT_CLIENT_SECRET instead."
+)
+
+
+async def handle_oncat(args: list[str], state: SessionState) -> CommandResult:
+    """Manage the per-user ONCat sign-in used by /load ipts and /list ipts."""
+    from eqsanscli.integrations import oncat
+
+    sub = (args[0].lower() if args else "status")
+
+    if sub in ("status", "whoami"):
+        if oncat.is_signed_in():
+            return CommandResult(
+                success=True,
+                message=f"Signed in to ONCat (token: {oncat._token_path()}).\n"
+                "  /load ipts and /list ipts return only the IPTS you can access.",
+            )
+        return CommandResult(
+            success=True,
+            message="Not signed in to ONCat. Run /oncat login (approve in a browser).",
+        )
+
+    if sub in ("logout", "signout", "sign-out"):
+        removed = oncat.sign_out()
+        return CommandResult(
+            success=True,
+            message=("Signed out — cached ONCat token removed."
+                     if removed else "No cached ONCat token to remove."),
+        )
+
+    if sub == "login":
+        # The device flow blocks while polling for browser approval, so the TUI
+        # runs it in a worker (see app._render_data); headless can't browser-login
+        # mid-protocol and reports the console alternative.
+        return CommandResult(
+            success=True,
+            message="Starting ONCat sign-in — a verification URL will appear; "
+            "approve it in your browser.",
+            data={"type": "oncat_login"},
+        )
+
+    return CommandResult(success=False, message=_ONCAT_USAGE)

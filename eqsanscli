@@ -18,4 +18,11 @@ export PYTHONNOUSERSITE=1              # ignore ~/.local (may hold an incompatib
 export PYTHONPATH="$SCRIPT_DIR/src"    # only our package — NOT the user's PYTHONPATH
 export EQSANSCLI_ROOT="$SCRIPT_DIR"
 
+# ONCat access is per-user (Device Authorization Grant). If this user has no
+# cached token yet and no env credentials, do the one-time browser sign-in here
+# in the plain terminal — before the TUI takes over the screen — so the prompt is
+# visible. Later launches skip this (the token is cached in ~/.eqsanscli/).
+"$SCRIPT_DIR/.venv/bin/python" -c "import sys; sys.path.insert(0,'$SCRIPT_DIR/src'); from eqsanscli.integrations import oncat; sys.exit(0 if oncat.is_signed_in() else 1)" \
+    || "$SCRIPT_DIR/.venv/bin/python" -m eqsanscli.oncat_login_cli || true
+
 exec "$SCRIPT_DIR/.venv/bin/python" -m eqsanscli "$@"

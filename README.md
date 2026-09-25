@@ -130,9 +130,21 @@ Use `--force` to re-reduce all rows regardless of status.
 
 ### Catalog & Data Loading
 
+**ONCat access is per-user.** Each user signs in once with their own ORNL
+credentials (Device Authorization Grant — no shared secret) and sees only the IPTS
+they're entitled to. The launcher runs the one-time sign-in automatically on first
+use; you can also sign in with `/oncat login` in the TUI or `eqsanscli-oncat-login`
+in a terminal. Over SSH, the sign-in shows a URL you approve in your **local**
+browser; the token is then cached in `~/.eqsanscli/` and reused. Unattended
+services (e.g. NDIP/Galaxy) can instead set `ONCAT_USERNAME`, `ONCAT_PASSWORD`,
+`ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET`. Requires `pyoncat>=2.6`.
+
 | Command | Description |
 |---------|-------------|
-| `/load ipts <number>` | Fetch catalog from ONCat (REPLACES current catalog, wipes `/reclass` overrides) |
+| `/oncat status` | Show whether you're signed in to ONCat |
+| `/oncat login` | Sign in to ONCat (approve a URL in your browser; works over SSH) |
+| `/oncat logout` | Remove the cached ONCat token |
+| `/load ipts <number>` | Fetch catalog from ONCat (REPLACES current catalog, wipes `/reclass` overrides); only IPTS you can access |
 | `/refresh catalog` | Re-fetch the current IPTS catalog while PRESERVING `/reclass` overrides; reports new runs since last fetch. Use mid-experiment. |
 | `/show catalog` | Display loaded catalog (with Class column: S, T, BkgS, BkgT, EmpT, N=ignored) |
 | `/show ipts` | Show current IPTS number |

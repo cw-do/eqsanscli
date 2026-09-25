@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.45.2</div>
+          data reduction tool &middot; v0.46.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,12 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-10-frame-skipping-fs-suffix-broke-transmission-matching-v0431">2026-09-10: frame-skipping &quot;fs&quot; suffix broke transmission matching (v0.43.1)<a class="anchor" href="#2026-09-10-frame-skipping-fs-suffix-broke-transmission-matching-v0431">#</a></h3>
+<p>Reported on IPTS-38151: the first transmissions (188011–188019) were measured at λ=0 and ignored; re-measured ones (188029+) were titled with a frame-skipping suffix — <code>T-porsil 4m 2.5afs</code>, <code>T-a0ss 4m 2.5afs</code> — while the samples stayed <code>S-porsil 4m 2.5a</code>. After <code><a href="commands.html#cmd-matchruns">/matchruns</a></code> every sample had no transmission.</p>
+<p>Cause: <code>_extract_sample_name</code> strips the config token so a title reduces to a bare sample key (&quot;S-porsil 4m 2.5a&quot; → &quot;porsil&quot;). Its regex matched distance + wavelength + an optional <code>\d+Hz</code>, but not a <code>fs</code> (frame-skipping) suffix glued to the wavelength. So &quot;T-porsil 4m 2.5afs&quot; stripped only &quot;4m 2.5a&quot;, leaving &quot;fs&quot; → sample key &quot;porsil_fs&quot;, which matched nothing (the transmission lookup and its temperature/displacement-stripped fallback both keyed on the mismatched name). Classification was fine — 188029/188030/188031 were correctly EmpT/BkgT/T — the failure was purely the name key.</p>
+<p>Fix: the config regex now also consumes an optional <code>fs</code> (attached <code>2.5afs</code> or spaced <code>2.5a fs</code>), an optional frequency, and a trailing <code>fs</code>, case-insensitive. <code>T-porsil 4m 2.5afs</code> → &quot;porsil&quot;, matching <code>S-porsil 4m 2.5a</code>. Verified end to end on the IPTS-38151 titles: porsil/a0ss/… each get their <code>…fs</code> transmission, empty beam, and background. Frequency-only and temperature/thickness titles are unchanged.</p>
+<p><code>tests/test_matching.py</code> (+3: fs stripped from the name attached/spaced/with frequency; the fs transmission matches its plain sample end-to-end; 60Hz and thickness titles still strip). 332 tests.</p>
+<p><strong>Files changed:</strong> <code>services/matching_service.py</code>, <code>tests/test_matching.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-10-per-row-output-directory-set-outputdir-v0430">2026-09-10: per-row output directory — /set &lt;rows&gt; outputdir &lt;path&gt; (v0.43.0)<a class="anchor" href="#2026-09-10-per-row-output-directory-set-outputdir-v0430">#</a></h3>
 <p>Asked: time-slice reductions generate a lot of data, so the user wants each sample written to its own folder — &quot;if a per-sample outputdir is defined use it, otherwise the session-wide one.&quot; Chosen design (with the user): a per-row override, two-tier fallback, no auto-magic.</p>
 <p>New <code>output_override: str = &quot;&quot;</code> on <code>WorkingTableRow</code>, alongside <code>configuration_override</code> and persisted in <code>to_dict</code> (<code>from_dict</code> already drops unknown keys / keeps dataclass fields, so old sessions load with <code>&quot;&quot;</code>). Deliberately <strong>not</strong> in <code>_REDUCTION_FIELDS</code>: changing where output is written does not invalidate a <code>done</code> reduction, so it never silently marks a done row <code>modified</code> (an hour-long time-slice run must not re-run just because you moved its folder).</p>

@@ -256,6 +256,20 @@ def run_headless() -> None:
             if result.data:
                 data_type = result.data.get("type")
 
+                if data_type == "oncat_login":
+                    # A device browser sign-in can't happen mid-JSON. Point at the
+                    # console login (or env credentials) instead of blocking.
+                    _emit({
+                        "success": False,
+                        "message": "ONCat sign-in can't run in headless mode. Run "
+                        "'eqsanscli-oncat-login' in a terminal (approve in a browser) "
+                        "to cache a token, or set ONCAT_USERNAME/ONCAT_PASSWORD/"
+                        "ONCAT_CLIENT_ID/ONCAT_CLIENT_SECRET for unattended use.",
+                        "data": None,
+                    })
+                    _autosave(state)
+                    continue
+
                 if data_type == "start_reduction":
                     reduction_result = _run_reduction_sync(
                         state, result.data["indices"], loop, router,
