@@ -70,6 +70,28 @@ def test_invalid_number_rejected():
     assert not res.success and "Invalid" in res.message
 
 
+def test_suggests_shared_outputdir_when_unset(monkeypatch):
+    # /load ipts doesn't change the output dir, but suggests the conventional one
+    # when the current dir isn't already inside this experiment's tree.
+    _stub_fetch(monkeypatch)
+    monkeypatch.setattr(cat.os, "getcwd", lambda: "/home/user/elsewhere")
+    st = SessionState()                       # default output_directory "./output/"
+    res = _run(["38659"], st)
+    assert res.success
+    assert "/set outputdir /SNS/EQSANS/IPTS-38659/shared/output/" in res.message
+    assert st.output_directory == "./output/"   # suggestion only — nothing changed
+
+
+def test_no_outputdir_suggestion_when_already_under_ipts(monkeypatch):
+    _stub_fetch(monkeypatch)
+    monkeypatch.setattr(cat.os, "getcwd", lambda: "/home/user/elsewhere")
+    st = SessionState()
+    st.output_directory = "/SNS/EQSANS/IPTS-38659/shared/output"
+    res = _run(["38659"], st)
+    assert res.success
+    assert "/set outputdir" not in res.message   # already pointed there → no nag
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))

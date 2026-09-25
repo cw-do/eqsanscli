@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.45.1 | 2026-09-25 | `/load ipts` now **suggests** the conventional output folder. It still does not change the cwd or the output dir (deliberately safe — reduced files default to `./output/` next to the cwd), but the load message now shows where output currently points and a ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. The nudge is suppressed when the current output dir is already inside this experiment's tree (contains `IPTS-<N>`), so a configured session isn't nagged. Suggestion only — nothing is set for you. |
 | 0.45.0 | 2026-09-25 | **Title tokens name each sample's background and thickness.** A background titled `bkg<N>_…` is background N; a sample titled `…_bg<N>_…` gets that background from its own config at the same temperature token (else the only `bkg<N>` there; never guessed — unresolved keeps the default and warns); `…_th<X>mm_…` sets thickness (`th0p5mm` = 0.05 cm). The pointer is `bg`, not `bkg`, because any title containing "bkg" is a background. Before, every sample got the config's lowest-numbered background, so contrast and per-temperature solvent series were mis-paired. `--update` keeps a title-named background; `/matchruns --no-title-tokens` restores the old behaviour. Existing titles unaffected: identical tables and warnings vs 0.44.0 on IPTS-36552/38603. BKG-04, TBL-08. |
 | 0.44.0 | 2026-09-16 | **New `/retitle` command — correct a wrong ONCat run title in-session so `/matchruns` can pair it.** `/matchruns` derives the sample name from the title, so a transmission mislabeled by sample-changer slot (`T-s1 4m 10A`) can never pair with `S-L62_0 4m 10A` — and `/reclass` (fixes *class*), `/set <row> sample` (renames *after* matching) and per-row `/set … trans` (thrown away by the next `/matchruns`) couldn't fix it. `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title; `/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across titles (**whole-word by default** so `s1` never rewrites `s10`/`s11`); `/retitle show` / `/retitle clear [<runs>]`. Corrections live in the session (`state.title_overrides`, `{run: {title, original}}`), never touch ONCat, and are re-applied after `/load ipts`/`/refresh catalog` (which would bring the wrong titles back); `/show catalog` marks a corrected title with a trailing `*`; `original` always keeps ONCat's own title so `clear` restores the real record. Motivated by IPTS-36552 (11 slots × 2 configs; verified against each NeXus `SampleId`/`SampleTable:Position`). |
 | 0.43.1 | 2026-09-10 | Fix: a frame-skipping mode suffix in a transmission title stopped it matching its sample. IPTS-38151 samples were titled `S-porsil 4m 2.5a` but the re-measured transmissions `T-porsil 4m 2.5a`**`fs`** — the `fs` glued to the wavelength leaked past the config-stripping regex into the extracted sample name (`porsil_fs`), so it never matched `porsil` and every sample came out with no transmission. `_extract_sample_name`'s config regex now also consumes a `fs` suffix (attached `2.5afs` or spaced `2.5a fs`) and a following frequency token, so `T-…fs` transmissions match their plain `S-…` samples. Classification was already correct; only name extraction was wrong. |
@@ -226,6 +227,27 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)
+
+Asked, after confirming the current behaviour is safe: "having /load ipts suggest
+[a] default outputdir." `/load ipts` deliberately changes neither the cwd nor the
+output dir — there is no `chdir` in the reduction path, and output defaults to
+`./output/` relative to wherever eqsanscli was launched. That is safe but easy to
+forget, so reduced files can scatter into a stray `./output/`.
+
+Fix: purely a message addition — no side effect. After a successful `/load ipts`
+the handler appends a line showing where output currently points and a
+ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. It is
+suppressed when `os.path.abspath(state.output_directory)` already contains
+`IPTS-<N>` (a session that is already pointed at the experiment tree isn't
+nagged). Nothing is set automatically — the user still runs `/set outputdir`.
+
+`tests/test_load_ipts.py` (+2: the suggestion appears and changes nothing when
+the output dir is unset; it is absent when the dir is already under this IPTS).
+
+**Files changed:** `commands/catalog.py`, `tests/test_load_ipts.py`, CLAUDE.md,
+docs (regenerated), `src/eqsanscli/__init__.py`.
 
 ### 2026-09-25: title tokens name each sample's background and thickness (v0.45.0)
 
@@ -405,48 +427,3 @@ front). 329 tests.
 `services/reduction_service.py`, `commands/reduction.py`, `app.py`,
 `services/llm_handler.py`, SKILL.md, `tests/test_matching.py`,
 `tests/test_reduce_preflight.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-10: time-slice slice estimate up front + live progress heartbeat (v0.42.0)
-
-Reported: reducing a 1-hour run with a 5 s time-slice interval, "the job was
-running too long and I have no way of knowing how far it is." Two gaps: no sense
-of scale (5 s on 3600 s = **720 slices**, each a full independent reduction), and
-no progress — drtsans output was captured only when the process ended.
-
-**1 — Up-front estimate.** `/reduce` (and autopilot) now print a per-config line
-before launching: `⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)`, with
-a bold caution above 200 slices ("that is a lot of slices; check the interval
-matches the timescale you care about") and a note that drtsans writes a full
-I(Q)/I(Qx,Qy)/NeXus set per slice. New pure `timeslice_estimate(config, duration)`
-→ `{slices, interval_s, duration_s}` or None (off / interval ≤ 0 / duration
-unknown), fed by new `SessionState.run_duration(run)` (catalog `duration`, mirrors
-`run_title`). The count is per distinct config in the selection.
-
-**2 — Live output + progress.** `run_reduction` no longer buffers with
-`proc.communicate()` until the end; it Popens drtsans with `PYTHONUNBUFFERED=1`
-and drains stdout/stderr on two reader threads that write each line to the
-`.out`/`.err` files and flush. So the log now **grows during the run** (watchable
-with `tail -f`), cancellation is a responsive `poll()`/0.2 s loop (kill → threads
-join → append "Cancelled by user."), and an optional `progress_cb(line)` sees
-output live. `make_slice_progress(emit, label, total)` builds a callback that
-counts drtsans's one-per-slice `SaveNexus …_processed.nxs` lines and emits a
-throttled `⏳ <sample>: slice N/720 (P%)` heartbeat (≤ 1 line per 25 slices AND
-30 s, so a 720-slice run gives a readable trickle, not 720 lines). Wired through
-`reduce_row(progress_cb=…)` into both `/reduce` branches and both autopilot
-branches; attached only for a time-slicing row (a plain run also writes one
-processed.nxs, which would otherwise read as "slice 1").
-
-Verified against a fake drtsans: the `.out` file grows mid-run, stderr stays
-separate, a mid-run cancel returns in ~0.4 s, and the progress callback fires per
-slice.
-
-`tests/test_timeslice_progress.py` (new, +6: estimate counts/rounds-up and is
-None when off/unknown; progress parses `SaveNexus`, formats `N/total (P%)`, caps
-at 100%, and throttles by count; `run_duration` from the catalog). Two existing
-`run_reduction` fakes gained the `progress_cb=None` kwarg. 322 tests.
-
-**Files changed:** `integrations/drtsans_runner.py`,
-`services/reduction_service.py`, `commands/reduction.py`,
-`models/session_state.py`, `app.py`, `services/autopilot.py`,
-`tests/test_timeslice_progress.py`, `tests/test_reduce_preflight.py`,
-`tests/test_reduce_cancel.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.

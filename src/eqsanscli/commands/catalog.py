@@ -134,10 +134,22 @@ async def handle_load_ipts(args: list[str], state: SessionState) -> CommandResul
     n_titles = state.apply_title_overrides()
     title_note = f"\n  Re-applied {n_titles} /retitle correction(s)." if n_titles else ""
 
+    # Suggest the conventional output folder — /load ipts deliberately does NOT
+    # change the output dir (that stays safe/explicit), but reduced files default
+    # to ./output/ next to the cwd, which is rarely what you want. Only nudge when
+    # the current output dir isn't already inside this experiment's tree.
+    outdir_note = ""
+    if f"IPTS-{ipts}" not in os.path.abspath(state.output_directory):
+        suggested = f"/SNS/EQSANS/IPTS-{ipts}/shared/output/"
+        outdir_note = (
+            f"\n  [dim]Output currently → {os.path.abspath(state.output_directory)}. "
+            f"Set the experiment folder with:[/dim] /set outputdir {suggested}"
+        )
+
     rows = _build_catalog_rows(state.catalog, state.title_overrides)
     return CommandResult(
         success=True,
-        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs){inferred_note}{title_note}",
+        message=f"Loaded IPTS-{ipts} catalog ({len(df)} runs){inferred_note}{title_note}{outdir_note}",
         data={"type": "catalog", "rows": rows, "ipts": ipts},
     )
 

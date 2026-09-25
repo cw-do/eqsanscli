@@ -7,6 +7,51 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: time-slice slice estimate up front + live progress heartbeat (v0.42.0)
+
+Reported: reducing a 1-hour run with a 5 s time-slice interval, "the job was
+running too long and I have no way of knowing how far it is." Two gaps: no sense
+of scale (5 s on 3600 s = **720 slices**, each a full independent reduction), and
+no progress — drtsans output was captured only when the process ended.
+
+**1 — Up-front estimate.** `/reduce` (and autopilot) now print a per-config line
+before launching: `⏱ Time-slicing 4m2.5a30hz: ~720 slices/run (3600s ÷ 5s)`, with
+a bold caution above 200 slices ("that is a lot of slices; check the interval
+matches the timescale you care about") and a note that drtsans writes a full
+I(Q)/I(Qx,Qy)/NeXus set per slice. New pure `timeslice_estimate(config, duration)`
+→ `{slices, interval_s, duration_s}` or None (off / interval ≤ 0 / duration
+unknown), fed by new `SessionState.run_duration(run)` (catalog `duration`, mirrors
+`run_title`). The count is per distinct config in the selection.
+
+**2 — Live output + progress.** `run_reduction` no longer buffers with
+`proc.communicate()` until the end; it Popens drtsans with `PYTHONUNBUFFERED=1`
+and drains stdout/stderr on two reader threads that write each line to the
+`.out`/`.err` files and flush. So the log now **grows during the run** (watchable
+with `tail -f`), cancellation is a responsive `poll()`/0.2 s loop (kill → threads
+join → append "Cancelled by user."), and an optional `progress_cb(line)` sees
+output live. `make_slice_progress(emit, label, total)` builds a callback that
+counts drtsans's one-per-slice `SaveNexus …_processed.nxs` lines and emits a
+throttled `⏳ <sample>: slice N/720 (P%)` heartbeat (≤ 1 line per 25 slices AND
+30 s, so a 720-slice run gives a readable trickle, not 720 lines). Wired through
+`reduce_row(progress_cb=…)` into both `/reduce` branches and both autopilot
+branches; attached only for a time-slicing row (a plain run also writes one
+processed.nxs, which would otherwise read as "slice 1").
+
+Verified against a fake drtsans: the `.out` file grows mid-run, stderr stays
+separate, a mid-run cancel returns in ~0.4 s, and the progress callback fires per
+slice.
+
+`tests/test_timeslice_progress.py` (new, +6: estimate counts/rounds-up and is
+None when off/unknown; progress parses `SaveNexus`, formats `N/total (P%)`, caps
+at 100%, and throttles by count; `run_duration` from the catalog). Two existing
+`run_reduction` fakes gained the `progress_cb=None` kwarg. 322 tests.
+
+**Files changed:** `integrations/drtsans_runner.py`,
+`services/reduction_service.py`, `commands/reduction.py`,
+`models/session_state.py`, `app.py`, `services/autopilot.py`,
+`tests/test_timeslice_progress.py`, `tests/test_reduce_preflight.py`,
+`tests/test_reduce_cancel.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: a second /reduce while one runs is refused, not run concurrently (v0.41.0)
 
 Asked: "what happens if I `/reduce` while the previous reduce is not completed?"
