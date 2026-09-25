@@ -7,6 +7,59 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: per-row output directory — /set <rows> outputdir <path> (v0.43.0)
+
+Asked: time-slice reductions generate a lot of data, so the user wants each
+sample written to its own folder — "if a per-sample outputdir is defined use it,
+otherwise the session-wide one." Chosen design (with the user): a per-row
+override, two-tier fallback, no auto-magic.
+
+New `output_override: str = ""` on `WorkingTableRow`, alongside
+`configuration_override` and persisted in `to_dict` (`from_dict` already drops
+unknown keys / keeps dataclass fields, so old sessions load with `""`).
+Deliberately **not** in `_REDUCTION_FIELDS`: changing where output is written
+does not invalidate a `done` reduction, so it never silently marks a done row
+`modified` (an hour-long time-slice run must not re-run just because you moved
+its folder).
+
+`/set <rows> outputdir <path>` sets it (registered in `SETTABLE_FIELDS` as
+`outputdir`/`outdir`/`output` → `output_override`, echoed as `outputdir`); the
+value is stored as an abspath; `none` clears it. Combining with run fields is
+rejected by the existing non-run-field guard. `/set outputdir <path>` (no rows)
+is unchanged — still the session-wide setter.
+
+Precedence in `reduce_row`: `effective_dir = row.output_override or output_dir`.
+Crucially the row override also beats the config's own `outputdir` (which
+`build_reduction_json` reads via `config_params["outputdir"]`, and which
+`/set outputdir` populates) — so `reduce_row` overlays
+`config_params["outputdir"] = effective_dir` when the row overrides. `effective_dir`
+is then used for the JSON `outputDir`, the `mkdir`, the `json_path`, and the
+produced-file glob, so all four agree. A row with no override behaves exactly as
+before.
+
+`handle_reduce`'s up-front writability check (v0.39.0) now iterates the *distinct*
+effective dirs of the selected rows, so a bad per-row path is caught before
+launch with a fix that names both `/set outputdir` and `/set <rows> outputdir`.
+The `⟳` reduce line (both `/reduce` branches) shows `@ <dir>` when a row
+overrides. NL routing + SKILL updated.
+
+Not yet: downstream discovery (`/show data`, `/plot`, `/stitch`,
+`merge_service._scan_output_dir`) still scans the session-wide dir, so outputs in
+an override dir aren't auto-found — view them with `/plot <file>` or
+`/show iq <dir>`, which take an explicit path. Descending into override dirs is
+the planned follow-up.
+
+`tests/test_matching.py` (+5: set stores abspath, `none` clears, can't combine
+with run fields, round-trips, and doesn't mark a done row modified);
+`tests/test_reduce_preflight.py` (+2: the override wins over session-wide *and*
+the config outputdir in the JSON + on disk; an unwritable override is refused up
+front). 329 tests.
+
+**Files changed:** `models/working_table.py`, `commands/matching.py`,
+`services/reduction_service.py`, `commands/reduction.py`, `app.py`,
+`services/llm_handler.py`, SKILL.md, `tests/test_matching.py`,
+`tests/test_reduce_preflight.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: time-slice slice estimate up front + live progress heartbeat (v0.42.0)
 
 Reported: reducing a 1-hour run with a 5 s time-slice interval, "the job was

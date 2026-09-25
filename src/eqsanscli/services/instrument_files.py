@@ -119,6 +119,7 @@ class SensitivityFile:
     tag: str
     variant: str
     plain: bool  # tag appears as "_<tag>_<run>" — undecorated (4m, not 4mSM)
+    deprecated: bool = False  # name carries a retirement marker (OLD/bak/…)
 
     @property
     def name(self) -> str:
@@ -252,6 +253,19 @@ def _variant_of(name: str) -> str:
     return m.group(1) if m else ""
 
 
+#: Tokens that mark a calibration file as retired-but-kept — a scientist parks the
+#: superseded map next to the new one "just in case" (e.g. renaming it
+#: ``..._186200.OLD_nominal_geometry.nxs``). Matched as a delimited word so a real
+#: name fragment can't trip it. A marked file is only ever a last resort.
+_DEPRECATED_MARKERS = ("old", "bak", "backup", "deprecated", "superseded",
+                       "donotuse", "dontuse", "unused", "obsolete")
+
+
+def _is_deprecated_name(name: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", os.path.basename(name).lower())
+    return any(m in tokens for m in _DEPRECATED_MARKERS)
+
+
 def _is_dark_name(low: str) -> bool:
     if not low.startswith("eqsans_"):
         return False
@@ -282,6 +296,7 @@ def _scan_cycle(cycle_id: str, cycle_dir: str) -> Cycle:
             cycle.sensitivities.append(SensitivityFile(
                 path=full, run=run, distance=distance, tag=tag,
                 variant=_variant_of(name), plain=plain,
+                deprecated=_is_deprecated_name(name),
             ))
         elif _is_dark_name(low):
             run = _run_from_name(name)
@@ -650,10 +665,13 @@ def _pick_sensitivity(
     cands = [s for s in cycle.sensitivities if s.distance == target_distance]
     if not cands:
         return None
-    # Preferred variant first, then undecorated tag (4m over 4mSM), then the
-    # newest run within the cycle (2022A holds four flood generations).
+    # A live (non-retired) file always beats one a scientist parked next to it
+    # marked OLD/bak/… — but a marked file is still used if it is the only map for
+    # this distance, so a cycle never loses its sensitivity. Then preferred
+    # variant, then undecorated tag (4m over 4mSM), then the newest run within the
+    # cycle (2022A holds four flood generations).
     return max(cands, key=lambda s: (
-        s.variant.lower() == variant_pref.lower(), s.plain, s.run,
+        not s.deprecated, s.variant.lower() == variant_pref.lower(), s.plain, s.run,
     ))
 
 

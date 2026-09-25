@@ -170,6 +170,14 @@ Detector offset, scale components and sample offset are only meaningful if an
 AgBe calibration exists at or before the run. None exists before cycle 2026A —
 older data reduces without them rather than with invented values.
 
+**CAL-06** · warning · enforced (`_pick_sensitivity`, `_is_deprecated_name`)
+A retired calibration file kept beside its replacement — renamed with a marker
+token (`OLD`, `bak`, `backup`, `deprecated`, `superseded`, `donotuse`, …) — is
+never chosen over a live sibling for the same distance. It is deprioritized, not
+excluded: if it is the only map for that distance it is still used, so a cycle
+never loses its sensitivity. Before this, two equally-ranked names tie-broke
+alphabetically and a `…OLD….nxs` could win (2026B 4 m, IPTS-38151).
+
 
 ---
 

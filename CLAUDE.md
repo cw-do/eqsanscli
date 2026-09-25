@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.45.2 | 2026-09-25 | Fix: a **retired sensitivity file kept beside its replacement** could be chosen over the live one. On 2026B a new 4 m flood `…_186200.nxs` was added and the old one renamed `…_186200.OLD_nominal_geometry.nxs` and kept "just in case"; both parsed to the same `(variant, plain, run)`, and on that tie `_pick_sensitivity`'s `max()` returned the alphabetically-first candidate — and `.OLD_…` sorts before `.nxs` — so 4 m reductions silently used the old map. `SensitivityFile` gains a `deprecated` flag (name contains a delimited marker token: `OLD`/`bak`/`backup`/`deprecated`/`superseded`/`donotuse`/…), and `not deprecated` is now the top-priority ranking key: a live file always beats a marked sibling, but a marked file is still used if it is the only map for that distance (deprioritize, don't exclude — a cycle never loses its sensitivity). Protocol CAL-06. The live 2026B test was de-literal'd (asserts a live 4 m map the folder holds, never an `OLD` one) per the "no pinned machine-physics literals" rule. |
 | 0.45.1 | 2026-09-25 | `/load ipts` now **suggests** the conventional output folder. It still does not change the cwd or the output dir (deliberately safe — reduced files default to `./output/` next to the cwd), but the load message now shows where output currently points and a ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. The nudge is suppressed when the current output dir is already inside this experiment's tree (contains `IPTS-<N>`), so a configured session isn't nagged. Suggestion only — nothing is set for you. |
 | 0.45.0 | 2026-09-25 | **Title tokens name each sample's background and thickness.** A background titled `bkg<N>_…` is background N; a sample titled `…_bg<N>_…` gets that background from its own config at the same temperature token (else the only `bkg<N>` there; never guessed — unresolved keeps the default and warns); `…_th<X>mm_…` sets thickness (`th0p5mm` = 0.05 cm). The pointer is `bg`, not `bkg`, because any title containing "bkg" is a background. Before, every sample got the config's lowest-numbered background, so contrast and per-temperature solvent series were mis-paired. `--update` keeps a title-named background; `/matchruns --no-title-tokens` restores the old behaviour. Existing titles unaffected: identical tables and warnings vs 0.44.0 on IPTS-36552/38603. BKG-04, TBL-08. |
 | 0.44.0 | 2026-09-16 | **New `/retitle` command — correct a wrong ONCat run title in-session so `/matchruns` can pair it.** `/matchruns` derives the sample name from the title, so a transmission mislabeled by sample-changer slot (`T-s1 4m 10A`) can never pair with `S-L62_0 4m 10A` — and `/reclass` (fixes *class*), `/set <row> sample` (renames *after* matching) and per-row `/set … trans` (thrown away by the next `/matchruns`) couldn't fix it. `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title; `/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across titles (**whole-word by default** so `s1` never rewrites `s10`/`s11`); `/retitle show` / `/retitle clear [<runs>]`. Corrections live in the session (`state.title_overrides`, `{run: {title, original}}`), never touch ONCat, and are re-applied after `/load ipts`/`/refresh catalog` (which would bring the wrong titles back); `/show catalog` marks a corrected title with a trailing `*`; `original` always keeps ONCat's own title so `clear` restores the real record. Motivated by IPTS-36552 (11 slots × 2 configs; verified against each NeXus `SampleId`/`SampleTable:Position`). |
@@ -227,6 +228,42 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-25: a retired sensitivity file no longer wins over its replacement (v0.45.2)
+
+Found via a live test failure the same day: on 2026B a new 4 m flood map was added
+(`Sensitivity_patched_thinPMMA_4m_186200.nxs`, Sep 24) and the previous one kept
+beside it, renamed `…_186200.OLD_nominal_geometry.nxs` (Aug 9) "just in case." The
+resolver started returning the OLD one, so 4 m reductions would silently use the
+superseded map.
+
+Cause: `_pick_sensitivity` ranks by `(variant==pref, plain, run)`. Both files
+parse identically — variant `thinPMMA`, `plain` (`_4m_186200`), run `186200` — so
+they tie on every key. On a tie `max()` returns the first in folder-sorted order,
+and `…186200.OLD_nominal_geometry.nxs` sorts before `…186200.nxs` (`O` 0x4F < `n`
+0x6E), so the retired copy won.
+
+Fix: `SensitivityFile` gains `deprecated: bool`, set by `_is_deprecated_name` when
+the filename contains a delimited retirement token (`old`, `bak`, `backup`,
+`deprecated`, `superseded`, `donotuse`, `dontuse`, `unused`, `obsolete`). The word
+split is delimiter-based so a real fragment can't trip it (`goldstd` is not
+"old"). `_pick_sensitivity` now leads its key with `not s.deprecated`, so a live
+file always beats a marked sibling — but a marked file is still used when it is the
+only map for a distance (deprioritize, never exclude, so a cycle can't lose its
+sensitivity). Chosen over an mtime tiebreak (fragile: rsync/copy resets mtimes,
+which CLAUDE.md warns against) and over hard exclusion (would drop a sole map).
+
+The live 2026B test was de-literal'd per the "never pin a machine-physics value to
+a literal" rule: it now asserts the resolved sensitivity is a live 4 m map the
+folder actually holds and is not marked `OLD`, rather than a hardcoded filename.
+
+Protocol CAL-06 (warning, enforced). `tests/test_instrument_files.py` (+3
+synthetic, mount-independent: live beats OLD sibling; a sole OLD map is still used;
+the marker matches delimited words only) and the de-literal'd live test. 356 tests.
+
+**Files changed:** `services/instrument_files.py`, `knowledge/protocol.md`,
+`tests/test_instrument_files.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
 
 ### 2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)
 
@@ -374,56 +411,3 @@ thickness titles still strip). 332 tests.
 
 **Files changed:** `services/matching_service.py`, `tests/test_matching.py`,
 CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-10: per-row output directory — /set <rows> outputdir <path> (v0.43.0)
-
-Asked: time-slice reductions generate a lot of data, so the user wants each
-sample written to its own folder — "if a per-sample outputdir is defined use it,
-otherwise the session-wide one." Chosen design (with the user): a per-row
-override, two-tier fallback, no auto-magic.
-
-New `output_override: str = ""` on `WorkingTableRow`, alongside
-`configuration_override` and persisted in `to_dict` (`from_dict` already drops
-unknown keys / keeps dataclass fields, so old sessions load with `""`).
-Deliberately **not** in `_REDUCTION_FIELDS`: changing where output is written
-does not invalidate a `done` reduction, so it never silently marks a done row
-`modified` (an hour-long time-slice run must not re-run just because you moved
-its folder).
-
-`/set <rows> outputdir <path>` sets it (registered in `SETTABLE_FIELDS` as
-`outputdir`/`outdir`/`output` → `output_override`, echoed as `outputdir`); the
-value is stored as an abspath; `none` clears it. Combining with run fields is
-rejected by the existing non-run-field guard. `/set outputdir <path>` (no rows)
-is unchanged — still the session-wide setter.
-
-Precedence in `reduce_row`: `effective_dir = row.output_override or output_dir`.
-Crucially the row override also beats the config's own `outputdir` (which
-`build_reduction_json` reads via `config_params["outputdir"]`, and which
-`/set outputdir` populates) — so `reduce_row` overlays
-`config_params["outputdir"] = effective_dir` when the row overrides. `effective_dir`
-is then used for the JSON `outputDir`, the `mkdir`, the `json_path`, and the
-produced-file glob, so all four agree. A row with no override behaves exactly as
-before.
-
-`handle_reduce`'s up-front writability check (v0.39.0) now iterates the *distinct*
-effective dirs of the selected rows, so a bad per-row path is caught before
-launch with a fix that names both `/set outputdir` and `/set <rows> outputdir`.
-The `⟳` reduce line (both `/reduce` branches) shows `@ <dir>` when a row
-overrides. NL routing + SKILL updated.
-
-Not yet: downstream discovery (`/show data`, `/plot`, `/stitch`,
-`merge_service._scan_output_dir`) still scans the session-wide dir, so outputs in
-an override dir aren't auto-found — view them with `/plot <file>` or
-`/show iq <dir>`, which take an explicit path. Descending into override dirs is
-the planned follow-up.
-
-`tests/test_matching.py` (+5: set stores abspath, `none` clears, can't combine
-with run fields, round-trips, and doesn't mark a done row modified);
-`tests/test_reduce_preflight.py` (+2: the override wins over session-wide *and*
-the config outputdir in the JSON + on disk; an unwritable override is refused up
-front). 329 tests.
-
-**Files changed:** `models/working_table.py`, `commands/matching.py`,
-`services/reduction_service.py`, `commands/reduction.py`, `app.py`,
-`services/llm_handler.py`, SKILL.md, `tests/test_matching.py`,
-`tests/test_reduce_preflight.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.

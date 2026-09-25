@@ -20,6 +20,7 @@ from eqsanscli.services import instrument_files as ifiles
 from eqsanscli.services.instrument_files import (
     DEFAULT_MP_ROOT, MANAGED_PARAMS, PARAM_DARK, PARAM_DETOFFSET, PARAM_FLUX,
     PARAM_SAMPLEOFFSET, PARAM_SCALECOMP, PARAM_SENSITIVITY,
+    _is_deprecated_name,
     flood_distance_for, resolve_for_run, scan_cycles, select_cycle, verify_paths,
 )
 
@@ -117,6 +118,42 @@ def test_preferred_variant_beats_higher_run():
         r = resolve_for_run(305000, 4.0)
         # 5mmPMMA_4m_300009 has the higher run but thinPMMA wins.
         assert "thinPMMA" in str(r.values[PARAM_SENSITIVITY])
+
+
+def test_deprecated_sensitivity_never_wins_over_live_sibling():
+    # A scientist keeps the superseded flood next to the new one, marked OLD
+    # (IPTS-38151 / 2026B: ..._186200.OLD_nominal_geometry.nxs sat beside the new
+    # ..._186200.nxs and won the name tie, so 4 m used the old map). The live file
+    # must win. (v0.45.2)
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, "2040A_mp")
+        _touch(os.path.join(d, "EQSANS_400000.nxs.h5"), 900)
+        _touch(os.path.join(d, "Sensitivity_patched_thinPMMA_4m_400002.nxs"))
+        _touch(os.path.join(d, "Sensitivity_patched_thinPMMA_4m_400002.OLD_nominal_geometry.nxs"))
+        cycles = scan_cycles(root, use_cache=False)
+        r = resolve_for_run(400500, 4.0, cycles=cycles)
+        assert os.path.basename(str(r.values[PARAM_SENSITIVITY])) == \
+            "Sensitivity_patched_thinPMMA_4m_400002.nxs"
+
+
+def test_deprecated_sensitivity_used_when_only_option():
+    # Deprioritize, don't exclude: if the ONLY map for a distance is marked, it is
+    # still used, so a cycle never loses its sensitivity.
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, "2040A_mp")
+        _touch(os.path.join(d, "EQSANS_400000.nxs.h5"), 900)
+        _touch(os.path.join(d, "Sensitivity_patched_thinPMMA_4m_400002.OLD_nominal_geometry.nxs"))
+        cycles = scan_cycles(root, use_cache=False)
+        r = resolve_for_run(400500, 4.0, cycles=cycles)
+        assert "OLD" in os.path.basename(str(r.values[PARAM_SENSITIVITY]))
+
+
+def test_deprecation_marker_matches_words_only():
+    # Delimited tokens only — a real name fragment must not trip the marker.
+    assert _is_deprecated_name("Sensitivity_patched_thinPMMA_4m_186200.OLD_nominal_geometry.nxs")
+    assert _is_deprecated_name("Sensitivity_patched_thinPMMA_4m_1.bak.nxs")
+    assert not _is_deprecated_name("Sensitivity_patched_thinPMMA_4m_186200.nxs")
+    assert not _is_deprecated_name("Sensitivity_patched_goldstd_4m_1.nxs")  # 'gold' contains 'old'
 
 
 def test_missing_distance_falls_back_to_earlier_cycle():
@@ -243,8 +280,15 @@ def test_live_current_cycle_resolves_to_2026b():
         return
     r = resolve_for_run(186500, 4.0, root=DEFAULT_MP_ROOT)
     assert r.cycle_id == "2026B"
-    assert r.values[PARAM_SENSITIVITY].endswith(
-        "2026B_mp/Sensitivity_patched_thinPMMA_4m_186200.nxs")
+    # NOT pinned to a literal: a new flood map supersedes the old one within a
+    # cycle (a scientist parks the retired one alongside as *.OLD_*.nxs). Assert
+    # what resolves is a live 4m map the folder actually holds, and that a file
+    # marked OLD/bak/… never wins (v0.45.2 regression — it did, on a name tie).
+    sens = r.values[PARAM_SENSITIVITY]
+    sens_name = os.path.basename(sens)
+    assert os.path.exists(sens)
+    assert "sensitivity" in sens_name.lower() and "4m" in sens_name.lower()
+    assert not _is_deprecated_name(sens_name)
     assert r.values[PARAM_DARK].endswith("2026B_mp/EQSANS_186198.nxs.h5")
     assert r.values[PARAM_FLUX].endswith("2026B_mp/bl6_flux_2026B_aug_rebinned.txt")
     assert r.values[PARAM_SAMPLEOFFSET] == 285.0
