@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.46.1 | 2026-09-25 | Document the ONCat sign-in (v0.46.0) in the **in-CLI help**: `/oncat login|status|logout` now appear in `/help` (new "ONCat Sign-in (per-user)" block), as step 0 in `/help --simple` and the `/guide` side pane, and in the startup "Getting Started" banner — with the per-user + SSH (approve the URL in your own browser) notes. Help text only; no behaviour change. |
 | 0.46.0 | 2026-09-25 | **Per-user ONCat login (Device Authorization Grant).** The old code authenticated with a committed machine-to-machine `client_id`+`client_secret` (`CLIENT_CREDENTIALS_FLOW`) — one shared identity for everyone, and the **secret was in the public repo** — which ORNL's docs say must not be used for a distributed CLI. Now each user signs in as themselves: a **public** client id (no secret), device flow, per-user token cached in `~/.eqsanscli/oncat_token.json` (0600), so `/load ipts` and `/list ipts` return **only the IPTS that user can access**. New `/oncat login|status|logout`, an `eqsanscli-oncat-login` console entry, and a launcher hook that runs the one-time sign-in before the TUI. Works over SSH: the verification URL is shown (TUI pane or terminal), the user approves it in their own browser. Data calls are **token-first and never pop a browser** (raise `OncatAuthRequired` → "run /oncat login"); the TUI runs the sign-in in a worker thread. Browserless services (NDIP/Galaxy) can set `ONCAT_USERNAME`/`ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` (deprecated Password Grant, no secret committed) or pre-seed a token. Requires `pyoncat>=2.6` (2.7 installed on the cluster venv). **The leaked m2m secret must be revoked by the ONCat admin** — it stays in git history. |
 | 0.45.2 | 2026-09-25 | Fix: a **retired sensitivity file kept beside its replacement** could be chosen over the live one. On 2026B a new 4 m flood `…_186200.nxs` was added and the old one renamed `…_186200.OLD_nominal_geometry.nxs` and kept "just in case"; both parsed to the same `(variant, plain, run)`, and on that tie `_pick_sensitivity`'s `max()` returned the alphabetically-first candidate — and `.OLD_…` sorts before `.nxs` — so 4 m reductions silently used the old map. `SensitivityFile` gains a `deprecated` flag (name contains a delimited marker token: `OLD`/`bak`/`backup`/`deprecated`/`superseded`/`donotuse`/…), and `not deprecated` is now the top-priority ranking key: a live file always beats a marked sibling, but a marked file is still used if it is the only map for that distance (deprioritize, don't exclude — a cycle never loses its sensitivity). Protocol CAL-06. The live 2026B test was de-literal'd (asserts a live 4 m map the folder holds, never an `OLD` one) per the "no pinned machine-physics literals" rule. |
 | 0.45.1 | 2026-09-25 | `/load ipts` now **suggests** the conventional output folder. It still does not change the cwd or the output dir (deliberately safe — reduced files default to `./output/` next to the cwd), but the load message now shows where output currently points and a ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. The nudge is suppressed when the current output dir is already inside this experiment's tree (contains `IPTS-<N>`), so a configured session isn't nagged. Suggestion only — nothing is set for you. |
@@ -229,6 +230,18 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-25: document ONCat sign-in in the in-CLI help (v0.46.1)
+
+Follow-up to v0.46.0: the new per-user ONCat sign-in was in SKILL.md/README but not
+in the help a user sees inside the app. Added `/oncat login|status|logout` to the
+full `/help` (a dedicated "ONCat Sign-in (per-user)" block above Catalog & Data
+Loading), as step 0 in the `/help --simple` quickstart and the `/guide` side pane,
+and to the startup "Getting Started" banner — each noting it is per-user and that
+over SSH you approve the URL in your own browser. Help/manual text only; no
+behaviour change. 363 tests.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
 
 ### 2026-09-25: per-user ONCat login via the Device Authorization Grant (v0.46.0)
 
@@ -390,49 +403,3 @@ parsing) — and passing goes 328 → 339. Not yet run on the analysis nodes.
 **Files changed:** `services/matching_service.py`, `commands/matching.py`,
 `services/llm_handler.py`, `knowledge/protocol.md`, `tests/test_title_tokens.py`,
 SKILL.md, README.md, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-09-16: /retitle — correct a wrong ONCat run title in-session (v0.44.0)
-
-Asked, in the user's words: "if I can say 'rename 181470 title to be T-L62_0 4m
-10A' … or 'replace s1 with L62_0 in the titles of run xxxx-xxxx' … it will be a
-lot easier."
-
-Why it was needed: `/matchruns` pairs a scattering run with its transmission /
-background / empty-beam runs by parsing the **sample name out of the ONCat title**
-(`matching_service._extract_sample_name`). When the titles are wrong, nothing
-downstream could fix it — `/reclass` changes a run's *class*, `/set <row> sample`
-renames a row *after* matching, and per-row `/set … trans` patches one row and is
-discarded by the next `/matchruns`. IPTS-36552 was the case: transmissions titled
-by sample-changer slot (`T-s1`, `T-s2`, …) while samples carried real names
-(`S-L62_0`), so every transmission failed to pair.
-
-Command surface: `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title;
-`/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across all titles;
-`/retitle show`; `/retitle clear [<runs>]`. Design decisions worth keeping:
-
-- **Whole-word swap by default** — `s1` must not also rewrite `s10`/`s11` (in
-  IPTS-36552 that would have mislabeled two samples). `--regex` is the escape
-  hatch. Pinned by `test_word_swap_does_not_touch_s10_or_s11`.
-- **ONCat is never written.** Corrections live in `state.title_overrides`
-  (`{run: {"title": corrected, "original": what ONCat says}}`), persisted in the
-  session, and re-applied after `/load ipts` and `/refresh catalog` (which would
-  otherwise bring the wrong titles straight back via `apply_title_overrides()`).
-  `/load ipts <different N>` drops them.
-- **`original` keeps ONCat's own title**, not the result of an earlier `/retitle`,
-  so `clear` always restores the real record.
-- **`*` marker** on a corrected title in `/show catalog`.
-- Every path ends by telling the user to run `/matchruns`.
-
-Simulating the rename + `/matchruns` on the IPTS-36552 session pairs 260/261 rows
-(the leftover is `--- all samples 1mm.`, not a sample). The slot→name mapping was
-verified against each NeXus `entry/DASlogs/SampleId` and `SampleTable:Position`,
-not guessed.
-
-`tests/test_retitle.py` (new, +9); `tests/test_load_ipts.py` stub updated for the
-new `_build_catalog_rows(df, overrides)` signature. NL routing in `llm_handler`,
-README, SKILL all updated. 341 tests.
-
-**Files changed:** `commands/catalog.py`, `models/session_state.py`,
-`commands/registry.py`, `services/llm_handler.py`, `tests/test_retitle.py`,
-`tests/test_load_ipts.py`, SKILL.md, README.md, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.

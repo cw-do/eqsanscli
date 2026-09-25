@@ -7,6 +7,52 @@ the version it shipped in.
 
 ---
 
+### 2026-09-16: /retitle — correct a wrong ONCat run title in-session (v0.44.0)
+
+Asked, in the user's words: "if I can say 'rename 181470 title to be T-L62_0 4m
+10A' … or 'replace s1 with L62_0 in the titles of run xxxx-xxxx' … it will be a
+lot easier."
+
+Why it was needed: `/matchruns` pairs a scattering run with its transmission /
+background / empty-beam runs by parsing the **sample name out of the ONCat title**
+(`matching_service._extract_sample_name`). When the titles are wrong, nothing
+downstream could fix it — `/reclass` changes a run's *class*, `/set <row> sample`
+renames a row *after* matching, and per-row `/set … trans` patches one row and is
+discarded by the next `/matchruns`. IPTS-36552 was the case: transmissions titled
+by sample-changer slot (`T-s1`, `T-s2`, …) while samples carried real names
+(`S-L62_0`), so every transmission failed to pair.
+
+Command surface: `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title;
+`/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across all titles;
+`/retitle show`; `/retitle clear [<runs>]`. Design decisions worth keeping:
+
+- **Whole-word swap by default** — `s1` must not also rewrite `s10`/`s11` (in
+  IPTS-36552 that would have mislabeled two samples). `--regex` is the escape
+  hatch. Pinned by `test_word_swap_does_not_touch_s10_or_s11`.
+- **ONCat is never written.** Corrections live in `state.title_overrides`
+  (`{run: {"title": corrected, "original": what ONCat says}}`), persisted in the
+  session, and re-applied after `/load ipts` and `/refresh catalog` (which would
+  otherwise bring the wrong titles straight back via `apply_title_overrides()`).
+  `/load ipts <different N>` drops them.
+- **`original` keeps ONCat's own title**, not the result of an earlier `/retitle`,
+  so `clear` always restores the real record.
+- **`*` marker** on a corrected title in `/show catalog`.
+- Every path ends by telling the user to run `/matchruns`.
+
+Simulating the rename + `/matchruns` on the IPTS-36552 session pairs 260/261 rows
+(the leftover is `--- all samples 1mm.`, not a sample). The slot→name mapping was
+verified against each NeXus `entry/DASlogs/SampleId` and `SampleTable:Position`,
+not guessed.
+
+`tests/test_retitle.py` (new, +9); `tests/test_load_ipts.py` stub updated for the
+new `_build_catalog_rows(df, overrides)` signature. NL routing in `llm_handler`,
+README, SKILL all updated. 341 tests.
+
+**Files changed:** `commands/catalog.py`, `models/session_state.py`,
+`commands/registry.py`, `services/llm_handler.py`, `tests/test_retitle.py`,
+`tests/test_load_ipts.py`, SKILL.md, README.md, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: frame-skipping "fs" suffix broke transmission matching (v0.43.1)
 
 Reported on IPTS-38151: the first transmissions (188011–188019) were measured at
