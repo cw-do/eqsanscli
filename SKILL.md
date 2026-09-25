@@ -185,6 +185,8 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 | Transmission title has a frame-skipping suffix (`T-poly 4m 2.5a`**`fs`**) while the sample is `S-poly 4m 2.5a` | Handled automatically — the `fs` suffix is stripped from the sample key so it still matches. No action needed |
 | Transmission measured *after* the first match (higher run number, empty field now) | `/refresh catalog` then `/matchruns --update` back-fills it; or plain `/matchruns` (rebuild) always finds it (matches by sample name, order-independent) |
 | Missing background | `/assign bkg <sample_name>` — PREFERRED, handles config matching |
+| Samples need *different* backgrounds (contrast series, per-temperature solvent) and the titles carry `bkg<N>` / `bg<N>` tokens | Handled automatically — a sample titled `…_bg2_…` gets `bkg2` in its configuration, at the same temperature token (BKG-04). The message reports "From title tokens: …". A pointer with no `bkg<N>` run keeps the config default and warns. `/matchruns --no-title-tokens` ignores the tokens |
+| Titles carry `th<X>mm` (e.g. `…_th2mm`) | Thickness is set from it (0.2 cm) on that row (TBL-08). No token → 0.1 cm default as before |
 | Missing empty beam | `/set <row> emp <run>`, or `/set --config <id> emp <run>` for a whole configuration |
 | Mislabeled run (title says T- but it is scattering) | `/reclass <runs> scatt`, then `/matchruns` again |
 | Sample name contains a bkg keyword (e.g. BkgG) | `/reclass --sample BkgG sample` — respects the S-/T- prefix |

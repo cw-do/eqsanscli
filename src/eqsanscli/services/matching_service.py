@@ -84,6 +84,66 @@ RUN_CLASS_SHORT: dict[str, str] = {
 
 ConfigKey = tuple[float, float, int]
 
+# Title tokens written by a proposal-driven script generator (protocol BKG-04,
+# TBL-08). A background titled `bkg<N>…` is background number N; a sample that
+# carries `bg<N>` wants that background. The sample-side pointer is `bg`, not
+# `bkg`, because any title containing "bkg" is classified as a background.
+# `th<X>mm` is the cell path length ('p' for a decimal point: th0p5mm).
+# Tokens are underscore/space-delimited words inside the extracted sample name,
+# so a title without them is matched exactly as before.
+_BKG_ID_RE = re.compile(r"(?:^|_)bkg(\d+)(?=_|$)", re.IGNORECASE)
+_BG_PTR_RE = re.compile(r"(?:^|_)bg(\d+)(?=_|$)", re.IGNORECASE)
+_THICK_RE = re.compile(r"(?:^|_)th(\d+(?:p\d+)?)mm(?=_|$)", re.IGNORECASE)
+_TEMP_SUFFIX_RE = re.compile(r"_(\d{2,3}C)$", re.IGNORECASE)
+
+
+def title_thickness_cm(sample_name: str) -> float | None:
+    """Cell thickness in cm from a `th<X>mm` token, or None when absent."""
+    m = _THICK_RE.search(sample_name)
+    if not m:
+        return None
+    return float(m.group(1).replace("p", ".")) / 10.0
+
+
+def background_pointer(sample_name: str) -> int | None:
+    """N from a sample's `bg<N>` token, or None."""
+    m = _BG_PTR_RE.search(sample_name)
+    return int(m.group(1)) if m else None
+
+
+def _pick_numbered_background(n: int, sample_name: str,
+                              bkg_scatt: list["ClassifiedRun"],
+                              bkg_trans: list["ClassifiedRun"]) -> tuple[str, str, str]:
+    """(bkg_scatt, bkg_trans, problem) for a `bg<N>` sample within one config.
+
+    Prefer the bkg<N> run at the sample's temperature token; otherwise the only
+    bkg<N> run in the config. The newest run wins among equals, as for
+    transmissions. An unresolved pointer returns a problem string, never a guess.
+    """
+    t = _TEMP_SUFFIX_RE.search(sample_name)
+    temp = t.group(1).upper() if t else None
+
+    def choose(cands: list["ClassifiedRun"]) -> tuple[str, str]:
+        numbered = [r for r in cands if (m := _BKG_ID_RE.search(r.sample_name)) and int(m.group(1)) == n]
+        if not numbered:
+            return "", "absent"
+        def temp_of(r):
+            m = _TEMP_SUFFIX_RE.search(r.sample_name)
+            return m.group(1).upper() if m else None
+        same = [r for r in numbered if temp_of(r) == temp]
+        if same:
+            return str(max(r.run_number for r in same)), ""
+        temps = {temp_of(r) for r in numbered}
+        if len(temps) == 1:
+            return str(max(r.run_number for r in numbered)), ""
+        return "", f"bkg{n} measured at {sorted(str(x) for x in temps)}, none at {temp}"
+
+    s, s_problem = choose(bkg_scatt)
+    tr, _ = choose(bkg_trans)
+    if s_problem == "absent":
+        return "", "", f"no bkg{n} run in this configuration"
+    return s, tr, s_problem
+
 
 @dataclass
 class ClassifiedRun:
@@ -277,7 +337,8 @@ def _classify_catalog(catalog: pd.DataFrame) -> list[ClassifiedRun]:
     return classified
 
 
-def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list[str]]:
+def match_runs(catalog: pd.DataFrame, ipts: int = 0,
+               title_tokens: bool = True) -> tuple[WorkingTable, list[str]]:
     """Auto-match runs from a catalog into a working table.
 
     Returns (table, warnings) where warnings is a list of human-readable
@@ -287,6 +348,10 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
     - Transmission matched for EVERY scattering run by sample name.
     - Bkg/empty scattering runs get empty beam as their own background.
     - Config = (distance, wavelength, frequency).
+    - With ``title_tokens`` (default), a sample titled with ``bg<N>`` gets the
+      ``bkg<N>`` background of its config instead of the config default
+      (BKG-04), and ``th<X>mm`` sets the row thickness (TBL-08). Titles without
+      those tokens are matched exactly as before.
     """
     if catalog.empty:
         return WorkingTable(name="default", ipts=ipts), []
@@ -323,8 +388,15 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                 f"Use /set <row> emp <run> to override."
             )
 
-        # Warn if multiple background scattering runs in this config
-        if len(bkg_scatt_runs) > 1:
+        # Warn if multiple background scattering runs in this config — unless
+        # every sample row names its own background with a bg<N> token, in
+        # which case the config default is never used.
+        uses_default_bkg = any(
+            not (r.is_background or r.is_empty)
+            and not (title_tokens and background_pointer(r.sample_name) is not None)
+            for r in all_scattering
+        )
+        if len(bkg_scatt_runs) > 1 and uses_default_bkg:
             run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in bkg_scatt_runs)
             warnings.append(
                 f"[{cfg_label}] {len(bkg_scatt_runs)} background scatt runs found: {run_list}\n"
@@ -377,6 +449,18 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                     by_config_assigned.append(s.sample_name)
                 row_bkg_scatt = default_bkg_scatt
                 row_bkg_trans = default_bkg_trans
+                n_ptr = background_pointer(s.sample_name) if title_tokens else None
+                if n_ptr is not None:
+                    b_s, b_t, problem = _pick_numbered_background(
+                        n_ptr, s.sample_name, bkg_scatt_runs, bkg_trans_runs)
+                    if problem:
+                        warnings.append(
+                            f"[{cfg_label}] {s.sample_name}: title asks for bkg{n_ptr} but "
+                            f"{problem}; using the config default {default_bkg_scatt or '(none)'}.\n"
+                            f"  Fix the title with /retitle, or /set <row> bkg <run>."
+                        )
+                    else:
+                        row_bkg_scatt, row_bkg_trans = b_s, b_t
 
             row = WorkingTableRow(
                 index=0,
@@ -390,6 +474,9 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0) -> tuple[WorkingTable, list
                 wavelength=s.wavelength,
                 frequency=s.frequency,
             )
+            th = title_thickness_cm(s.sample_name) if title_tokens else None
+            if th is not None:
+                row.thickness = th
             table.add_row(row)
 
         if by_config_assigned:
@@ -408,6 +495,7 @@ def merge_new_runs(
     existing_table: WorkingTable,
     fresh_catalog: pd.DataFrame,
     ipts: int = 0,
+    title_tokens: bool = True,
 ) -> tuple[WorkingTable, list[str], int, list[str]]:
     """Merge new catalog runs into an existing working table.
 
@@ -424,7 +512,7 @@ def merge_new_runs(
     existing_runs = {r.scattering_run for r in existing_table.rows}
 
     # Build fresh table from refreshed catalog
-    fresh_table, fresh_warnings = match_runs(fresh_catalog, ipts=ipts)
+    fresh_table, fresh_warnings = match_runs(fresh_catalog, ipts=ipts, title_tokens=title_tokens)
 
     # Collect bkg/empty/bkgtrans assignments from existing table per config.
     # For each field, take the FIRST NON-EMPTY value across all rows in the
@@ -464,8 +552,14 @@ def merge_new_runs(
             if cfg in config_assignments and row.scattering_run not in bkg_like_runs:
                 # Inherit assignments from existing table for this config
                 assignments = config_assignments[cfg]
-                row.background_scatt = assignments["background_scatt"]
-                row.background_trans = assignments["background_trans"]
+                # A background named by the title's bg<N> token (BKG-04) is the
+                # proposal's choice for this sample; the config's inherited
+                # background must not overwrite it.
+                named_bkg = (title_tokens and background_pointer(row.sample_name) is not None
+                             and row.background_scatt)
+                if not named_bkg:
+                    row.background_scatt = assignments["background_scatt"]
+                    row.background_trans = assignments["background_trans"]
                 row.empty_beam = assignments["empty_beam"]
             elif cfg not in config_assignments:
                 # New config not seen before

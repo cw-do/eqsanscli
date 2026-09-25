@@ -155,6 +155,7 @@ Use `--force` to re-reduce all rows regardless of status.
 | `/retitle show` / `/retitle clear [<runs>]` | List corrections, or restore the ONCat title(s). Always follow a `/retitle` with `/matchruns` |
 | `/matchruns` | Auto-match transmission/background/empty runs using `run_class`. REBUILDS the table (resets row status) |
 | `/matchruns --update` | Add only new scattering runs to the EXISTING table; preserves `done` rows and assignments. Use after `/refresh catalog` |
+| `/matchruns --no-title-tokens` | Match without the `bg<N>` / `th<X>mm` title tokens (see *Title tokens* below): config-default background, 0.1 cm thickness |
 | `/assign bkg <sample>` | Reassign background sample for all rows (config-aware, sets bkg+bkgtrans) |
 | `/set <row> <field> <value>` | Set row field. `<row>` = index, run number, range (`1-5`, `1,3,5`), or `all` |
 | `/set <row> <field> none` | Clear a field |
@@ -986,6 +987,26 @@ rebuild the working table.
 - Transmission matched for every scattering run by sample name within the same config
 - Use `/assign bkg <sample>` to change which sample is used as background
 - **Warnings** are shown if multiple empty beams or multiple backgrounds are found in the same configuration — user should decide which to use
+
+**Title tokens (v0.45.0).** A script generated from a proposal can say in the titles
+which background each sample uses, and the cell thickness:
+
+```
+S-bkg2_D2O40_th1mm 4m 10a 25C        ← background number 2
+S-SiPEG_D2O40_bg2_th1mm 4m 10a 25C   ← this sample uses bkg2; 1 mm cell
+```
+
+- A sample with `bg<N>` gets the `bkg<N>` run of its own configuration, at the same
+  temperature token (`25C`); if `bkg<N>` was measured at only one temperature in that
+  configuration, that one. The newest run wins among equals. (BKG-04)
+- `th<X>mm` sets the row thickness (`th2mm` → 0.2 cm, `th0p5mm` → 0.05 cm). (TBL-08)
+- The pointer is `bg<N>`, **not** `bkg<N>`: any title containing "bkg" is classified as a
+  background, so `S-x_B_bkg2` would turn the sample into one.
+- A pointer that cannot be resolved keeps the configuration default and warns.
+  `/assign bkg` and `/set` still override afterwards; `--update` keeps a title-named
+  background instead of copying the configuration's onto the new row.
+- Titles without these tokens are matched exactly as before; `/matchruns --no-title-tokens`
+  switches them off.
 
 **Transmission matching with temperature:** When run titles include temperature
 (e.g., "r1 4m 10A 110C" → sample name `r1_110C`), matching works in two tiers:

@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.44.0</div>
+          data reduction tool &middot; v0.45.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,12 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-10-a-second-reduce-while-one-runs-is-refused-not-run-concurrently-v0410">2026-09-10: a second /reduce while one runs is refused, not run concurrently (v0.41.0)<a class="anchor" href="#2026-09-10-a-second-reduce-while-one-runs-is-refused-not-run-concurrently-v0410">#</a></h3>
+<p>Asked: &quot;what happens if I <code><a href="commands.html#cmd-reduce">/reduce</a></code> while the previous reduce is not completed?&quot; The answer was: nothing stopped it. Reductions run in a background worker thread (the UI even says &quot;Running in background — press ^X … to stop&quot;), so the input stays live and a second <code><a href="commands.html#cmd-reduce">/reduce</a></code> (or <code><a href="commands.html#cmd-autopilot">/autopilot</a></code>) dispatched mid-batch launched a <strong>second concurrent worker</strong>. Consequences: a second <code>ThreadPoolExecutor</code>, so up to 2× <code>max_workers</code> drtsans processes at once (node overload); a shared <code>_cancel_event</code>, so one Cancel stopped <em>both</em> batches; interleaved log output; and worst, if a row appeared in both selections it was reduced <strong>twice at the same time</strong>, both writing the same <code>.json</code>/<code>.nxs</code>/<code>_Iq.dat</code> — a file race.</p>
+<p>The <code>_job_running</code> flag already existed but was only read by the Cancel key binding, never checked before launching. New <code>_reject_if_busy(log, what)</code> guards both launch sites (<code>start_reduction</code>, <code>start_autopilot</code>) in <code>_render_data</code>: if a job is running it writes <code>⚠ A job is already running — not starting another &lt;what&gt;. Wait for it to finish, or press ^X / click ✕ Cancel to stop it first.</code> and returns True so the caller does not launch. The flag is now also claimed synchronously on the main thread at the launch site (<code>_set_job_running(True)</code> before <code>run_reduction_batch</code>/<code>run_autopilot_worker</code>), not only inside the worker thread — closing the small window where two fast submissions could both pass the guard before the first worker set it. The workers still set/clear the flag as before (idempotent).</p>
+<p>Headless is unaffected: it reduces synchronously in the stdin loop, so a command finishes before the next is read — batches can&#x27;t overlap.</p>
+<p><code>tests/test_reduce_concurrency.py</code> (new, +3): busy → refused with a message that names the job type and how to stop it; idle → allowed and silent. The guard is exercised directly (app built via <code>__new__</code>, no Textual event loop); textual/rich import fine under the test interpreter.</p>
+<p><strong>Files changed:</strong> <code>app.py</code>, <code>tests/test_reduce_concurrency.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-10-a-gui-crash-after-a-complete-reduction-is-no-longer-a-failure-v0400">2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)<a class="anchor" href="#2026-09-10-a-gui-crash-after-a-complete-reduction-is-no-longer-a-failure-v0400">#</a></h3>
 <p>Reported from a real run: <code><a href="commands.html#cmd-reduce">/reduce 17</a></code> (IPTS-38151, a20a0-1_fs, a time-slice reduction) ran 62 minutes, wrote <strong>all</strong> its output — 242 <code>_Iq.dat</code>, every <code>_Iqxqy.dat</code>, <code>_processed.nxs</code>, and <code>.png</code> across 121 slices — and was then shown as <code>✗ FAILED</code> with <code>Cannot install event loop hook for &quot;qt&quot; when running with --simple-prompt</code>. The user asked whether it was critical. It was not: the science was complete.</p>
 <p>Cause: <code>run_reduction</code> sets <code>success = (proc.returncode == 0)</code>, nothing else. At the very end of the script drtsans tried to bring up an interactive Qt plot under <code>--simple-prompt</code> and the X11 connection dropped — the <code>.err</code> held <code>ICE default IO error handler doing an exit(), pid = …, errno = 32</code> (EPIPE). That made the process exit nonzero <em>after</em> all files were written, so a complete reduction was flagged <code>error</code>. Two harms: the user thinks it failed, and the row status <code>error</code> means <code><a href="commands.html#cmd-reduce">/reduce --new</a></code> and autopilot would <strong>re-reduce it</strong> — another hour — for nothing. (<code>_summarize_error</code> also surfaced the benign qt line because it contains &quot;cannot&quot;.)</p>
@@ -610,7 +616,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-16 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-25 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

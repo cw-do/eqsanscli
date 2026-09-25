@@ -7,6 +7,41 @@ the version it shipped in.
 
 ---
 
+### 2026-09-10: a second /reduce while one runs is refused, not run concurrently (v0.41.0)
+
+Asked: "what happens if I `/reduce` while the previous reduce is not completed?"
+The answer was: nothing stopped it. Reductions run in a background worker thread
+(the UI even says "Running in background — press ^X … to stop"), so the input
+stays live and a second `/reduce` (or `/autopilot`) dispatched mid-batch launched
+a **second concurrent worker**. Consequences: a second `ThreadPoolExecutor`, so up
+to 2× `max_workers` drtsans processes at once (node overload); a shared
+`_cancel_event`, so one Cancel stopped *both* batches; interleaved log output; and
+worst, if a row appeared in both selections it was reduced **twice at the same
+time**, both writing the same `.json`/`.nxs`/`_Iq.dat` — a file race.
+
+The `_job_running` flag already existed but was only read by the Cancel key
+binding, never checked before launching. New `_reject_if_busy(log, what)` guards
+both launch sites (`start_reduction`, `start_autopilot`) in `_render_data`: if a
+job is running it writes `⚠ A job is already running — not starting another
+<what>. Wait for it to finish, or press ^X / click ✕ Cancel to stop it first.`
+and returns True so the caller does not launch. The flag is now also claimed
+synchronously on the main thread at the launch site (`_set_job_running(True)`
+before `run_reduction_batch`/`run_autopilot_worker`), not only inside the worker
+thread — closing the small window where two fast submissions could both pass the
+guard before the first worker set it. The workers still set/clear the flag as
+before (idempotent).
+
+Headless is unaffected: it reduces synchronously in the stdin loop, so a command
+finishes before the next is read — batches can't overlap.
+
+`tests/test_reduce_concurrency.py` (new, +3): busy → refused with a message that
+names the job type and how to stop it; idle → allowed and silent. The guard is
+exercised directly (app built via `__new__`, no Textual event loop); textual/rich
+import fine under the test interpreter.
+
+**Files changed:** `app.py`, `tests/test_reduce_concurrency.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-10: a GUI crash after a complete reduction is no longer a failure (v0.40.0)
 
 Reported from a real run: `/reduce 17` (IPTS-38151, a20a0-1_fs, a time-slice

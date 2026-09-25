@@ -184,6 +184,10 @@ WORKING TABLE:
   Whole-word by default: "s1" will NOT touch "s10"/"s11". ALWAYS follow /retitle with /matchruns to rebuild.
 /matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog) — REBUILDS table (resets row status)
 /matchruns --update             - Add new scattering runs to the EXISTING working table without disrupting reduced rows. Use after /refresh catalog.
+/matchruns --no-title-tokens    - Match ignoring bg<N>/th<X>mm title tokens (every sample gets the config's default background, thickness 0.1 cm)
+  Title tokens: a background titled bkg<N>_… is background N; a sample titled …_bg<N>_… uses it (same config,
+  same temperature token); …_th<X>mm_… sets thickness X mm. /matchruns applies them by default.
+  "ignore the bg tokens" / "use the old background matching" → /matchruns --no-title-tokens
   IMPORTANT: Mid-experiment incremental flow when new runs arrive:
     "new runs collected, update the table" → /refresh catalog then /matchruns --update
     "reduce only the new ones" → /reduce --new   (skips rows already done)

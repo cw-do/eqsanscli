@@ -2,7 +2,7 @@
 topic: protocol
 summary: The rules a reduction must satisfy. Authoritative — code and docs follow this file.
 load: always
-updated: 2026-08-17
+updated: 2026-09-25
 ---
 
 # EQSANS reduction protocol
@@ -41,7 +41,9 @@ More than one `empty_trans` in a configuration means a choice was made silently.
 The first is used; the user picks explicitly with `/set --config <id> emp <run>`.
 
 **CAT-04** · warning · enforced (`match_runs` warns)
-Same for more than one `bkg_scatt` per configuration.
+Same for more than one `bkg_scatt` per configuration — unless every sample row in
+that configuration names its own background with a `bg<N>` title token (BKG-04),
+in which case no choice was made silently and nothing is warned.
 
 **CAT-05** · info · enforced (`classify_title`)
 Background keywords are tested **before** the empty-beam pattern, so
@@ -110,6 +112,11 @@ All rows in one configuration resolve to the same calibration cycle. Runs
 spanning a cycle boundary would otherwise be reduced with one cycle's calibration
 while belonging to another.
 
+**TBL-08** · info · enforced (`services/matching_service.py`)
+A `th<X>mm` token in a title sets that row's thickness to X mm (`th0p5mm` = 0.5 mm).
+Without the token thickness keeps the TBL-05 default. An explicit `/set … thickness`
+or `/autopilot --thickness` afterwards still wins.
+
 ---
 
 ## BKG — background
@@ -126,7 +133,15 @@ A row's background is not the row's own scattering run.
 **BKG-03** · warning · unenforced
 All non-background rows in an experiment use the *same* background sample unless
 the user deliberately says otherwise. A table where some rows use `banjo` and
-others `emptycell` is usually a mistake.
+others `emptycell` is usually a mistake. A `bg<N>` title token (BKG-04) is such a
+deliberate statement.
+
+**BKG-04** · warning · enforced (`services/matching_service.py`)
+A sample whose title carries `bg<N>` uses background `bkg<N>` from its own
+configuration: the one at the same temperature token, else the only `bkg<N>` there.
+The run chosen is never guessed — an unresolvable pointer keeps the configuration
+default and is reported. The pointer is spelled `bg`, not `bkg`, because any title
+containing "bkg" is a background run.
 
 ---
 

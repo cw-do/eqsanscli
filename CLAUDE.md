@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.45.0 | 2026-09-25 | **Title tokens name each sample's background and thickness.** A background titled `bkg<N>_…` is background N; a sample titled `…_bg<N>_…` gets that background from its own config at the same temperature token (else the only `bkg<N>` there; never guessed — unresolved keeps the default and warns); `…_th<X>mm_…` sets thickness (`th0p5mm` = 0.05 cm). The pointer is `bg`, not `bkg`, because any title containing "bkg" is a background. Before, every sample got the config's lowest-numbered background, so contrast and per-temperature solvent series were mis-paired. `--update` keeps a title-named background; `/matchruns --no-title-tokens` restores the old behaviour. Existing titles unaffected: identical tables and warnings vs 0.44.0 on IPTS-36552/38603. BKG-04, TBL-08. |
 | 0.44.0 | 2026-09-16 | **New `/retitle` command — correct a wrong ONCat run title in-session so `/matchruns` can pair it.** `/matchruns` derives the sample name from the title, so a transmission mislabeled by sample-changer slot (`T-s1 4m 10A`) can never pair with `S-L62_0 4m 10A` — and `/reclass` (fixes *class*), `/set <row> sample` (renames *after* matching) and per-row `/set … trans` (thrown away by the next `/matchruns`) couldn't fix it. `/retitle 181470 T-L62_0 4m 10A` sets one run's whole title; `/retitle s1 L62_0 [--runs <spec>] [--regex]` swaps a word across titles (**whole-word by default** so `s1` never rewrites `s10`/`s11`); `/retitle show` / `/retitle clear [<runs>]`. Corrections live in the session (`state.title_overrides`, `{run: {title, original}}`), never touch ONCat, and are re-applied after `/load ipts`/`/refresh catalog` (which would bring the wrong titles back); `/show catalog` marks a corrected title with a trailing `*`; `original` always keeps ONCat's own title so `clear` restores the real record. Motivated by IPTS-36552 (11 slots × 2 configs; verified against each NeXus `SampleId`/`SampleTable:Position`). |
 | 0.43.1 | 2026-09-10 | Fix: a frame-skipping mode suffix in a transmission title stopped it matching its sample. IPTS-38151 samples were titled `S-porsil 4m 2.5a` but the re-measured transmissions `T-porsil 4m 2.5a`**`fs`** — the `fs` glued to the wavelength leaked past the config-stripping regex into the extracted sample name (`porsil_fs`), so it never matched `porsil` and every sample came out with no transmission. `_extract_sample_name`'s config regex now also consumes a `fs` suffix (attached `2.5afs` or spaced `2.5a fs`) and a following frequency token, so `T-…fs` transmissions match their plain `S-…` samples. Classification was already correct; only name extraction was wrong. |
 | 0.43.0 | 2026-09-10 | **Per-row output directory: `/set <rows> outputdir <path>`.** For data-heavy (time-sliced) reductions the user wanted each sample in its own folder. New per-row `output_override` field on `WorkingTableRow` (mirrors `configuration_override`); precedence is **row override → session-wide** (the row override also wins over the config's own `outputdir`, which `build_reduction_json` otherwise uses). `reduce_row` computes an `effective_dir` used consistently for the JSON `outputDir`, the `mkdir`, and the produced-file glob. `none` clears the override (back to session-wide). `/reduce` and autopilot's up-front output-dir writability check now validates *each distinct* effective dir (a bad per-row path is caught before launch, not per row). The `⟳` reduce line shows `@ <dir>` when a row overrides. Changing `output_override` deliberately does **not** mark a `done` row `modified` — where output is written doesn't invalidate the science (an hour-long time-slice run won't silently re-run). Persisted in `to_dict`; NL routes "put rows 5-10 output in /path" → `/set 5-10 outputdir /path`. |
@@ -225,6 +226,56 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-25: title tokens name each sample's background and thickness (v0.45.0)
+
+Asked (Changwoo, working on a proposal-to-script study): a proposal already says
+which background each sample uses, so the acquisition script should write it into
+the titles — label backgrounds `bkg1`, `bkg2`, … and tell each sample which one to
+use — and carry the sample thickness too, since the reduction needs it.
+
+Why it was needed: `match_runs` gives **every** sample in a configuration the
+lowest-numbered `bkg_scatt` (and, independently, the lowest `bkg_trans`). A
+contrast-variation series (one solvent background per H2O/D2O ratio) or a
+temperature series with its own solvent run per temperature was therefore paired
+wrongly for every sample but one, and `/assign bkg` could not fix it either — it
+also assigns one background per configuration. Thickness was never read from
+anything but `/set` / `--thickness` (0.1 cm default).
+
+Grammar (tokens are `_`-delimited words inside the extracted sample name):
+
+- `bkg<N>` in a background title: this is background N.
+- `bg<N>` in a sample title: use background N. **Not `bkg<N>`** — `classify_title`
+  tests "bkg" as a substring, so `S-x_B_bkg2 4m 10a` is a *background* run. Pinned
+  by `test_the_pointer_must_not_be_spelled_bkg`.
+- `th<X>mm`: cell path length, `p` for the decimal point (`th0p5mm` = 0.05 cm).
+
+Resolution, within the row's configuration: the `bkg<N>` run with the same
+temperature token; else, if `bkg<N>` was measured at only one temperature there,
+that one; else nothing is guessed — the row keeps the pre-0.45 default and a
+warning names the pointer and what was found. Newest run wins among equals, as for
+transmissions. The CAT-04 "several backgrounds, using the first" warning is
+suppressed only when every sample row in the config names its own background.
+`merge_new_runs` (`--update`) no longer copies the config's background onto a new
+row whose title named one. `/matchruns --no-title-tokens` restores the old
+behaviour exactly. New protocol rules BKG-04 and TBL-08; CAT-04 and BKG-03 amended.
+
+No effect on existing titles, checked three ways: no `bg<N>`/`th<X>mm` word occurs
+in the 367 real ONCat titles of IPTS-36552 and IPTS-38603 or in the 131 titles in
+this repo's tests and docs; `match_runs` from v0.44.0 (`a6290d6`) and from this
+version give identical working tables and identical warnings on both catalogs
+(263 and 54 rows); and a legacy-title test asserts tokens on/off give the same
+table. The rest of the suite is unchanged: run on Windows (anaconda 3.12,
+`PYTHONUTF8=1`, no `textual`) against a worktree of `a6290d6`, the same 7 tests
+fail before and after — all POSIX-only (chmod read-only dirs, `/SNS/…` cwd
+parsing) — and passing goes 328 → 339. Not yet run on the analysis nodes.
+
+`tests/test_title_tokens.py` (new, +11). NL routing in `llm_handler`, README
+(*Title tokens*), SKILL decision tree, protocol, docs regenerated.
+
+**Files changed:** `services/matching_service.py`, `commands/matching.py`,
+`services/llm_handler.py`, `knowledge/protocol.md`, `tests/test_title_tokens.py`,
+SKILL.md, README.md, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
 
 ### 2026-09-16: /retitle — correct a wrong ONCat run title in-session (v0.44.0)
 
@@ -399,38 +450,3 @@ at 100%, and throttles by count; `run_duration` from the catalog). Two existing
 `models/session_state.py`, `app.py`, `services/autopilot.py`,
 `tests/test_timeslice_progress.py`, `tests/test_reduce_preflight.py`,
 `tests/test_reduce_cancel.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-10: a second /reduce while one runs is refused, not run concurrently (v0.41.0)
-
-Asked: "what happens if I `/reduce` while the previous reduce is not completed?"
-The answer was: nothing stopped it. Reductions run in a background worker thread
-(the UI even says "Running in background — press ^X … to stop"), so the input
-stays live and a second `/reduce` (or `/autopilot`) dispatched mid-batch launched
-a **second concurrent worker**. Consequences: a second `ThreadPoolExecutor`, so up
-to 2× `max_workers` drtsans processes at once (node overload); a shared
-`_cancel_event`, so one Cancel stopped *both* batches; interleaved log output; and
-worst, if a row appeared in both selections it was reduced **twice at the same
-time**, both writing the same `.json`/`.nxs`/`_Iq.dat` — a file race.
-
-The `_job_running` flag already existed but was only read by the Cancel key
-binding, never checked before launching. New `_reject_if_busy(log, what)` guards
-both launch sites (`start_reduction`, `start_autopilot`) in `_render_data`: if a
-job is running it writes `⚠ A job is already running — not starting another
-<what>. Wait for it to finish, or press ^X / click ✕ Cancel to stop it first.`
-and returns True so the caller does not launch. The flag is now also claimed
-synchronously on the main thread at the launch site (`_set_job_running(True)`
-before `run_reduction_batch`/`run_autopilot_worker`), not only inside the worker
-thread — closing the small window where two fast submissions could both pass the
-guard before the first worker set it. The workers still set/clear the flag as
-before (idempotent).
-
-Headless is unaffected: it reduces synchronously in the stdin loop, so a command
-finishes before the next is read — batches can't overlap.
-
-`tests/test_reduce_concurrency.py` (new, +3): busy → refused with a message that
-names the job type and how to stop it; idle → allowed and silent. The guard is
-exercised directly (app built via `__new__`, no Textual event loop); textual/rich
-import fine under the test interpreter.
-
-**Files changed:** `app.py`, `tests/test_reduce_concurrency.py`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.

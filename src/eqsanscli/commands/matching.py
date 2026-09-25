@@ -26,6 +26,10 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
       --update  Add only new scattering runs to the existing table; preserve
                 already-reduced rows and their status. New rows inherit bkg/empty
                 from existing rows in the same config. Use after /refresh catalog.
+      --no-title-tokens
+                Ignore bg<N>/th<X>mm title tokens (BKG-04, TBL-08): every sample
+                gets the config's default background and thickness stays 0.1 cm,
+                exactly as before v0.45.0.
     """
     catalog = state.catalog
     if catalog is None or catalog.empty:
@@ -35,6 +39,7 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
         )
 
     update_mode = any(a.lower() in ("--update", "-u") for a in args)
+    title_tokens = not any(a.lower() == "--no-title-tokens" for a in args)
 
     if update_mode:
         existing = state.current_table
@@ -45,10 +50,10 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
                         "Run /matchruns (without --update) first.",
             )
         table, match_warnings, n_new, new_config_ids = merge_new_runs(
-            existing, catalog, ipts=state.ipts
+            existing, catalog, ipts=state.ipts, title_tokens=title_tokens
         )
     else:
-        table, match_warnings = match_runs(catalog, ipts=state.ipts)
+        table, match_warnings = match_runs(catalog, ipts=state.ipts, title_tokens=title_tokens)
         n_new = None
         new_config_ids = []
 
@@ -116,6 +121,16 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             f"  Background matched: {matched_bkg}/{len(table.rows)}\n"
             f"  Empty beam matched: {matched_empty}/{len(table.rows)}"
         )
+
+    if title_tokens:
+        from eqsanscli.services.matching_service import background_pointer, title_thickness_cm
+        n_ptr = sum(1 for r in table.rows if background_pointer(r.sample_name) is not None)
+        n_th = sum(1 for r in table.rows if title_thickness_cm(r.sample_name) is not None)
+        if n_ptr or n_th:
+            summary += (
+                f"\n  From title tokens: background named by bg<N> on {n_ptr} row(s), "
+                f"thickness from th<X>mm on {n_th} row(s) (/matchruns --no-title-tokens to ignore)"
+            )
 
     if preset_applied:
         summary += f"\n  Presets auto-applied: {', '.join(preset_applied)}"
