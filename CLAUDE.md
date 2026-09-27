@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.46.2 | 2026-09-26 | Fix: v0.46.0's launcher hook **forced the ONCat browser sign-in before the TUI started** when no token existed — intrusive, and it pre-empted the intended in-TUI `/oncat login`. The launcher no longer signs in at startup; the TUI just opens. When not signed in it shows one non-blocking line (`🔑 Not signed in to ONCat — type /oncat login …`), and `/load ipts` still prompts on demand. Sign in via `/oncat login` in the TUI (device URL shown in the pane, approve in your browser — works over SSH) or `eqsanscli-oncat-login` in a terminal, whichever you prefer. |
 | 0.46.1 | 2026-09-25 | Document the ONCat sign-in (v0.46.0) in the **in-CLI help**: `/oncat login|status|logout` now appear in `/help` (new "ONCat Sign-in (per-user)" block), as step 0 in `/help --simple` and the `/guide` side pane, and in the startup "Getting Started" banner — with the per-user + SSH (approve the URL in your own browser) notes. Help text only; no behaviour change. |
 | 0.46.0 | 2026-09-25 | **Per-user ONCat login (Device Authorization Grant).** The old code authenticated with a committed machine-to-machine `client_id`+`client_secret` (`CLIENT_CREDENTIALS_FLOW`) — one shared identity for everyone, and the **secret was in the public repo** — which ORNL's docs say must not be used for a distributed CLI. Now each user signs in as themselves: a **public** client id (no secret), device flow, per-user token cached in `~/.eqsanscli/oncat_token.json` (0600), so `/load ipts` and `/list ipts` return **only the IPTS that user can access**. New `/oncat login|status|logout`, an `eqsanscli-oncat-login` console entry, and a launcher hook that runs the one-time sign-in before the TUI. Works over SSH: the verification URL is shown (TUI pane or terminal), the user approves it in their own browser. Data calls are **token-first and never pop a browser** (raise `OncatAuthRequired` → "run /oncat login"); the TUI runs the sign-in in a worker thread. Browserless services (NDIP/Galaxy) can set `ONCAT_USERNAME`/`ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` (deprecated Password Grant, no secret committed) or pre-seed a token. Requires `pyoncat>=2.6` (2.7 installed on the cluster venv). **The leaked m2m secret must be revoked by the ONCat admin** — it stays in git history. |
 | 0.45.2 | 2026-09-25 | Fix: a **retired sensitivity file kept beside its replacement** could be chosen over the live one. On 2026B a new 4 m flood `…_186200.nxs` was added and the old one renamed `…_186200.OLD_nominal_geometry.nxs` and kept "just in case"; both parsed to the same `(variant, plain, run)`, and on that tie `_pick_sensitivity`'s `max()` returned the alphabetically-first candidate — and `.OLD_…` sorts before `.nxs` — so 4 m reductions silently used the old map. `SensitivityFile` gains a `deprecated` flag (name contains a delimited marker token: `OLD`/`bak`/`backup`/`deprecated`/`superseded`/`donotuse`/…), and `not deprecated` is now the top-priority ranking key: a live file always beats a marked sibling, but a marked file is still used if it is the only map for that distance (deprioritize, don't exclude — a cycle never loses its sensitivity). Protocol CAL-06. The live 2026B test was de-literal'd (asserts a live 4 m map the folder holds, never an `OLD` one) per the "no pinned machine-physics literals" rule. |
@@ -231,6 +232,22 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-26: don't force ONCat sign-in at launch (v0.46.2)
+
+Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which
+contradicted the intended in-TUI `/oncat login`. Cause: v0.46.0 added a launcher
+hook that ran `eqsanscli-oncat-login` (blocking on browser approval) before the TUI
+whenever no token existed. Removed it — the launcher just starts the TUI now.
+
+Instead the TUI shows a single non-blocking notice on startup when not signed in
+(`🔑 Not signed in to ONCat — type /oncat login …`), and data commands still prompt
+on demand (`/load ipts` → OncatAuthRequired → "run /oncat login"). Sign-in is the
+user's choice of `/oncat login` (device URL in the pane, approve in a browser —
+works over SSH) or the standalone `eqsanscli-oncat-login`. No forced browser flow.
+
+**Files changed:** `eqsanscli` (launcher), `app.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-25: document ONCat sign-in in the in-CLI help (v0.46.1)
 
 Follow-up to v0.46.0: the new per-user ONCat sign-in was in SKILL.md/README but not
@@ -353,53 +370,3 @@ the output dir is unset; it is absent when the dir is already under this IPTS).
 
 **Files changed:** `commands/catalog.py`, `tests/test_load_ipts.py`, CLAUDE.md,
 docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-09-25: title tokens name each sample's background and thickness (v0.45.0)
-
-Asked (Changwoo, working on a proposal-to-script study): a proposal already says
-which background each sample uses, so the acquisition script should write it into
-the titles — label backgrounds `bkg1`, `bkg2`, … and tell each sample which one to
-use — and carry the sample thickness too, since the reduction needs it.
-
-Why it was needed: `match_runs` gives **every** sample in a configuration the
-lowest-numbered `bkg_scatt` (and, independently, the lowest `bkg_trans`). A
-contrast-variation series (one solvent background per H2O/D2O ratio) or a
-temperature series with its own solvent run per temperature was therefore paired
-wrongly for every sample but one, and `/assign bkg` could not fix it either — it
-also assigns one background per configuration. Thickness was never read from
-anything but `/set` / `--thickness` (0.1 cm default).
-
-Grammar (tokens are `_`-delimited words inside the extracted sample name):
-
-- `bkg<N>` in a background title: this is background N.
-- `bg<N>` in a sample title: use background N. **Not `bkg<N>`** — `classify_title`
-  tests "bkg" as a substring, so `S-x_B_bkg2 4m 10a` is a *background* run. Pinned
-  by `test_the_pointer_must_not_be_spelled_bkg`.
-- `th<X>mm`: cell path length, `p` for the decimal point (`th0p5mm` = 0.05 cm).
-
-Resolution, within the row's configuration: the `bkg<N>` run with the same
-temperature token; else, if `bkg<N>` was measured at only one temperature there,
-that one; else nothing is guessed — the row keeps the pre-0.45 default and a
-warning names the pointer and what was found. Newest run wins among equals, as for
-transmissions. The CAT-04 "several backgrounds, using the first" warning is
-suppressed only when every sample row in the config names its own background.
-`merge_new_runs` (`--update`) no longer copies the config's background onto a new
-row whose title named one. `/matchruns --no-title-tokens` restores the old
-behaviour exactly. New protocol rules BKG-04 and TBL-08; CAT-04 and BKG-03 amended.
-
-No effect on existing titles, checked three ways: no `bg<N>`/`th<X>mm` word occurs
-in the 367 real ONCat titles of IPTS-36552 and IPTS-38603 or in the 131 titles in
-this repo's tests and docs; `match_runs` from v0.44.0 (`a6290d6`) and from this
-version give identical working tables and identical warnings on both catalogs
-(263 and 54 rows); and a legacy-title test asserts tokens on/off give the same
-table. The rest of the suite is unchanged: run on Windows (anaconda 3.12,
-`PYTHONUTF8=1`, no `textual`) against a worktree of `a6290d6`, the same 7 tests
-fail before and after — all POSIX-only (chmod read-only dirs, `/SNS/…` cwd
-parsing) — and passing goes 328 → 339. Not yet run on the analysis nodes.
-
-`tests/test_title_tokens.py` (new, +11). NL routing in `llm_handler`, README
-(*Title tokens*), SKILL decision tree, protocol, docs regenerated.
-
-**Files changed:** `services/matching_service.py`, `commands/matching.py`,
-`services/llm_handler.py`, `knowledge/protocol.md`, `tests/test_title_tokens.py`,
-SKILL.md, README.md, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.

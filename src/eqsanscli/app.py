@@ -187,6 +187,19 @@ class EQSANSApp(App):
                 "Type [bold cyan]/continue[/bold cyan] to resume where you left off.\n"
             ))
 
+        # Non-blocking ONCat sign-in reminder. Sign-in is never forced at launch —
+        # the user runs /oncat login when they choose (or is prompted on /load ipts).
+        try:
+            from eqsanscli.integrations import oncat
+            if not oncat.is_signed_in():
+                log.write(Text.from_markup(
+                    "  [bold yellow]🔑 Not signed in to ONCat.[/bold yellow] "
+                    "Type [bold cyan]/oncat login[/bold cyan] to sign in "
+                    "(approve a URL in your browser) before [bold]/load ipts[/bold].\n"
+                ))
+        except Exception:
+            pass
+
         self.query_one("#cmd-input", CompletableInput).focus()
         self.query_one("#footer-bar", FooterBar).update_model()
         self._refresh_completions()

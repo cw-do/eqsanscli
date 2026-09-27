@@ -7,6 +7,56 @@ the version it shipped in.
 
 ---
 
+### 2026-09-25: title tokens name each sample's background and thickness (v0.45.0)
+
+Asked (Changwoo, working on a proposal-to-script study): a proposal already says
+which background each sample uses, so the acquisition script should write it into
+the titles — label backgrounds `bkg1`, `bkg2`, … and tell each sample which one to
+use — and carry the sample thickness too, since the reduction needs it.
+
+Why it was needed: `match_runs` gives **every** sample in a configuration the
+lowest-numbered `bkg_scatt` (and, independently, the lowest `bkg_trans`). A
+contrast-variation series (one solvent background per H2O/D2O ratio) or a
+temperature series with its own solvent run per temperature was therefore paired
+wrongly for every sample but one, and `/assign bkg` could not fix it either — it
+also assigns one background per configuration. Thickness was never read from
+anything but `/set` / `--thickness` (0.1 cm default).
+
+Grammar (tokens are `_`-delimited words inside the extracted sample name):
+
+- `bkg<N>` in a background title: this is background N.
+- `bg<N>` in a sample title: use background N. **Not `bkg<N>`** — `classify_title`
+  tests "bkg" as a substring, so `S-x_B_bkg2 4m 10a` is a *background* run. Pinned
+  by `test_the_pointer_must_not_be_spelled_bkg`.
+- `th<X>mm`: cell path length, `p` for the decimal point (`th0p5mm` = 0.05 cm).
+
+Resolution, within the row's configuration: the `bkg<N>` run with the same
+temperature token; else, if `bkg<N>` was measured at only one temperature there,
+that one; else nothing is guessed — the row keeps the pre-0.45 default and a
+warning names the pointer and what was found. Newest run wins among equals, as for
+transmissions. The CAT-04 "several backgrounds, using the first" warning is
+suppressed only when every sample row in the config names its own background.
+`merge_new_runs` (`--update`) no longer copies the config's background onto a new
+row whose title named one. `/matchruns --no-title-tokens` restores the old
+behaviour exactly. New protocol rules BKG-04 and TBL-08; CAT-04 and BKG-03 amended.
+
+No effect on existing titles, checked three ways: no `bg<N>`/`th<X>mm` word occurs
+in the 367 real ONCat titles of IPTS-36552 and IPTS-38603 or in the 131 titles in
+this repo's tests and docs; `match_runs` from v0.44.0 (`a6290d6`) and from this
+version give identical working tables and identical warnings on both catalogs
+(263 and 54 rows); and a legacy-title test asserts tokens on/off give the same
+table. The rest of the suite is unchanged: run on Windows (anaconda 3.12,
+`PYTHONUTF8=1`, no `textual`) against a worktree of `a6290d6`, the same 7 tests
+fail before and after — all POSIX-only (chmod read-only dirs, `/SNS/…` cwd
+parsing) — and passing goes 328 → 339. Not yet run on the analysis nodes.
+
+`tests/test_title_tokens.py` (new, +11). NL routing in `llm_handler`, README
+(*Title tokens*), SKILL decision tree, protocol, docs regenerated.
+
+**Files changed:** `services/matching_service.py`, `commands/matching.py`,
+`services/llm_handler.py`, `knowledge/protocol.md`, `tests/test_title_tokens.py`,
+SKILL.md, README.md, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-09-16: /retitle — correct a wrong ONCat run title in-session (v0.44.0)
 
 Asked, in the user's words: "if I can say 'rename 181470 title to be T-L62_0 4m
