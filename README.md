@@ -11,6 +11,75 @@ source .venv/bin/activate
 python -m eqsanscli
 ```
 
+## ONCat Authentication
+
+Catalog data (run numbers, titles, metadata) comes from ORNL's
+[ONCat](https://oncat.ornl.gov) service, and **access is per-user**: each user
+signs in with their own ORNL (UCAMS/XCAMS) credentials and sees only the IPTS they
+are entitled to.
+
+### We follow ORNL's recommended guideline
+
+eqsanscli uses the **Device Authorization Grant** (OAuth 2.0, RFC 8628). This is
+the flow ONCat's documentation
+([*Choosing the Right Authentication for Your ONCat Integration*](https://oncat.ornl.gov/))
+**recommends for command-line tools that act on behalf of a user**. Concretely, we
+follow the guideline as stated:
+
+- **A public client id, no client secret.** ONCat publishes a shared public client
+  for human users; it is safe to commit and carries no access on its own. eqsanscli
+  ships no secret. (This replaced an earlier machine-to-machine
+  `client_id`+`client_secret` — the Client Credentials flow — which ONCat's docs
+  say must **not** be used for a distributed CLI, because anyone with the process
+  would have the credentials, and it grants one shared identity rather than
+  per-user access.)
+- **Per-user sign-in.** Each user approves a sign-in in their own browser and
+  receives their own access/refresh tokens, so entitlement is enforced by ONCat,
+  not by us.
+- **We do *not* use the deprecated Password Grant** for interactive use (RFC 9700
+  §2.4: the password credentials grant "MUST NOT be used"). It remains available
+  only as an opt-in, deployment-provided fallback for browserless services (below).
+
+Requires `pyoncat >= 2.6` (the version that provides the device flow).
+
+### Signing in
+
+Sign in **once**; the token is cached per-user in `~/.eqsanscli/oncat_token.json`
+(file mode `0600`) and reused automatically, so later launches need no prompt until
+the token expires from long inactivity.
+
+```
+/oncat login        # in the TUI — a verification URL appears in the pane
+/oncat status       # show whether you're signed in
+/oncat logout       # remove the cached token
+```
+
+or, from a plain terminal:
+
+```bash
+eqsanscli-oncat-login
+```
+
+**Over SSH:** the sign-in does not need a browser on the cluster — copy the
+verification URL into the browser on your **own machine**, sign in with UCAMS, and
+approve. That's it, once.
+
+Sign-in is never forced at launch: the TUI opens normally and shows a one-line
+reminder if you're not signed in; data commands (`/load ipts`, `/list ipts`) prompt
+you to `/oncat login` if you haven't yet.
+
+### Browserless / unattended services (e.g. NDIP, Galaxy)
+
+Two options, neither of which commits a secret:
+
+1. **Pre-seed the token.** If the service runs eqsanscli as the real user with their
+   home directory, that user signs in once (anywhere) and every later launch reuses
+   the cached `~/.eqsanscli/oncat_token.json` — no browser.
+2. **Environment credentials.** Set `ONCAT_USERNAME`, `ONCAT_PASSWORD`,
+   `ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET` and eqsanscli uses the (deprecated)
+   Password Grant — no browser. The confidential client is provided by the
+   deployment; nothing secret lives in this repository.
+
 ## Typical Workflow
 
 ### Minimal (using auto-match)
@@ -130,14 +199,10 @@ Use `--force` to re-reduce all rows regardless of status.
 
 ### Catalog & Data Loading
 
-**ONCat access is per-user.** Each user signs in once with their own ORNL
-credentials (Device Authorization Grant — no shared secret) and sees only the IPTS
-they're entitled to. The launcher runs the one-time sign-in automatically on first
-use; you can also sign in with `/oncat login` in the TUI or `eqsanscli-oncat-login`
-in a terminal. Over SSH, the sign-in shows a URL you approve in your **local**
-browser; the token is then cached in `~/.eqsanscli/` and reused. Unattended
-services (e.g. NDIP/Galaxy) can instead set `ONCAT_USERNAME`, `ONCAT_PASSWORD`,
-`ONCAT_CLIENT_ID`, `ONCAT_CLIENT_SECRET`. Requires `pyoncat>=2.6`.
+ONCat access is **per-user** — sign in once with `/oncat login` (or
+`eqsanscli-oncat-login`) and you see only the IPTS you can access. See
+[ONCat Authentication](#oncat-authentication) above for the flow, SSH notes, and
+the browserless service options.
 
 | Command | Description |
 |---------|-------------|
