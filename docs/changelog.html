@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.46.2</div>
+          data reduction tool &middot; v0.46.3</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,11 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-25-load-ipts-suggests-the-conventional-output-folder-v0451">2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)<a class="anchor" href="#2026-09-25-load-ipts-suggests-the-conventional-output-folder-v0451">#</a></h3>
+<p>Asked, after confirming the current behaviour is safe: &quot;having /load ipts suggest [a] default outputdir.&quot; <code><a href="commands.html#cmd-load">/load ipts</a></code> deliberately changes neither the cwd nor the output dir — there is no <code>chdir</code> in the reduction path, and output defaults to <code>./output/</code> relative to wherever eqsanscli was launched. That is safe but easy to forget, so reduced files can scatter into a stray <code>./output/</code>.</p>
+<p>Fix: purely a message addition — no side effect. After a successful <code><a href="commands.html#cmd-load">/load ipts</a></code> the handler appends a line showing where output currently points and a ready-to-paste <code><a href="commands.html#cmd-set">/set outputdir /SNS/EQSANS/IPTS-&lt;N&gt;/shared/output/</a></code>. It is suppressed when <code>os.path.abspath(state.output_directory)</code> already contains <code>IPTS-&lt;N&gt;</code> (a session that is already pointed at the experiment tree isn&#x27;t nagged). Nothing is set automatically — the user still runs <code><a href="commands.html#cmd-set">/set outputdir</a></code>.</p>
+<p><code>tests/test_load_ipts.py</code> (+2: the suggestion appears and changes nothing when the output dir is unset; it is absent when the dir is already under this IPTS).</p>
+<p><strong>Files changed:</strong> <code>commands/catalog.py</code>, <code>tests/test_load_ipts.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-25-title-tokens-name-each-samples-background-and-thickness-v0450">2026-09-25: title tokens name each sample&#x27;s background and thickness (v0.45.0)<a class="anchor" href="#2026-09-25-title-tokens-name-each-samples-background-and-thickness-v0450">#</a></h3>
 <p>Asked (Changwoo, working on a proposal-to-script study): a proposal already says which background each sample uses, so the acquisition script should write it into the titles — label backgrounds <code>bkg1</code>, <code>bkg2</code>, … and tell each sample which one to use — and carry the sample thickness too, since the reduction needs it.</p>
 <p>Why it was needed: <code>match_runs</code> gives <strong>every</strong> sample in a configuration the lowest-numbered <code>bkg_scatt</code> (and, independently, the lowest <code>bkg_trans</code>). A contrast-variation series (one solvent background per H2O/D2O ratio) or a temperature series with its own solvent run per temperature was therefore paired wrongly for every sample but one, and <code><a href="commands.html#cmd-assign">/assign bkg</a></code> could not fix it either — it also assigns one background per configuration. Thickness was never read from anything but <code><a href="commands.html#cmd-set">/set</a></code> / <code>--thickness</code> (0.1 cm default).</p>
@@ -655,7 +660,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-27 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-28 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

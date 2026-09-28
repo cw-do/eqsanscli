@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.46.3 | 2026-09-26 | Cosmetic: the catalog **Class column is now colour-coded** in `/load ipts` and `/show catalog` — scattering `S` bold green, transmission `T` cyan, background `BkgS`/`BkgT` yellow, empty beam `EmpT`/`EmpS` magenta, ignored `N` dim — so run roles are scannable at a glance. TUI-only: `_render_table` renders the Class cell as a styled `rich.Text` (`_CLASS_STYLES`, `_class_cell`); the underlying row data is unchanged, so headless JSON stays plain. |
 | 0.46.2 | 2026-09-26 | Fix: v0.46.0's launcher hook **forced the ONCat browser sign-in before the TUI started** when no token existed — intrusive, and it pre-empted the intended in-TUI `/oncat login`. The launcher no longer signs in at startup; the TUI just opens. When not signed in it shows one non-blocking line (`🔑 Not signed in to ONCat — type /oncat login …`), and `/load ipts` still prompts on demand. Sign in via `/oncat login` in the TUI (device URL shown in the pane, approve in your browser — works over SSH) or `eqsanscli-oncat-login` in a terminal, whichever you prefer. |
 | 0.46.1 | 2026-09-25 | Document the ONCat sign-in (v0.46.0) in the **in-CLI help**: `/oncat login|status|logout` now appear in `/help` (new "ONCat Sign-in (per-user)" block), as step 0 in `/help --simple` and the `/guide` side pane, and in the startup "Getting Started" banner — with the per-user + SSH (approve the URL in your own browser) notes. Help text only; no behaviour change. |
 | 0.46.0 | 2026-09-25 | **Per-user ONCat login (Device Authorization Grant).** The old code authenticated with a committed machine-to-machine `client_id`+`client_secret` (`CLIENT_CREDENTIALS_FLOW`) — one shared identity for everyone, and the **secret was in the public repo** — which ORNL's docs say must not be used for a distributed CLI. Now each user signs in as themselves: a **public** client id (no secret), device flow, per-user token cached in `~/.eqsanscli/oncat_token.json` (0600), so `/load ipts` and `/list ipts` return **only the IPTS that user can access**. New `/oncat login|status|logout`, an `eqsanscli-oncat-login` console entry, and a launcher hook that runs the one-time sign-in before the TUI. Works over SSH: the verification URL is shown (TUI pane or terminal), the user approves it in their own browser. Data calls are **token-first and never pop a browser** (raise `OncatAuthRequired` → "run /oncat login"); the TUI runs the sign-in in a worker thread. Browserless services (NDIP/Galaxy) can set `ONCAT_USERNAME`/`ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` (deprecated Password Grant, no secret committed) or pre-seed a token. Requires `pyoncat>=2.6` (2.7 installed on the cluster venv). **The leaked m2m secret must be revoked by the ONCat admin** — it stays in git history. |
@@ -232,6 +233,21 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-26: colour-code the catalog Class column (v0.46.3)
+
+Requested cosmetic upgrade: in `/load ipts` and `/show catalog`, colour the Class
+column by run role so trans/bkg/empty/ignore stand out at a glance. Scattering `S`
+bold green, transmission `T` cyan, background `BkgS`/`BkgT` yellow, empty beam
+`EmpT`/`EmpS` magenta, ignored `N` dim.
+
+TUI-only and data-safe: `app._render_table` now renders the Class cell as a styled
+`rich.Text` via `_class_cell` / `_CLASS_STYLES` (keyed by the RUN_CLASS_SHORT
+label), while the row dicts in `CommandResult.data` are untouched — so the headless
+JSON stays plain (no markup leaking into the protocol). Colours chosen to read on
+both light and dark terminals.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-26: don't force ONCat sign-in at launch (v0.46.2)
 
 Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which
@@ -349,24 +365,3 @@ the marker matches delimited words only) and the de-literal'd live test. 356 tes
 **Files changed:** `services/instrument_files.py`, `knowledge/protocol.md`,
 `tests/test_instrument_files.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)
-
-Asked, after confirming the current behaviour is safe: "having /load ipts suggest
-[a] default outputdir." `/load ipts` deliberately changes neither the cwd nor the
-output dir — there is no `chdir` in the reduction path, and output defaults to
-`./output/` relative to wherever eqsanscli was launched. That is safe but easy to
-forget, so reduced files can scatter into a stray `./output/`.
-
-Fix: purely a message addition — no side effect. After a successful `/load ipts`
-the handler appends a line showing where output currently points and a
-ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. It is
-suppressed when `os.path.abspath(state.output_directory)` already contains
-`IPTS-<N>` (a session that is already pointed at the experiment tree isn't
-nagged). Nothing is set automatically — the user still runs `/set outputdir`.
-
-`tests/test_load_ipts.py` (+2: the suggestion appears and changes nothing when
-the output dir is unset; it is absent when the dir is already under this IPTS).
-
-**Files changed:** `commands/catalog.py`, `tests/test_load_ipts.py`, CLAUDE.md,
-docs (regenerated), `src/eqsanscli/__init__.py`.

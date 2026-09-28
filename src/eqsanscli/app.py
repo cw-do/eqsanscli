@@ -668,6 +668,24 @@ class EQSANSApp(App):
         self.call_from_thread(self._set_job_running, False)
         self.call_from_thread(self._update_status_bars)
 
+    # Colour the catalog's Class column by run class, so trans/bkg/empty/ignore
+    # runs are distinguishable at a glance. Keyed by the short label
+    # (RUN_CLASS_SHORT); chosen to read on both light and dark terminals.
+    _CLASS_STYLES = {
+        "S": "bold green",       # scattering — the sample measurements
+        "T": "cyan",             # transmission
+        "BkgS": "yellow",        # background scattering
+        "BkgT": "yellow",        # background transmission
+        "EmpT": "magenta",       # empty-beam transmission
+        "EmpS": "magenta",       # empty-beam scattering
+        "N": "dim",              # ignored
+    }
+
+    def _class_cell(self, value: str):
+        """Class-column value as a styled Text (falls back to plain if unknown)."""
+        style = self._CLASS_STYLES.get(value.strip())
+        return Text(value, style=style) if style else value
+
     def _render_table(
         self, log: RichLog, columns: list[str], rows: list[dict], title: str = ""
     ) -> None:
@@ -680,7 +698,11 @@ class EQSANSApp(App):
             table.add_column(col, justify=justify)
 
         for row_data in rows:
-            table.add_row(*[row_data.get(c, "") for c in columns])
+            cells = []
+            for c in columns:
+                value = row_data.get(c, "")
+                cells.append(self._class_cell(value) if c == "Class" else value)
+            table.add_row(*cells)
 
         log.write(table, shrink=False)
 

@@ -7,6 +7,27 @@ the version it shipped in.
 
 ---
 
+### 2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)
+
+Asked, after confirming the current behaviour is safe: "having /load ipts suggest
+[a] default outputdir." `/load ipts` deliberately changes neither the cwd nor the
+output dir — there is no `chdir` in the reduction path, and output defaults to
+`./output/` relative to wherever eqsanscli was launched. That is safe but easy to
+forget, so reduced files can scatter into a stray `./output/`.
+
+Fix: purely a message addition — no side effect. After a successful `/load ipts`
+the handler appends a line showing where output currently points and a
+ready-to-paste `/set outputdir /SNS/EQSANS/IPTS-<N>/shared/output/`. It is
+suppressed when `os.path.abspath(state.output_directory)` already contains
+`IPTS-<N>` (a session that is already pointed at the experiment tree isn't
+nagged). Nothing is set automatically — the user still runs `/set outputdir`.
+
+`tests/test_load_ipts.py` (+2: the suggestion appears and changes nothing when
+the output dir is unset; it is absent when the dir is already under this IPTS).
+
+**Files changed:** `commands/catalog.py`, `tests/test_load_ipts.py`, CLAUDE.md,
+docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-09-25: title tokens name each sample's background and thickness (v0.45.0)
 
 Asked (Changwoo, working on a proposal-to-script study): a proposal already says
