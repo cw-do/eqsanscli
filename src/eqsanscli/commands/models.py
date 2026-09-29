@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from eqsanscli.models.session_state import SessionState
 
 AVAILABLE_MODELS = [
+    "openai/gpt-6-luna-pro",
     "openai/gpt-5-mini",
     "google/gemini-3-flash-preview",
     "anthropic/claude-opus-4.6",

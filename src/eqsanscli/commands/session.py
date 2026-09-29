@@ -46,13 +46,13 @@ async def handle_save(args: list[str], state: SessionState) -> CommandResult:
             message="Usage: /save <target>\n"
             "  /save table [name]         — Save active table (name defaults to table name)\n"
             "  /save catalog data.csv     — Export catalog to CSV\n"
-            "  (use /session save for sessions)",
+            "  /save session [name]       — Same as /session save",
         )
     sub = args[0].lower()
     if sub == "table":
         return await handle_save_table(args[1:], state)
-    if sub == "session":
-        return CommandResult(success=False, message="Use /session save [name] instead.")
+    if sub == "session":  # same as /session save — both spellings are natural
+        return await handle_save_session(args[1:], state)
     if sub == "catalog":
         return await handle_save_catalog(args[1:], state)
     return CommandResult(success=False, message=f"Unknown /save target: {sub}")
@@ -67,7 +67,7 @@ async def handle_load(args: list[str], state: SessionState) -> CommandResult:
             "  /load table                — List saved tables\n"
             "  /load table mytable        — Load a table\n"
             "  /load catalog data.csv     — Load catalog from CSV\n"
-            "  (use /session load for sessions)",
+            "  /load session <name>       — Same as /session load",
         )
     sub = args[0].lower()
     if sub == "ipts":
@@ -75,8 +75,8 @@ async def handle_load(args: list[str], state: SessionState) -> CommandResult:
         return await handle_load_ipts(args[1:], state)
     if sub == "table":
         return await handle_load_table(args[1:], state)
-    if sub == "session":
-        return CommandResult(success=False, message="Use /session load <name> or /session list instead.")
+    if sub == "session":  # same as /session load (no name → list)
+        return await handle_load_session(args[1:], state)
     if sub == "catalog":
         return await handle_load_catalog(args[1:], state)
     return CommandResult(success=False, message=f"Unknown /load target: {sub}")
@@ -208,7 +208,7 @@ async def handle_load_session(args: list[str], state: SessionState) -> CommandRe
                 )
             except Exception:
                 lines.append(f"  [dim]{p.stem:<20}  {saved_at}  (corrupt)[/dim]")
-        lines.append(f"\n[dim]Usage: /load session <name>[/dim]")
+        lines.append(f"\n[dim]Usage: /session load <name>[/dim]")
         return CommandResult(success=True, message="\n".join(lines))
 
     from eqsanscli.models.session_state import SessionState as SS

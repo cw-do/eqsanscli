@@ -97,6 +97,9 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.47.2 | 2026-09-29 | Fix: **autopilot found no stitchable groups** on IPTS-37681. Titles wrote the configuration without a space (`S-CTAB 1,3_0.1shear 4m2.5a`); `_extract_sample_name` only stripped the spaced form (`4m 2.5a`), so the name kept `_4m2.5a`, output doubled it (`…_4m2.5a_4m2.5a_Iq.dat`), and the 4 m and 8 m rows of one sample had different names — every group had one config. Names now drop a compact configuration word (`4m2.5a`, `8m10a`, `2p5m2p5a`, `…30hz`, whole words only), and `build_stitch_table` groups on the name without a configuration token (`strip_config_tokens`), so sessions matched before the fix stitch their existing files without re-reducing. STC-01. |
+| 0.47.1 | 2026-09-29 | Fix command forms the app itself told users to type. The `/session load` listing said `Usage: /load session <name>`, which refused with "Use /session load …" (a loop); README said `/save session …` (also refused). `/load session` and `/save session` now **forward** to `/session load`/`save`. `/help` listed `/confirm … (--status, --comment)` but `--status` never existed and unknown args were silently dropped — `/confirm --status No` would still confirm **Yes**; `/confirm` now refuses anything it does not parse. Found by auditing every `/command` mention (code strings, SKILL, README, knowledge, docs) against the router; `tests/test_command_forms.py` keeps the documented-flags check permanent. |
+| 0.47.0 | 2026-09-29 | **rheo-SANS matching + prefix-aware `/reclass`**, from IPTS-37681 (CTAB in a Couette cell, shear planes 1,3/2,3 × shear rates × 2 configs). (1) `/reclass --sample S-X bkg` now reaches only `S-` titles (a prefixed name matches only that prefix; before, the prefix was discarded, so "S-cup are bkg, T-cup are bkgtrans" set all ten runs BkgS then all BkgT); new prefix-aware class `background` (S-→BkgS, T-→BkgT); a literal class contradicting a run's prefix is warned; a name-based reclass no longer revives `ignore` runs. CAT-08. (2) `/matchruns`: a `_<rate>shear` token is a condition like `_dX` — every shear rate takes the plane's at-rest transmission (TBL-09); several empty beams/backgrounds per config are chosen per row by the distinguishing title token the sample shares (`empty beam 2,3` for `CTAB 2,3_…`), else first-found + warning as before (CAT-09; off with `--no-title-tokens`). `emptycup` is a background keyword. 20 → 0 rows missing transmission, and the 2,3 rows no longer get the 1,3 empty beam/cup. (3) Default OpenRouter model → `openai/gpt-6-luna-pro`. |
 | 0.46.3 | 2026-09-26 | Cosmetic: the catalog **Class column is now colour-coded** in `/load ipts` and `/show catalog` — scattering `S` bold green, transmission `T` cyan, background `BkgS`/`BkgT` yellow, empty beam `EmpT`/`EmpS` magenta, ignored `N` dim — so run roles are scannable at a glance. TUI-only: `_render_table` renders the Class cell as a styled `rich.Text` (`_CLASS_STYLES`, `_class_cell`); the underlying row data is unchanged, so headless JSON stays plain. |
 | 0.46.2 | 2026-09-26 | Fix: v0.46.0's launcher hook **forced the ONCat browser sign-in before the TUI started** when no token existed — intrusive, and it pre-empted the intended in-TUI `/oncat login`. The launcher no longer signs in at startup; the TUI just opens. When not signed in it shows one non-blocking line (`🔑 Not signed in to ONCat — type /oncat login …`), and `/load ipts` still prompts on demand. Sign in via `/oncat login` in the TUI (device URL shown in the pane, approve in your browser — works over SSH) or `eqsanscli-oncat-login` in a terminal, whichever you prefer. |
 | 0.46.1 | 2026-09-25 | Document the ONCat sign-in (v0.46.0) in the **in-CLI help**: `/oncat login|status|logout` now appear in `/help` (new "ONCat Sign-in (per-user)" block), as step 0 in `/help --simple` and the `/guide` side pane, and in the startup "Getting Started" banner — with the per-user + SSH (approve the URL in your own browser) notes. Help text only; no behaviour change. |
@@ -233,6 +236,130 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)
+
+Reported after a full autopilot on IPTS-37681: "28 reduced … ⚠ No stitchable
+groups found". Titles wrote the configuration as one word (`S-CTAB 1,3_0.1shear
+4m2.5a`). `_extract_sample_name` strips `\d+m\s+\d+a`, i.e. only the spaced
+form, so the sample name kept `_4m2.5a`; `output_stem` appended the config again
+(`CTAB_1,3_0.1shear_4m2.5a_4m2.5a_Iq.dat`); and `build_stitch_table`, which groups
+by `row.sample_name`, saw `…_4m2.5a` and `…_8m10a` as two samples. I had noticed
+the leftover config in v0.47.0 and called it harmless for matching — true, but it
+broke stitching.
+
+Two fixes. Root: `_extract_sample_name` also removes a configuration written as a
+whole word (`_CFG_WORD_RE`: distance `m` wavelength `a`, `.` or `p` decimal,
+optional `fs`/`<n>hz`, delimited by whitespace/`_`/ends — `sample2m5a` is left
+alone). Compatibility: `build_stitch_table` keys groups by
+`strip_config_tokens(row.sample_name)`, so an existing session (rows named before
+the fix, files already on disk with the doubled stem) stitches without
+re-matching or re-reducing. `_CFG_TOKEN_RE` (CAT-09's token filter) now shares the
+same pattern body.
+
+Verified read-only on the real `autopilot_session.json`: 14 groups, all
+stitchable (12 CTAB + 2 EmptyCupBob), each ordered 8m10a → 4m2.5a, files found
+under their existing names. STC-01 extended. `tests/test_rheo_matching.py` (+2).
+380 tests.
+
+**Files changed:** `services/matching_service.py`, `services/merge_service.py`,
+`knowledge/protocol.md`, `tests/test_rheo_matching.py`, CLAUDE.md, docs
+(regenerated), `src/eqsanscli/__init__.py`.
+
+### 2026-09-29: command forms the app tells you to type now work (v0.47.1)
+
+Reported: `/session load` lists sessions and ends "Usage: /load session <name>";
+typing that answered "Use /session load <name> or /session list instead." Asked to
+check the other usages for the same kind of error.
+
+Audit, three passes over every `/command` mention in the code's string literals,
+SKILL.md, README, `knowledge/` and `docs/pages/`:
+1. every top-level command resolves in the router — clean (hits were Rich markup
+   `[/dim]` and paths);
+2. every distinct `/command subcommand` form dispatched through the real router
+   on an empty session in a sandbox cwd/HOME (skipping shell, ONCat, share,
+   zipnsend, exit, rm/mv/cp/cd), flagging "Unknown …"/"… instead" replies — after
+   discarding noise (trailing punctuation, flags probed without their value,
+   prose like "/instrument find the mask"), two real errors: the listing hint
+   above and README's `/save session myexperiment`;
+3. every `--flag` written after a `/command` is parsed somewhere — one miss:
+   `/help` advertised `/confirm … (--status, --comment)`. There is no `--status`,
+   and `handle_confirm` silently skipped anything it did not parse, so
+   `/confirm --status No` would still write status=Yes to the IPTS record.
+
+Fixes: the listing hint reads `/session load <name>`; `/load session` and `/save
+session` forward to `/session load`/`save` instead of refusing (both spellings are
+natural, and the TUI does not special-case the session command); README uses
+`/session save`; `/help` shows `/confirm [ipts] [--comment <text>]`; `/confirm`
+refuses any argument it does not understand (autopilot calls `run_confirm_data`
+directly, unaffected).
+
+`tests/test_command_forms.py` (+4): the listing's hint round-trips to a load; both
+spellings forward; `/confirm --status No` writes nothing; and pass 3 as a
+permanent check (no false positives today). Pass 2 is too noisy for a test.
+
+**Files changed:** `commands/session.py`, `commands/export.py`, `app.py`,
+README.md, `tests/test_command_forms.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
+### 2026-09-29: rheo-SANS matching, prefix-aware /reclass, default model (v0.47.0)
+
+Field report from IPTS-37681 (CTAB in a Couette cell, two shear planes × six
+shear rates × 4m2.5a/8m10a). Three problems, one session:
+
+**`/reclass --sample` could not tell S- from T-.** The user wrote "S-emptycupbob
+are background scattering and T-emptycupbob are background transmission"; the LLM
+emitted `/reclass --sample EmptyCupBob bkg` then `… bkgtrans`. Both ran, but
+`_match_catalog_title` strips the title's S-/T- prefix and the LLM had to drop the
+pattern's, so each command hit all ten runs: first all BkgS, then all BkgT. It
+also revived two runs the user had set to `ignore` (N → BkgS). Now a pattern
+starting `S-`/`T-` matches only titles with that prefix; a new prefix-aware class
+`background` (alias `bkgsample`) does S-→BkgS / T-→BkgT like `sample` does; a
+literal class that contradicts a run's prefix is applied but warned; and a
+name-based reclass leaves `ignore` runs alone (naming the run by number still
+revives it — `ignore` is only ever set by hand). LLM prompt: the example "treat
+emptyticell as background" now emits `background`, plus the S-/T- split example.
+CAT-08.
+
+**20 rows missing transmission.** The transmission is measured once, at rest,
+per plane (`T-CTAB 1,3_0shear 4m2.5a`) and serves every shear rate
+(`S-CTAB 1,3_1000shear …`, `…_0shear-return …`). `_match_base` now strips a
+`_<rate>shear` token as it strips `_d<N>`; the plane token is kept, so a plane
+never borrows the other's transmission. TBL-09.
+
+**The plane was also wrong for empty beam and background.** Each config holds
+`T-empty beam 1,3` and `T-empty beam 2,3` (different beam paths through the
+cell → different beam centres) and `EmptyCupBob 1,3`/`2,3`; every row got the
+first. New `_pick_by_shared_token`: among several candidates of one role, a row
+takes the one whose *distinguishing* tokens (not common to all candidates; config
+tokens like `4m2.5a` excluded) its own name shares — only on a unique pick; else
+the first-found default and the CAT-03/04 warning stand, exactly as before. The
+background transmission follows the chosen background by name. `bg<N>` (BKG-04)
+wins; `--no-title-tokens` turns it off. The CAT-03/04 warnings moved after the
+row loop so they fire only when some row actually fell back. CAT-09. `emptycup` /
+`empty cup` added to `BKG_KEYWORDS`, so `EmptyCupBob` classifies as background
+without a `/reclass`.
+
+Measured on the real catalog (fresh classification, user's ignores kept): 28
+rows, 0 missing transmission or empty beam; each 1,3 row → 188898/188899 empty,
+188908/188910 cup; each 2,3 row → 188918/188919, 188909/188911.
+
+Also: default OpenRouter model `google/gemini-3-flash-preview` →
+`openai/gpt-6-luna-pro` (checked present in OpenRouter's model list), first in
+`/models`; `.env.example` updated (the local `.env` pinned Gemini and overrides
+the code default — updated too, not committed).
+
+Not changed: a config written without a space (`4m2.5a`) is not stripped from
+sample names by `_extract_sample_name`, so names read `CTAB_1,3_0.1shear_4m2.5a`.
+Harmless for matching; left alone because it would rename output files.
+
+`tests/test_reclass.py` (+6), `tests/test_rheo_matching.py` (+5). 374 tests.
+
+**Files changed:** `commands/catalog.py`, `commands/matching.py`,
+`commands/models.py`, `config/settings.py`, `services/matching_service.py`,
+`services/llm_handler.py`, `app.py`, `knowledge/protocol.md`, SKILL.md,
+`.env.example`, tests, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-26: colour-code the catalog Class column (v0.46.3)
 
 Requested cosmetic upgrade: in `/load ipts` and `/show catalog`, colour the Class
@@ -262,106 +389,4 @@ user's choice of `/oncat login` (device URL in the pane, approve in a browser �
 works over SSH) or the standalone `eqsanscli-oncat-login`. No forced browser flow.
 
 **Files changed:** `eqsanscli` (launcher), `app.py`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-25: document ONCat sign-in in the in-CLI help (v0.46.1)
-
-Follow-up to v0.46.0: the new per-user ONCat sign-in was in SKILL.md/README but not
-in the help a user sees inside the app. Added `/oncat login|status|logout` to the
-full `/help` (a dedicated "ONCat Sign-in (per-user)" block above Catalog & Data
-Loading), as step 0 in the `/help --simple` quickstart and the `/guide` side pane,
-and to the startup "Getting Started" banner — each noting it is per-user and that
-over SSH you approve the URL in your own browser. Help/manual text only; no
-behaviour change. 363 tests.
-
-**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-25: per-user ONCat login via the Device Authorization Grant (v0.46.0)
-
-Asked to review ORNL's ONCat auth docs against our integration. Two problems: the
-CLI authenticated with a committed machine-to-machine `client_id`+`client_secret`
-(`CLIENT_CREDENTIALS_FLOW`) — (1) one shared *application* identity for everyone,
-so `/load ipts`/`/list ipts` couldn't reflect per-user entitlement (the stated
-requirement), and (2) the **secret is in the public GitHub repo**. ORNL's docs are
-explicit that client-credentials is not for user-facing/distributed CLIs and that
-the **Device Authorization Grant** is the recommended flow for exactly this case.
-
-Investigated feasibility: `pyoncat>=2.6` is needed for the device flow; 2.7 is
-available on ORNL's repoman index and installs cleanly into the app venv (pure
-Python, needs only `requests`). Prototyped it end to end with a real sign-in —
-confirmed per-user access (identity + the user's own EQSANS experiment list) and
-silent token reuse on the second run.
-
-`integrations/oncat.py` rewritten:
-- Public device-flow client id (`eaeb036a-…`, no secret), scopes
-  `api:read data:read openid`, per-user `FileSystemTokenStore` at
-  `~/.eqsanscli/oncat_token.json` (dir 0700, file 0600).
-- **Token-first, non-interactive data calls**: `fetch_catalog`/`list_experiments`
-  build the client with `REAUTH_NEVER` and never pop a browser; with no usable
-  token they raise `OncatAuthRequired` (front ends turn it into "run /oncat
-  login"). `_translate_auth_error` maps pyoncat expiry errors to the same.
-- Explicit `login()` (device flow, `REAUTH_PROMPT`) + `is_signed_in()` /
-  `sign_out()`. An injectable `set_verification_handler` lets each front end show
-  the verification URL/code where it belongs (default: stderr).
-- **Browserless fallback for services (NDIP/Galaxy):** if `ONCAT_USERNAME`/
-  `ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` are all set, use the
-  (deprecated) Password Grant — no secret committed, the deployment provides it.
-  Precedence: env password grant → cached token → (login only) device browser.
-
-Front ends: new `/oncat status|login|logout` (`handle_oncat`, registered); the TUI
-runs `login()` in a `@work` thread (`run_oncat_login`) and posts the URL into the
-output pane — works over SSH (approve in your own browser); headless refuses
-`oncat_login` with guidance (can't browser-sign-in mid-JSON); the `eqsanscli`
-launcher runs the one-time sign-in in the plain terminal before the TUI when no
-token exists; new `eqsanscli-oncat-login` console entry. `pyproject` pins
-`pyoncat>=2.6` and adds the entry point.
-
-**Security:** the previously committed m2m secret is removed from the code but
-remains in git history — it must be **revoked/rotated by the ONCat admin**.
-
-`tests/test_oncat_auth.py` (+6: no secret in source; token file drives
-`is_signed_in`/`sign_out`; a data call without a token raises `OncatAuthRequired`
-and `/load ipts` surfaces it; `/oncat` status/login/logout; env creds select the
-Password Grant). SKILL + LLM routing + docs updated. 363 tests.
-
-**Files changed:** `integrations/oncat.py`, `commands/catalog.py`,
-`commands/registry.py`, `app.py`, `headless.py`, `oncat_login_cli.py` (new),
-`eqsanscli` (launcher), `pyproject.toml`, `services/llm_handler.py`, SKILL.md,
-`tests/test_oncat_auth.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-25: a retired sensitivity file no longer wins over its replacement (v0.45.2)
-
-Found via a live test failure the same day: on 2026B a new 4 m flood map was added
-(`Sensitivity_patched_thinPMMA_4m_186200.nxs`, Sep 24) and the previous one kept
-beside it, renamed `…_186200.OLD_nominal_geometry.nxs` (Aug 9) "just in case." The
-resolver started returning the OLD one, so 4 m reductions would silently use the
-superseded map.
-
-Cause: `_pick_sensitivity` ranks by `(variant==pref, plain, run)`. Both files
-parse identically — variant `thinPMMA`, `plain` (`_4m_186200`), run `186200` — so
-they tie on every key. On a tie `max()` returns the first in folder-sorted order,
-and `…186200.OLD_nominal_geometry.nxs` sorts before `…186200.nxs` (`O` 0x4F < `n`
-0x6E), so the retired copy won.
-
-Fix: `SensitivityFile` gains `deprecated: bool`, set by `_is_deprecated_name` when
-the filename contains a delimited retirement token (`old`, `bak`, `backup`,
-`deprecated`, `superseded`, `donotuse`, `dontuse`, `unused`, `obsolete`). The word
-split is delimiter-based so a real fragment can't trip it (`goldstd` is not
-"old"). `_pick_sensitivity` now leads its key with `not s.deprecated`, so a live
-file always beats a marked sibling — but a marked file is still used when it is the
-only map for a distance (deprioritize, never exclude, so a cycle can't lose its
-sensitivity). Chosen over an mtime tiebreak (fragile: rsync/copy resets mtimes,
-which CLAUDE.md warns against) and over hard exclusion (would drop a sole map).
-
-The live 2026B test was de-literal'd per the "never pin a machine-physics value to
-a literal" rule: it now asserts the resolved sensitivity is a live 4 m map the
-folder actually holds and is not marked `OLD`, rather than a hardcoded filename.
-
-Protocol CAL-06 (warning, enforced). `tests/test_instrument_files.py` (+3
-synthetic, mount-independent: live beats OLD sibling; a sole OLD map is still used;
-the marker matches delimited words only) and the de-literal'd live test. 356 tests.
-
-**Files changed:** `services/instrument_files.py`, `knowledge/protocol.md`,
-`tests/test_instrument_files.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.

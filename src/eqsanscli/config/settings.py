@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_MODEL = "openai/gpt-6-luna-pro"
 FALLBACK_MODEL = "openai/gpt-5-mini"
 
 

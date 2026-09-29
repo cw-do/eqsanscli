@@ -192,6 +192,8 @@ def _find_frame_files(output_dir: str, sample_name: str, config: str) -> tuple[s
 
 
 def build_stitch_table(table: WorkingTable, output_dir: str) -> list[StitchGroup]:
+    from eqsanscli.services.matching_service import strip_config_tokens
+
     """Build stitch groups by scanning output directory for *_Iq.dat files.
 
     Strategy 1: Match files to working table rows (uses row metadata for ordering).
@@ -236,7 +238,10 @@ def build_stitch_table(table: WorkingTable, output_dir: str) -> list[StitchGroup
         if os.path.exists(fpath):
             row.output_file = fpath
             row.status = "done"
-            sample_files.setdefault(row.sample_name, []).append(
+            # Group on the name without a configuration token: rows matched
+            # before v0.47.2 could be named "CTAB_0shear_4m2.5a" and
+            # "CTAB_0shear_8m10a" — one sample, which must stitch as one.
+            sample_files.setdefault(strip_config_tokens(row.sample_name), []).append(
                 (fpath, cfg, row.detector_distance, row.wavelength)
             )
 

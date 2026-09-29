@@ -7,6 +7,108 @@ the version it shipped in.
 
 ---
 
+### 2026-09-25: document ONCat sign-in in the in-CLI help (v0.46.1)
+
+Follow-up to v0.46.0: the new per-user ONCat sign-in was in SKILL.md/README but not
+in the help a user sees inside the app. Added `/oncat login|status|logout` to the
+full `/help` (a dedicated "ONCat Sign-in (per-user)" block above Catalog & Data
+Loading), as step 0 in the `/help --simple` quickstart and the `/guide` side pane,
+and to the startup "Getting Started" banner — each noting it is per-user and that
+over SSH you approve the URL in your own browser. Help/manual text only; no
+behaviour change. 363 tests.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
+### 2026-09-25: per-user ONCat login via the Device Authorization Grant (v0.46.0)
+
+Asked to review ORNL's ONCat auth docs against our integration. Two problems: the
+CLI authenticated with a committed machine-to-machine `client_id`+`client_secret`
+(`CLIENT_CREDENTIALS_FLOW`) — (1) one shared *application* identity for everyone,
+so `/load ipts`/`/list ipts` couldn't reflect per-user entitlement (the stated
+requirement), and (2) the **secret is in the public GitHub repo**. ORNL's docs are
+explicit that client-credentials is not for user-facing/distributed CLIs and that
+the **Device Authorization Grant** is the recommended flow for exactly this case.
+
+Investigated feasibility: `pyoncat>=2.6` is needed for the device flow; 2.7 is
+available on ORNL's repoman index and installs cleanly into the app venv (pure
+Python, needs only `requests`). Prototyped it end to end with a real sign-in —
+confirmed per-user access (identity + the user's own EQSANS experiment list) and
+silent token reuse on the second run.
+
+`integrations/oncat.py` rewritten:
+- Public device-flow client id (`eaeb036a-…`, no secret), scopes
+  `api:read data:read openid`, per-user `FileSystemTokenStore` at
+  `~/.eqsanscli/oncat_token.json` (dir 0700, file 0600).
+- **Token-first, non-interactive data calls**: `fetch_catalog`/`list_experiments`
+  build the client with `REAUTH_NEVER` and never pop a browser; with no usable
+  token they raise `OncatAuthRequired` (front ends turn it into "run /oncat
+  login"). `_translate_auth_error` maps pyoncat expiry errors to the same.
+- Explicit `login()` (device flow, `REAUTH_PROMPT`) + `is_signed_in()` /
+  `sign_out()`. An injectable `set_verification_handler` lets each front end show
+  the verification URL/code where it belongs (default: stderr).
+- **Browserless fallback for services (NDIP/Galaxy):** if `ONCAT_USERNAME`/
+  `ONCAT_PASSWORD`/`ONCAT_CLIENT_ID`/`ONCAT_CLIENT_SECRET` are all set, use the
+  (deprecated) Password Grant — no secret committed, the deployment provides it.
+  Precedence: env password grant → cached token → (login only) device browser.
+
+Front ends: new `/oncat status|login|logout` (`handle_oncat`, registered); the TUI
+runs `login()` in a `@work` thread (`run_oncat_login`) and posts the URL into the
+output pane — works over SSH (approve in your own browser); headless refuses
+`oncat_login` with guidance (can't browser-sign-in mid-JSON); the `eqsanscli`
+launcher runs the one-time sign-in in the plain terminal before the TUI when no
+token exists; new `eqsanscli-oncat-login` console entry. `pyproject` pins
+`pyoncat>=2.6` and adds the entry point.
+
+**Security:** the previously committed m2m secret is removed from the code but
+remains in git history — it must be **revoked/rotated by the ONCat admin**.
+
+`tests/test_oncat_auth.py` (+6: no secret in source; token file drives
+`is_signed_in`/`sign_out`; a data call without a token raises `OncatAuthRequired`
+and `/load ipts` surfaces it; `/oncat` status/login/logout; env creds select the
+Password Grant). SKILL + LLM routing + docs updated. 363 tests.
+
+**Files changed:** `integrations/oncat.py`, `commands/catalog.py`,
+`commands/registry.py`, `app.py`, `headless.py`, `oncat_login_cli.py` (new),
+`eqsanscli` (launcher), `pyproject.toml`, `services/llm_handler.py`, SKILL.md,
+`tests/test_oncat_auth.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
+### 2026-09-25: a retired sensitivity file no longer wins over its replacement (v0.45.2)
+
+Found via a live test failure the same day: on 2026B a new 4 m flood map was added
+(`Sensitivity_patched_thinPMMA_4m_186200.nxs`, Sep 24) and the previous one kept
+beside it, renamed `…_186200.OLD_nominal_geometry.nxs` (Aug 9) "just in case." The
+resolver started returning the OLD one, so 4 m reductions would silently use the
+superseded map.
+
+Cause: `_pick_sensitivity` ranks by `(variant==pref, plain, run)`. Both files
+parse identically — variant `thinPMMA`, `plain` (`_4m_186200`), run `186200` — so
+they tie on every key. On a tie `max()` returns the first in folder-sorted order,
+and `…186200.OLD_nominal_geometry.nxs` sorts before `…186200.nxs` (`O` 0x4F < `n`
+0x6E), so the retired copy won.
+
+Fix: `SensitivityFile` gains `deprecated: bool`, set by `_is_deprecated_name` when
+the filename contains a delimited retirement token (`old`, `bak`, `backup`,
+`deprecated`, `superseded`, `donotuse`, `dontuse`, `unused`, `obsolete`). The word
+split is delimiter-based so a real fragment can't trip it (`goldstd` is not
+"old"). `_pick_sensitivity` now leads its key with `not s.deprecated`, so a live
+file always beats a marked sibling — but a marked file is still used when it is the
+only map for a distance (deprioritize, never exclude, so a cycle can't lose its
+sensitivity). Chosen over an mtime tiebreak (fragile: rsync/copy resets mtimes,
+which CLAUDE.md warns against) and over hard exclusion (would drop a sole map).
+
+The live 2026B test was de-literal'd per the "never pin a machine-physics value to
+a literal" rule: it now asserts the resolved sensitivity is a live 4 m map the
+folder actually holds and is not marked `OLD`, rather than a hardcoded filename.
+
+Protocol CAL-06 (warning, enforced). `tests/test_instrument_files.py` (+3
+synthetic, mount-independent: live beats OLD sibling; a sole OLD map is still used;
+the marker matches delimited words only) and the de-literal'd live test. 356 tests.
+
+**Files changed:** `services/instrument_files.py`, `knowledge/protocol.md`,
+`tests/test_instrument_files.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-25: /load ipts suggests the conventional output folder (v0.45.1)
 
 Asked, after confirming the current behaviour is safe: "having /load ipts suggest

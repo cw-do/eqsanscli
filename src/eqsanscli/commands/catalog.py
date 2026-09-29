@@ -400,19 +400,46 @@ def _title_prefix_class(title: str) -> str:
     return "scattering"
 
 
+_PREFIX_RE = re.compile(r"^([sStT])[-\s]+")
+
+
+def _split_prefix(text: str) -> tuple[str | None, str]:
+    """Split a leading S-/T- prefix off: ('s'|'t'|None, remainder)."""
+    m = _PREFIX_RE.match(text.strip())
+    if not m:
+        return None, text.strip()
+    return m.group(1).lower(), text.strip()[m.end():].strip()
+
+
 def _match_catalog_title(pattern: str, title: str) -> bool:
     """Match a pattern against a catalog title (case-insensitive).
 
-    Strips the S-/T- prefix from the title before matching.
+    Strips the S-/T- prefix from the title before matching. A pattern that
+    carries its own prefix (`S-EmptyCup`, `T-*cup*`) matches only titles with
+    that same prefix — so "S-X are background scattering, T-X are background
+    transmission" can address the two halves separately.
     Supports * wildcard (glob-style) or exact match.
     """
     import fnmatch
-    p = pattern.lower().strip()
-    # Strip S-/T- prefix from title for matching
-    t = re.sub(r"^[sStT][-\s]+", "", title).strip().lower()
+    want_prefix, p = _split_prefix(pattern.lower())
+    have_prefix, t = _split_prefix(title.lower())
+    if want_prefix is not None and want_prefix != have_prefix:
+        return False
     if "*" in p or "?" in p:
         return fnmatch.fnmatch(t, p)
     return p in t
+
+
+# Prefix-aware classes: the S-/T- title prefix picks the scattering or the
+# transmission half of the role. "sample" existed first; "background" is the
+# same idea for a background — a bare `bkg` would put T- runs into BkgS.
+_PREFIX_AWARE = {
+    "sample": ("scattering", "transmission"),
+    "background": ("bkg_scatt", "bkg_trans"),
+    "bkgsample": ("bkg_scatt", "bkg_trans"),
+}
+_SCATT_SIDE = {"scattering", "bkg_scatt", "empty_scatt"}
+_TRANS_SIDE = {"transmission", "bkg_trans", "empty_trans"}
 
 
 async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
@@ -426,10 +453,15 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
         /reclass 172804 i                  — ignore this run (excluded from matching)
         /reclass 172804 n                  — same: 'n' (not used) is an alias of 'i'
         /reclass --sample BkgG sample      — all BkgG runs: S-BkgG→scatt, T-BkgG→trans
-        /reclass --sample emptyticell bkg  — all emptyticell runs → background
+        /reclass --sample emptyticell background — S-→BkgS, T-→BkgT
+        /reclass --sample S-EmptyCup bkg   — only the S- titled EmptyCup runs
 
-    Valid classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)
-    "sample" respects S-/T- prefix: S-BkgG → scattering, T-BkgG → transmission.
+    Valid classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample,
+    background, ignore (i, n)
+    "sample" and "background" respect the S-/T- prefix: S-BkgG → scattering,
+    T-BkgG → transmission (resp. BkgS / BkgT).
+    A --sample name that starts with S- or T- matches only titles with that prefix.
+    --sample leaves runs already marked ignore alone (name them by run to revive).
     "ignore" (aliases: i, n) excludes runs from /matchruns entirely (label: N).
     """
     if len(args) < 2:
@@ -437,16 +469,20 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
             success=False,
             message="Usage: /reclass <runs> <class>  |  /reclass --sample <name> <class>\n"
             "  <runs>   = run number, range (12345-12350), or comma-separated\n"
-            "  <name>   = sample name (case-insensitive, matches title after S-/T- prefix)\n"
-            "  <class>  = scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)\n\n"
+            "  <name>   = sample name (case-insensitive, matches title after S-/T- prefix;\n"
+            "             start it with S- or T- to match only those titles)\n"
+            "  <class>  = scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample,\n"
+            "             background, ignore (i, n)\n\n"
             "  'sample' respects S-/T- prefix (S-BkgG → scatt, T-BkgG → trans)\n"
+            "  'background' respects it too (S-X → BkgS, T-X → BkgT)\n"
             "  'ignore' (aliases: i, n — 'not used') excludes runs from /matchruns entirely\n\n"
             "Examples:\n"
             "  /reclass 172804 scatt\n"
             "  /reclass 172804-172810 sample\n"
             "  /reclass 172804 i        (or: /reclass 172804 n)\n"
             "  /reclass --sample BkgG sample\n"
-            "  /reclass --sample emptyticell bkg",
+            "  /reclass --sample emptyticell background\n"
+            "  /reclass --sample S-EmptyCup bkg     (S- titles only)",
         )
 
     if state.catalog_data is None:
@@ -471,12 +507,13 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
         class_name = args[1]
         use_sample_filter = False
 
-    is_sample_mode = class_name.lower().strip() == "sample"
+    prefix_pair = _PREFIX_AWARE.get(class_name.lower().strip())
 
-    if not is_sample_mode:
+    if prefix_pair is None:
         new_class = resolve_run_class(class_name)
         if new_class is None:
-            valid = "scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (i, n)"
+            valid = ("scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, "
+                     "background, ignore (i, n)")
             return CommandResult(
                 success=False,
                 message=f"Unknown class: '{class_name}'. Valid classes: {valid}",
@@ -491,6 +528,8 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
 
     updated = 0
     changed_runs: list[str] = []
+    skipped_ignored: list[int] = []
+    side_mismatch: list[int] = []
     for record in state.catalog_data:
         try:
             rn = int(record.get("run_number", 0))
@@ -498,36 +537,67 @@ async def handle_reclass(args: list[str], state: SessionState) -> CommandResult:
             continue
 
         title = str(record.get("title", ""))
+        old_class = record.get("run_class", "")
 
         if use_sample_filter:
             if not _match_catalog_title(sample_pattern, title):
+                continue
+            # A name match must not revive a run the user set aside: ignore is
+            # only ever set by hand (classify_title never produces it). Naming
+            # the run explicitly still overrides it.
+            if old_class == "ignore" and new_class != "ignore":
+                skipped_ignored.append(rn)
                 continue
         else:
             if rn not in requested_runs:
                 continue
 
-        old_class = record.get("run_class", "")
-        if is_sample_mode:
-            resolved = _title_prefix_class(title)
+        if prefix_pair is not None:
+            is_trans = _title_prefix_class(title) == "transmission"
+            resolved = prefix_pair[1] if is_trans else prefix_pair[0]
         else:
             resolved = new_class
+            prefix, _ = _split_prefix(title.lower())
+            if (prefix == "t" and resolved in _SCATT_SIDE) or (
+                    prefix == "s" and resolved in _TRANS_SIDE):
+                side_mismatch.append(rn)
         record["run_class"] = resolved
         old_short = RUN_CLASS_SHORT.get(old_class, old_class)
         new_short = RUN_CLASS_SHORT.get(resolved, resolved)
-        changed_runs.append(f"  {rn}  {title[:30]}  {old_short} → {new_short}")
+        changed_runs.append(f"  {rn}  {title[:40]}  {old_short} → {new_short}")
         updated += 1
+
+    notes: list[str] = []
+    if skipped_ignored:
+        runs = ", ".join(str(r) for r in skipped_ignored)
+        notes.append(
+            f"Left {len(skipped_ignored)} ignored run(s) as N: {runs}\n"
+            f"  (name-based /reclass never revives an ignored run — "
+            f"use /reclass <run> <class> to include one)"
+        )
+    if side_mismatch:
+        runs = ", ".join(str(r) for r in side_mismatch)
+        new_short = RUN_CLASS_SHORT.get(new_class, new_class)
+        notes.append(
+            f"⚠ {len(side_mismatch)} run(s) now {new_short} disagree with their "
+            f"S-/T- title prefix: {runs}\n"
+            f"  To follow the prefix use 'background' (S-→BkgS, T-→BkgT) or "
+            f"'sample' (S-→S, T-→T), or put the prefix in the name: "
+            f"/reclass --sample S-<name> bkg  and  /reclass --sample T-<name> bkgtrans"
+        )
 
     if updated == 0:
         target = f"sample '{sample_pattern}'" if use_sample_filter else run_spec
-        return CommandResult(
-            success=False,
-            message=f"No runs in catalog matching: {target}",
-        )
+        msg = f"No runs in catalog matching: {target}"
+        if notes:
+            msg += "\n" + "\n".join(notes)
+        return CommandResult(success=False, message=msg)
 
     detail = "\n".join(changed_runs)
+    extra = ("\n\n" + "\n".join(notes)) if notes else ""
     return CommandResult(
         success=True,
-        message=f"Reclassified {updated} run(s):\n{detail}\n\n"
+        message=f"Reclassified {updated} run(s):\n{detail}{extra}\n\n"
         "Run /matchruns to rebuild the working table with updated classes.",
     )
 

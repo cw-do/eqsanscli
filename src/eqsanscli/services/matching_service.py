@@ -22,7 +22,9 @@ from eqsanscli.models.working_table import WorkingTable, WorkingTableRow
 logger = logging.getLogger(__name__)
 
 BKG_KEYWORDS = ["bkg", "banjo", "background", "emptycell", "emptyticell", "empty ticell",
-                "empty ti-cell", "ti-cell", "ticell"]
+                "empty ti-cell", "ti-cell", "ticell",
+                # rheo-SANS: the empty Couette cup (IPTS-37681 "EmptyCupBob")
+                "emptycup", "empty cup", "empty_cup"]
 # Empty beam patterns: "empty"/"emp"/"emt" joined to "beam" by any separator or
 # none ("empty beam", "emptybeam", "empty_beam", "emptyBeam"), OR standalone
 # "empty"/"emp"/"emt" as a whole word. Must NOT match "emptycell"/"emptyticell"
@@ -95,6 +97,12 @@ _BKG_ID_RE = re.compile(r"(?:^|_)bkg(\d+)(?=_|$)", re.IGNORECASE)
 _BG_PTR_RE = re.compile(r"(?:^|_)bg(\d+)(?=_|$)", re.IGNORECASE)
 _THICK_RE = re.compile(r"(?:^|_)th(\d+(?:p\d+)?)mm(?=_|$)", re.IGNORECASE)
 _TEMP_SUFFIX_RE = re.compile(r"_(\d{2,3}C)$", re.IGNORECASE)
+
+# A configuration written as one word: distance m wavelength a, '.' or 'p' as
+# the decimal point, optional frame-skipping / frequency suffix.
+_CFG_BODY = r"^\d+(?:[.p]\d+)?m\d+(?:[.p]\d+)?a(?:fs)?(?:\d+hz)?(?:fs)?"
+# ...as a whole word in a title (delimited by whitespace, '_' or the ends).
+_CFG_WORD_RE = re.compile(r"(?<![^\s_])" + _CFG_BODY[1:] + r"(?![^\s_])", re.IGNORECASE)
 
 
 def title_thickness_cm(sample_name: str) -> float | None:
@@ -170,7 +178,7 @@ def classify_title(title: str) -> str:
         scattering, transmission, bkg_scatt, bkg_trans, empty_trans, empty_scatt
 
     Classification priority:
-        1. Background keywords checked FIRST (emptycell/emptyticell/ti-cell/banjo/bkg)
+        1. Background keywords checked FIRST (emptycell/emptyticell/ti-cell/banjo/emptycup/bkg)
         2. Empty beam (standalone "empty"/"emp"/"emt" or "* beam")
         3. S-/T- prefix for scattering/transmission
         4. Default: scattering
@@ -265,9 +273,17 @@ def _match_base(sample_name: str) -> str:
     Only the displacement convention ``_d<number>`` is stripped; ``_d2o`` and
     other non-numeric ``d`` tokens are left alone (the ``(?=_|$)`` lookahead
     requires the digits to end the token).
+
+    A rheo-SANS shear-rate token (``_0.1shear``, ``_1000shear``,
+    ``_0shear-return``) is stripped the same way: the transmission is measured
+    once at rest (``T-CTAB 1,3_0shear``) and serves every shear rate of that
+    sample. Other tokens — the shear plane ``1,3`` / ``2,3`` — are kept, so a
+    plane only ever matches its own transmission.
     """
     s = re.sub(r"_?\d{2,3}C$", "", sample_name, flags=re.IGNORECASE)  # temperature
     s = re.sub(r"_d\d+(?=_|$)", "", s, flags=re.IGNORECASE)           # displacement
+    s = re.sub(r"_\d+(?:[.p]\d+)?shear(?:-[a-z0-9]+)*(?=_|$)", "", s,
+               flags=re.IGNORECASE)                                   # shear rate
     s = re.sub(r"__+", "_", s).strip("_")
     return s.lower()
 
@@ -306,6 +322,11 @@ def _extract_sample_name(title: str) -> str:
         r"(?:\s*\d+\s*[hH]z)?"                   # frequency: "60Hz" / "30hz"
         r"(?:\s*fs)?",                           # fs may also trail the frequency
         " ", s, flags=re.IGNORECASE)
+    # The same written compactly, as a word of its own: "4m2.5a", "8m10a",
+    # "2p5m2p5a". Left in, it doubled into the output name
+    # (CTAB_1,3_0shear_4m2.5a_4m2.5a_Iq.dat) and split one sample into one
+    # stitch group per configuration (IPTS-37681).
+    s = re.sub(_CFG_WORD_RE, " ", s)
 
     # Strip thickness: small decimals at end like "1.5C", "0.1C" (≤10.0, at least one digit after dot or 0.x).
     s = re.sub(r"\s+\d+\.\d+\s*[cC]\s*$", "", s)
@@ -335,6 +356,47 @@ def _classify_catalog(catalog: pd.DataFrame) -> list[ClassifiedRun]:
         cr = _classify_run_from_row(row)
         classified.append(cr)
     return classified
+
+
+# A configuration token in a name says nothing about which run belongs to
+# which sample — every candidate in a config shares the configuration. Names
+# from sessions matched before v0.47.2 can still carry one ("CTAB_1,3_4m2.5a").
+_CFG_TOKEN_RE = re.compile(_CFG_BODY + r"$", re.IGNORECASE)
+
+
+def strip_config_tokens(name: str) -> str:
+    """`name` without any `_`-delimited configuration token (`4m2.5a`, `8m10a30hz`)."""
+    kept = [t for t in name.split("_") if not (t and _CFG_TOKEN_RE.match(t))]
+    return "_".join(kept) or name
+
+
+def _name_tokens(name: str) -> set[str]:
+    return {t for t in re.split(r"[_\s]+", name.lower())
+            if t and not _CFG_TOKEN_RE.match(t)}
+
+
+def _pick_by_shared_token(sample_name: str,
+                          cands: list[ClassifiedRun]) -> ClassifiedRun | None:
+    """Among several empty beams / backgrounds of one config, the one the sample names.
+
+    A candidate's *distinguishing* tokens are those not common to every
+    candidate. Pick the candidate whose distinguishing tokens the sample's name
+    shares — `T-empty beam 2,3` for `S-CTAB 2,3_10shear` (rheo-SANS: the 1,3
+    and 2,3 shear planes are different beam paths through the cell, so each has
+    its own empty beam and empty cup). Repeats of one name count as one and the
+    newest run wins. None when no candidate, or more than one, is named — the
+    caller keeps its config default, so a title without such a token matches
+    exactly as before.
+    """
+    if len(cands) < 2:
+        return None
+    toks = [_name_tokens(c.sample_name) for c in cands]
+    common = set.intersection(*toks)
+    mine = _name_tokens(sample_name)
+    hits = [c for c, t in zip(cands, toks) if (t - common) & mine]
+    if len({c.sample_name.lower() for c in hits}) != 1:
+        return None
+    return max(hits, key=lambda c: c.run_number)
 
 
 def match_runs(catalog: pd.DataFrame, ipts: int = 0,
@@ -379,30 +441,13 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
         if not all_scattering:
             continue
 
-        # Warn if multiple empty beams in this config
-        if len(empty_trans_runs) > 1:
-            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in empty_trans_runs)
-            warnings.append(
-                f"[{cfg_label}] {len(empty_trans_runs)} empty beam runs found: {run_list}\n"
-                f"  Using {empty_trans_runs[0].run_number} as default. "
-                f"Use /set <row> emp <run> to override."
-            )
-
-        # Warn if multiple background scattering runs in this config — unless
-        # every sample row names its own background with a bg<N> token, in
-        # which case the config default is never used.
-        uses_default_bkg = any(
-            not (r.is_background or r.is_empty)
-            and not (title_tokens and background_pointer(r.sample_name) is not None)
-            for r in all_scattering
-        )
-        if len(bkg_scatt_runs) > 1 and uses_default_bkg:
-            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in bkg_scatt_runs)
-            warnings.append(
-                f"[{cfg_label}] {len(bkg_scatt_runs)} background scatt runs found: {run_list}\n"
-                f"  Using {bkg_scatt_runs[0].run_number} as default. "
-                f"Use /assign bkg <sample> to override."
-            )
+        # Rows whose empty beam / background came from the config default while
+        # the config had several to choose from (CAT-03, CAT-04). Warned after
+        # the rows are built, because a shared title token (CAT-09) may have
+        # made the choice for every row.
+        empty_defaulted = False
+        bkg_defaulted = False
+        token_picks: dict[str, set[str]] = {"empty beam": set(), "background": set()}
 
         default_empty = str(empty_trans_runs[0].run_number) if empty_trans_runs else ""
         default_bkg_scatt = str(bkg_scatt_runs[0].run_number) if bkg_scatt_runs else ""
@@ -435,6 +480,15 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
                 if trans_run:
                     matched_by = "base"
 
+            row_empty = default_empty
+            if len(empty_trans_runs) > 1:
+                pick = _pick_by_shared_token(s.sample_name, empty_trans_runs) if title_tokens else None
+                if pick is not None:
+                    row_empty = str(pick.run_number)
+                    token_picks["empty beam"].add(f"{pick.run_number} ({pick.sample_name})")
+                else:
+                    empty_defaulted = True
+
             if s.is_background or s.is_empty:
                 # Background-cell and empty-beam rows don't get an auto-assigned
                 # background — empty-beam is a calibration measurement, not a
@@ -450,6 +504,19 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
                 row_bkg_scatt = default_bkg_scatt
                 row_bkg_trans = default_bkg_trans
                 n_ptr = background_pointer(s.sample_name) if title_tokens else None
+                if n_ptr is None and len(bkg_scatt_runs) > 1:
+                    pick = _pick_by_shared_token(s.sample_name, bkg_scatt_runs) if title_tokens else None
+                    if pick is not None:
+                        row_bkg_scatt = str(pick.run_number)
+                        same = [r for r in bkg_trans_runs
+                                if r.sample_name.lower() == pick.sample_name.lower()]
+                        t_pick = (max(same, key=lambda r: r.run_number) if same
+                                  else _pick_by_shared_token(s.sample_name, bkg_trans_runs))
+                        if t_pick is not None:
+                            row_bkg_trans = str(t_pick.run_number)
+                        token_picks["background"].add(f"{pick.run_number} ({pick.sample_name})")
+                    else:
+                        bkg_defaulted = True
                 if n_ptr is not None:
                     b_s, b_t, problem = _pick_numbered_background(
                         n_ptr, s.sample_name, bkg_scatt_runs, bkg_trans_runs)
@@ -469,7 +536,7 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
                 transmission_run=trans_run,
                 background_scatt=row_bkg_scatt,
                 background_trans=row_bkg_trans,
-                empty_beam=default_empty,
+                empty_beam=row_empty,
                 detector_distance=s.detector_distance,
                 wavelength=s.wavelength,
                 frequency=s.frequency,
@@ -478,6 +545,28 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
             if th is not None:
                 row.thickness = th
             table.add_row(row)
+
+        if empty_defaulted:
+            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in empty_trans_runs)
+            warnings.append(
+                f"[{cfg_label}] {len(empty_trans_runs)} empty beam runs found: {run_list}\n"
+                f"  Using {empty_trans_runs[0].run_number} as default. "
+                f"Use /set <row> emp <run> to override."
+            )
+        if bkg_defaulted:
+            run_list = ", ".join(f"{r.run_number} ({r.title[:25]})" for r in bkg_scatt_runs)
+            warnings.append(
+                f"[{cfg_label}] {len(bkg_scatt_runs)} background scatt runs found: {run_list}\n"
+                f"  Using {bkg_scatt_runs[0].run_number} as default. "
+                f"Use /assign bkg <sample> to override."
+            )
+        for role, picked in token_picks.items():
+            if picked:
+                warnings.append(
+                    f"[{cfg_label}] {role} chosen per row by the title token the sample "
+                    f"shares with it: {', '.join(sorted(picked))}.\n"
+                    f"  Verify with /show table; /matchruns --no-title-tokens uses the first one."
+                )
 
         if by_config_assigned:
             n = len(by_config_assigned)

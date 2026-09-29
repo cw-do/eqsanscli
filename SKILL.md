@@ -182,6 +182,8 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 | Missing transmission | `/set --sample <name> trans <run>` or `/set <row> trans <run>` |
 | Transmissions named by slot, not by sample (`T-s1` vs `S-L62_0`) — *no* row matches | Fix the titles, not the rows: `/retitle s1 L62_0`, then `/matchruns`. `/set` patches one row and the next `/matchruns` loses it |
 | Displacement series (`_d0`, `_d2`, …) shares one transmission | `/matchruns` handles it: the `_dX` suffix is ignored, and a config with a single transmission assigns it to all its samples (warns that it matched by configuration) |
+| rheo-SANS: shear rates share the at-rest transmission (`S-CTAB 1,3_1000shear` ← `T-CTAB 1,3_0shear`) | `/matchruns` handles it: a `_<rate>shear` token (incl. `_0shear-return`) is ignored for transmission matching; every other token — the shear plane `1,3`/`2,3` — must still agree (TBL-09) |
+| Several empty beams / backgrounds per config, one per shear plane (`T-empty beam 1,3`, `T-empty beam 2,3`; `EmptyCupBob 1,3`/`2,3`) | `/matchruns` gives each row the one whose distinguishing title token its name carries (CAT-09) and says so ("chosen per row by the title token…"). `EmptyCup…` classifies as a background. `/matchruns --no-title-tokens` reverts to first-found |
 | Transmission title has a frame-skipping suffix (`T-poly 4m 2.5a`**`fs`**) while the sample is `S-poly 4m 2.5a` | Handled automatically — the `fs` suffix is stripped from the sample key so it still matches. No action needed |
 | Transmission measured *after* the first match (higher run number, empty field now) | `/refresh catalog` then `/matchruns --update` back-fills it; or plain `/matchruns` (rebuild) always finds it (matches by sample name, order-independent) |
 | Missing background | `/assign bkg <sample_name>` — PREFERRED, handles config matching |
@@ -190,6 +192,7 @@ These are NOT reasons to use the manual path. Use autopilot with flags.
 | Missing empty beam | `/set <row> emp <run>`, or `/set --config <id> emp <run>` for a whole configuration |
 | Mislabeled run (title says T- but it is scattering) | `/reclass <runs> scatt`, then `/matchruns` again |
 | Sample name contains a bkg keyword (e.g. BkgG) | `/reclass --sample BkgG sample` — respects the S-/T- prefix |
+| A sample is really a background (S- and T- runs) | `/reclass --sample EmptyCup background` — S-→BkgS, T-→BkgT. Or address one half: `/reclass --sample S-EmptyCup bkg` + `/reclass --sample T-EmptyCup bkgtrans`. A bare `bkg` on the unprefixed name makes the T- runs BkgS too (warned) |
 | More than one empty beam or bkg per config | `/matchruns` warns; pick with `/set --config <id> emp <run>` |
 | Unwanted rows (test runs) | `/remove --sample <name>` |
 
@@ -439,8 +442,8 @@ before sign-in returns "Not signed in to ONCat".
 
 | Command | Purpose |
 |---------|---------|
-| `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n) |
-| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`) |
+| `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, background, ignore (aliases i, n). `sample`/`background` follow the S-/T- title prefix |
+| `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`). A name starting `S-`/`T-` matches only those titles (`--sample T-EmptyCup bkgtrans`). Runs already ignored (N) are left alone — name them by run number to revive |
 | `/retitle <run> <new title>` | Correct one run's title in this session, e.g. `/retitle 181470 T-L62_0 4m 10A`. `/matchruns` pairs **by title**, so this is how a mislabeled transmission is fixed at the source |
 | `/retitle <old> <new> [--runs <spec>]` | Swap a whole word in every title, or only in those runs (`/retitle s1 L62_0`). Whole-word by default — `s1` never rewrites `s10`; `--regex` for anything looser |
 | `/retitle show` / `/retitle clear [<runs>]` | List the corrections made here / restore the ONCat title |

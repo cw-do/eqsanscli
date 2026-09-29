@@ -96,7 +96,7 @@ Two options, neither of which commits a secret:
 /list iq                                 # List reduced files
 /plot *_Iq.dat --save plot.png           # Plot results
 /share *.png                             # Share via here.now (24h link)
-/save session myexperiment               # Save for later
+/session save myexperiment               # Save for later
 ```
 
 ### With porsil calibration (manual, like autopilot)

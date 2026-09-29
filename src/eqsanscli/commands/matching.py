@@ -27,9 +27,10 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
                 already-reduced rows and their status. New rows inherit bkg/empty
                 from existing rows in the same config. Use after /refresh catalog.
       --no-title-tokens
-                Ignore bg<N>/th<X>mm title tokens (BKG-04, TBL-08): every sample
-                gets the config's default background and thickness stays 0.1 cm,
-                exactly as before v0.45.0.
+                Ignore bg<N>/th<X>mm title tokens (BKG-04, TBL-08) and the
+                shared-token choice of empty beam/background (CAT-09): every
+                sample gets the config's first empty beam and background, and
+                thickness stays 0.1 cm.
     """
     catalog = state.catalog
     if catalog is None or catalog.empty:

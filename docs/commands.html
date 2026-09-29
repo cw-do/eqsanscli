@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.46.3</div>
+          data reduction tool &middot; v0.47.2</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -97,7 +97,7 @@
 </section>
 <section class="cmd" id="cmd-reclass">
 <h3>/reclass<a class="anchor" href="#cmd-reclass">#</a><span class="src">catalog.py</span></h3>
-<p class="summary">Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, ignore (aliases i, n)</p>
+<p class="summary">Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, background, ignore (aliases i, n). <code>sample</code>/<code>background</code> follow the S-/T- title prefix</p>
 <pre class="example"><code>/reclass 186517 empty
 /reclass --sample BkgG sample</code></pre>
 </section>
@@ -559,7 +559,7 @@ Autopilot steps (13 total):
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-28 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-09-29 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

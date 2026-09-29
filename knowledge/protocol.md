@@ -47,7 +47,7 @@ in which case no choice was made silently and nothing is warned.
 
 **CAT-05** · info · enforced (`classify_title`)
 Background keywords are tested **before** the empty-beam pattern, so
-`emptycell` / `emptyticell` / `ti-cell` / `banjo` / `bkg` / `background` classify
+`emptycell` / `emptyticell` / `ti-cell` / `banjo` / `emptycup` / `bkg` / `background` classify
 as background, not as empty beam. `empty` / `emp` / `emt` as standalone words, or
 anything followed by `beam`, are empty beam.
 
@@ -61,6 +61,28 @@ scattering runs were at 2.5 Å.)
 Runs of implausibly short duration for their role (a flood of a few seconds, a
 transmission of hours) are usually aborted or mislabelled measurements.
 Duration thresholds: **TBD**.
+
+**CAT-08** · warning · enforced (`commands/catalog.py:handle_reclass`)
+A name-based `/reclass --sample` must not cross the S-/T- divide by accident. A
+name that starts with `S-`/`T-` reaches only titles with that prefix; the
+`sample` and `background` classes follow each run's prefix (S-→scatt/BkgS,
+T-→trans/BkgT); a literal class that contradicts a run's prefix (`bkg` on a
+`T-` title) is applied but warned. A name match never revives a run already set
+to `ignore` — only naming the run by number does. (Real case: "S-emptycupbob are
+background scattering, T-emptycupbob background transmission" set all ten runs
+BkgS, then all ten BkgT, and revived two ignored runs.)
+
+**CAT-09** · warning · enforced (`services/matching_service.py:_pick_by_shared_token`)
+When a configuration has several empty beams (CAT-03) or backgrounds (CAT-04),
+each row takes the one whose *distinguishing* title token (a token not common to
+all the candidates) its own name carries: `T-empty beam 2,3 …` for
+`S-CTAB 2,3_10shear …`. In rheo-SANS the 1,3 and 2,3 shear planes are different
+beam paths through the Couette cell, each with its own beam centre and empty cup,
+so the first-found default would be wrong for half the rows. Only a unique pick
+counts; otherwise the default and the CAT-03/04 warning stand. A `bg<N>` token
+(BKG-04) takes precedence, and `/matchruns --no-title-tokens` turns this off.
+The background transmission follows the chosen background by name. (Real case:
+IPTS-37681, CTAB in a Couette cell, two planes × two configurations.)
 
 ---
 
@@ -116,6 +138,14 @@ while belonging to another.
 A `th<X>mm` token in a title sets that row's thickness to X mm (`th0p5mm` = 0.5 mm).
 Without the token thickness keeps the TBL-05 default. An explicit `/set … thickness`
 or `/autopilot --thickness` afterwards still wins.
+
+**TBL-09** · info · enforced (`services/matching_service.py:_match_base`)
+A transmission measured once serves a sample series that varies only in a
+*condition* token: a displacement `_d<N>` or a rheo-SANS shear rate
+`_<rate>shear` (`_0.1shear`, `_1000shear`, `_0shear-return`). Those tokens are
+dropped only when the exact name finds no transmission; every other token (the
+shear plane `1,3` / `2,3`) must still agree, so a plane never borrows the other
+plane's transmission.
 
 ---
 
@@ -307,6 +337,11 @@ See `stitching.md`.
 
 **STC-01** · info · enforced (`merge_service`)
 A sample needs two or more configurations to stitch; one is passed through.
+"The same sample" means the same name with any configuration word removed
+(`4m2.5a`, `8m10a`, `2p5m2p5a` — `strip_config_tokens`): a name that still carries
+its configuration would otherwise make every sample a group of one. (Real case:
+IPTS-37681 titles wrote `4m2.5a` without a space; autopilot found no stitchable
+groups.)
 
 **STC-02** · blocking · enforced (`_scaling_factor` raises)
 Each adjacent pair has a non-empty overlap containing at least two points of the

@@ -439,12 +439,17 @@ async def handle_confirm(args: list[str], state: SessionState) -> CommandResult:
             comment = args[i + 1]
             i += 2
             continue
-        if ipts is None:
-            try:
-                ipts = int(a)
-            except ValueError:
-                pass
-        i += 1
+        # This writes the IPTS's reduction status, so anything not understood is
+        # refused — a silently dropped `--status No` would still confirm "Yes".
+        if ipts is None and a.isdigit():
+            ipts = int(a)
+            i += 1
+            continue
+        return CommandResult(
+            success=False,
+            message=f"Unknown argument: {a}\nUsage: /confirm [ipts] [--comment <text>]\n"
+            "  (status is always Yes — there is no --status option)",
+        )
 
     if ipts is None:
         ipts = state.ipts

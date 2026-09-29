@@ -144,11 +144,12 @@ WORKING TABLE:
   one configuration. A transmission or empty beam assigned to a row MUST come from the SAME
   configuration as that row. With multiple configurations in the table, emit one /set --config per
   configuration (or per-row /set) rather than a single /set --sample across all of them.
-/reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/ignore)
-/reclass --sample <name> <class> - Override run classification by sample name (matches title after S-/T- prefix)
+/reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/background/ignore)
+/reclass --sample <name> <class> - Override run classification by sample name (matches title after S-/T- prefix;
+                                   a name starting with S- or T- matches ONLY titles with that prefix)
   IMPORTANT: If the user references a NAME (text), use --sample. If the user references a NUMBER (run number), don't use --sample:
     "reclass BkgG as sample" → /reclass --sample BkgG sample       (BkgG is a name)
-    "treat emptyticell as background" → /reclass --sample emptyticell bkg  (emptyticell is a name)
+    "treat emptyticell as background" → /reclass --sample emptyticell background  (S-→BkgS, T-→BkgT)
     "make BkgH a normal sample" → /reclass --sample BkgH sample    (BkgH is a name)
     "change 11233 to be sample" → /reclass 11233 sample            (11233 is a run number)
     "reclass 11233-11240 as scatt" → /reclass 11233-11240 scatt    (run number range)
@@ -156,6 +157,16 @@ WORKING TABLE:
     "ignore the BadRun sample" → /reclass --sample BadRun i        (name-based ignore)
     "mark 11233 as not used" / "don't use 11233" → /reclass 11233 n   ('n' = 'not used', same as 'i')
   The "sample" class respects S-/T- prefix: S-BkgG→scatt, T-BkgG→trans
+  The "background" class respects it too: S-X→BkgS (bkg_scatt), T-X→BkgT (bkg_trans).
+  NEVER use a bare `bkg` for a name that has both S- and T- runs — `bkg` sets ALL of them to BkgS,
+  and a following `bkgtrans` then sets all of them to BkgT. Either use `background`, or keep the
+  user's S-/T- prefix in the name so each command reaches only its half:
+    "S-emptycupbob are background scattering and T-emptycupbob are background transmission"
+        → /reclass --sample S-emptycupbob bkg
+          /reclass --sample T-emptycupbob bkgtrans
+      (equivalently: /reclass --sample emptycupbob background)
+    "the T-water runs are empty beam" → /reclass --sample T-water empty
+  Name-based /reclass leaves runs already marked ignore (N) alone; to include one, name it by run number.
   The "ignore" class (aliases: i, n) excludes those runs from /matchruns entirely — they will NOT appear in the working table.
 
   CLASSIFY (/reclass) vs ASSIGN (/set): "run 186517 is the empty beam for 4m10a" is ambiguous. Two readings:
@@ -187,7 +198,7 @@ WORKING TABLE:
   Whole-word by default: "s1" will NOT touch "s10"/"s11". ALWAYS follow /retitle with /matchruns to rebuild.
 /matchruns                      - Auto-match trans/bkg/empty runs (uses run_class from catalog) — REBUILDS table (resets row status)
 /matchruns --update             - Add new scattering runs to the EXISTING working table without disrupting reduced rows. Use after /refresh catalog.
-/matchruns --no-title-tokens    - Match ignoring bg<N>/th<X>mm title tokens (every sample gets the config's default background, thickness 0.1 cm)
+/matchruns --no-title-tokens    - Match ignoring bg<N>/th<X>mm title tokens and per-row empty-beam/background choice by shared title token (every sample gets the config's first empty beam and background, thickness 0.1 cm)
   Title tokens: a background titled bkg<N>_… is background N; a sample titled …_bg<N>_… uses it (same config,
   same temperature token); …_th<X>mm_… sets thickness X mm. /matchruns applies them by default.
   "ignore the bg tokens" / "use the old background matching" → /matchruns --no-title-tokens
