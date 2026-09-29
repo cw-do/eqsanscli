@@ -21,10 +21,11 @@ if TYPE_CHECKING:
     from eqsanscli.services.llm_handler import LLMHandler
 
 from eqsanscli.services.plotting_service import load_iq_native
+from eqsanscli.paths import app_root
 
 
 _PRESET_OVERLAP_DIRS = [
-    Path(__file__).resolve().parent.parent.parent.parent / "preset_configs",
+    app_root() / "preset_configs",
     Path.cwd() / "preset_configs",
 ]
 

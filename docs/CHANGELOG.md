@@ -7,6 +7,22 @@ the version it shipped in.
 
 ---
 
+### 2026-09-26: don't force ONCat sign-in at launch (v0.46.2)
+
+Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which
+contradicted the intended in-TUI `/oncat login`. Cause: v0.46.0 added a launcher
+hook that ran `eqsanscli-oncat-login` (blocking on browser approval) before the TUI
+whenever no token existed. Removed it — the launcher just starts the TUI now.
+
+Instead the TUI shows a single non-blocking notice on startup when not signed in
+(`🔑 Not signed in to ONCat — type /oncat login …`), and data commands still prompt
+on demand (`/load ipts` → OncatAuthRequired → "run /oncat login"). Sign-in is the
+user's choice of `/oncat login` (device URL in the pane, approve in a browser —
+works over SSH) or the standalone `eqsanscli-oncat-login`. No forced browser flow.
+
+**Files changed:** `eqsanscli` (launcher), `app.py`, CLAUDE.md,
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-25: document ONCat sign-in in the in-CLI help (v0.46.1)
 
 Follow-up to v0.46.0: the new per-user ONCat sign-in was in SKILL.md/README but not

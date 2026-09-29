@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from eqsanscli.paths import app_root
 
 DEFAULT_MODEL = "openai/gpt-6-luna-pro"
 FALLBACK_MODEL = "openai/gpt-5-mini"
@@ -42,7 +43,7 @@ class AppSettings:
             # Try multiple .env locations in order of priority
             env_locations = [
                 Path.cwd() / ".env",  # Current directory (user override)
-                Path(__file__).resolve().parent.parent.parent.parent / ".env",  # Script directory
+                app_root() / ".env",  # Script directory (or the release folder)
                 Path.home() / ".eqsanscli" / ".env",  # User's personal config
             ]
 

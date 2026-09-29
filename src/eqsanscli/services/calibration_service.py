@@ -16,8 +16,9 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 from eqsanscli.services.plotting_service import load_iq_native
+from eqsanscli.paths import app_root
 
-REFERENCE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "absscale_reference"
+REFERENCE_DIR = app_root() / "absscale_reference"
 
 REFERENCE_FILES = {
     "NG3": "NG3_B1_1413_4col.dat",

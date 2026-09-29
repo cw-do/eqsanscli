@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from eqsanscli.paths import app_root
 
 logger = logging.getLogger(__name__)
 
 # Search paths for preset_configs folder
 _PRESET_DIRS = [
-    Path(__file__).resolve().parent.parent.parent.parent / "preset_configs",  # project root
+    app_root() / "preset_configs",  # project root (or the release folder)
     Path.cwd() / "preset_configs",  # current working directory
 ]
 

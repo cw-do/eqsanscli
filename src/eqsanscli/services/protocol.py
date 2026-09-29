@@ -29,6 +29,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Callable, Optional
+from eqsanscli.paths import app_root
 
 SEVERITIES = ("blocking", "warning", "info")
 _RULE_RE = re.compile(
@@ -60,9 +61,7 @@ class Finding:
 
 
 def protocol_path() -> str:
-    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))))
-    return os.path.join(here, "knowledge", "protocol.md")
+    return str(app_root() / "knowledge" / "protocol.md")
 
 
 _CACHE: dict[tuple[str, float], dict[str, Rule]] = {}

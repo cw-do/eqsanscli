@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
+from eqsanscli.paths import app_root
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +36,14 @@ logger = logging.getLogger(__name__)
 #: shared one; a `knowledge/` folder in the working directory lets a user try
 #: local edits without touching the install.
 _SEARCH_DIRS = (
-    Path(__file__).resolve().parent.parent.parent.parent / "knowledge",
+    app_root() / "knowledge",
     Path.cwd() / "knowledge",
 )
 
 #: The pre-0.13 single-file location. Warned about once if it still exists, so a
 #: leftover copy is not silently ignored.
 _LEGACY_PATHS = (
-    Path(__file__).resolve().parent.parent.parent.parent / "preset_configs" / "knowledge.md",
+    app_root() / "preset_configs" / "knowledge.md",
     Path.cwd() / "preset_configs" / "knowledge.md",
 )
 

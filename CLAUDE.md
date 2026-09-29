@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.47.3 | 2026-09-29 | **Release channel `eqsanscli-safe`** (same protocol as `sansdir-stable`): users run a non-editable install of a tagged commit. Six data lookups (`.env`, `knowledge/`, `protocol.md`, `preset_configs/` ×2, `absscale_reference/`) walked up four levels from `__file__` — inside a site-packages install that is the venv, so they would have found nothing, silently. They now go through `eqsanscli.paths.app_root()`: `EQSANSCLI_ROOT` (exported by the launchers, previously unused) when it names a folder, else the repo root. `tests/test_paths.py` forbids the old pattern. |
 | 0.47.2 | 2026-09-29 | Fix: **autopilot found no stitchable groups** on IPTS-37681. Titles wrote the configuration without a space (`S-CTAB 1,3_0.1shear 4m2.5a`); `_extract_sample_name` only stripped the spaced form (`4m 2.5a`), so the name kept `_4m2.5a`, output doubled it (`…_4m2.5a_4m2.5a_Iq.dat`), and the 4 m and 8 m rows of one sample had different names — every group had one config. Names now drop a compact configuration word (`4m2.5a`, `8m10a`, `2p5m2p5a`, `…30hz`, whole words only), and `build_stitch_table` groups on the name without a configuration token (`strip_config_tokens`), so sessions matched before the fix stitch their existing files without re-reducing. STC-01. |
 | 0.47.1 | 2026-09-29 | Fix command forms the app itself told users to type. The `/session load` listing said `Usage: /load session <name>`, which refused with "Use /session load …" (a loop); README said `/save session …` (also refused). `/load session` and `/save session` now **forward** to `/session load`/`save`. `/help` listed `/confirm … (--status, --comment)` but `--status` never existed and unknown args were silently dropped — `/confirm --status No` would still confirm **Yes**; `/confirm` now refuses anything it does not parse. Found by auditing every `/command` mention (code strings, SKILL, README, knowledge, docs) against the router; `tests/test_command_forms.py` keeps the documented-flags check permanent. |
 | 0.47.0 | 2026-09-29 | **rheo-SANS matching + prefix-aware `/reclass`**, from IPTS-37681 (CTAB in a Couette cell, shear planes 1,3/2,3 × shear rates × 2 configs). (1) `/reclass --sample S-X bkg` now reaches only `S-` titles (a prefixed name matches only that prefix; before, the prefix was discarded, so "S-cup are bkg, T-cup are bkgtrans" set all ten runs BkgS then all BkgT); new prefix-aware class `background` (S-→BkgS, T-→BkgT); a literal class contradicting a run's prefix is warned; a name-based reclass no longer revives `ignore` runs. CAT-08. (2) `/matchruns`: a `_<rate>shear` token is a condition like `_dX` — every shear rate takes the plane's at-rest transmission (TBL-09); several empty beams/backgrounds per config are chosen per row by the distinguishing title token the sample shares (`empty beam 2,3` for `CTAB 2,3_…`), else first-found + warning as before (CAT-09; off with `--no-title-tokens`). `emptycup` is a background keyword. 20 → 0 rows missing transmission, and the 2,3 rows no longer get the 1,3 empty beam/cup. (3) Default OpenRouter model → `openai/gpt-6-luna-pro`. |
@@ -159,6 +160,32 @@ From 0.10.0 onward, one bump per revision — the collapsed 0.10.0 above is the
 last multi-revision version.
 - Tag the Change Log heading with the version it shipped in, so history and
   builds line up.
+
+### Release channel (`eqsanscli-safe`)
+
+Users run a **frozen release**, not this tree — same protocol as `sansdir-stable`:
+
+```
+/SNS/EQSANS/shared/script/eqsanscli-safe/
+  bin/eqsanscli, bin/eqsanscli-headless, bin/eqsanscli-oncat-login   launchers
+  .venv/            non-editable install of the tagged commit (site-packages)
+  knowledge/ preset_configs/ absscale_reference/   extracted from the same tag
+  .env              LLM key/model — local config, not in git, never overwritten
+  update.sh         maintainer only
+  VERSION           version, tag, commit, date
+/SNS/EQSANS/shared/bin/eqsanscli -> ../script/eqsanscli-safe/bin/eqsanscli
+```
+
+To release: commit, bump, push, `git tag vX.Y.Z && git push origin vX.Y.Z`, then
+`/SNS/EQSANS/shared/script/eqsanscli-safe/update.sh vX.Y.Z`. `update.sh` installs
+from `git archive <tag>`, so uncommitted edits can never reach a user, and it
+keeps already-installed dependencies frozen (adds only missing ones).
+
+The launchers export `EQSANSCLI_ROOT` = the release folder; **every data lookup
+must go through `eqsanscli.paths.app_root()`**, never `Path(__file__)` walking
+up — in site-packages that lands inside the venv and finds nothing, silently
+(`tests/test_paths.py` enforces it). A new top-level data folder must also be
+added to `update.sh`'s extract list.
 
 ### Testing
 
@@ -235,6 +262,40 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-09-29: release channel eqsanscli-safe; data folders via EQSANSCLI_ROOT (v0.47.3)
+
+Asked to create a safe distribution folder for eqsanscli "as we did for
+sansdir": `sansdir-stable` holds its own venv with a non-editable install of a
+tagged commit, launchers that use only that venv, an `update.sh` that installs
+from `git archive <tag>` (never the working copy), and a `VERSION` file.
+
+eqsanscli could not be installed that way as it stood. `knowledge/`,
+`preset_configs/`, `absscale_reference/` and the shared `.env` live at the repo
+root, outside the package, and six call sites found them with
+`Path(__file__).resolve().parent.parent.parent.parent` (protocol.py with four
+nested `dirname`s). From site-packages that resolves inside the venv — no
+presets, no always-loaded protocol, no absolute-scale reference, no LLM key —
+and each lookup degrades quietly rather than failing. The launchers already
+exported `EQSANSCLI_ROOT`, but nothing read it.
+
+New `eqsanscli/paths.py:app_root()` returns `EQSANSCLI_ROOT` when it names an
+existing folder, else the repo root (so the dev tree and tests are unchanged);
+all six sites use it. The release folder carries copies of the three data
+folders extracted from the same tag as the code. Chosen over packaging them as
+wheel data because the cwd overrides (`./knowledge`, `./preset_configs`) and the
+shared `.env` are folder-based anyway, and it keeps one mechanism for dev and
+release.
+
+`tests/test_paths.py` (+4): default is the repo root; the env root wins and
+moves `protocol_path()`; a missing env root falls back; no module walks up from
+its own file. Release procedure documented under *Release channel* above.
+
+**Files changed:** `paths.py` (new), `config/settings.py`,
+`services/knowledge.py`, `services/protocol.py`, `services/preset_service.py`,
+`services/calibration_service.py`, `services/smart_stitch.py`,
+`tests/test_paths.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
 
 ### 2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)
 
@@ -374,19 +435,3 @@ JSON stays plain (no markup leaking into the protocol). Colours chosen to read o
 both light and dark terminals.
 
 **Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
-
-### 2026-09-26: don't force ONCat sign-in at launch (v0.46.2)
-
-Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which
-contradicted the intended in-TUI `/oncat login`. Cause: v0.46.0 added a launcher
-hook that ran `eqsanscli-oncat-login` (blocking on browser approval) before the TUI
-whenever no token existed. Removed it — the launcher just starts the TUI now.
-
-Instead the TUI shows a single non-blocking notice on startup when not signed in
-(`🔑 Not signed in to ONCat — type /oncat login …`), and data commands still prompt
-on demand (`/load ipts` → OncatAuthRequired → "run /oncat login"). Sign-in is the
-user's choice of `/oncat login` (device URL in the pane, approve in a browser —
-works over SSH) or the standalone `eqsanscli-oncat-login`. No forced browser flow.
-
-**Files changed:** `eqsanscli` (launcher), `app.py`, CLAUDE.md,
-`src/eqsanscli/__init__.py`.
