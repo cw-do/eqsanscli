@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.47.3</div>
+          data reduction tool &middot; v0.47.4</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,10 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-26-colour-code-the-catalog-class-column-v0463">2026-09-26: colour-code the catalog Class column (v0.46.3)<a class="anchor" href="#2026-09-26-colour-code-the-catalog-class-column-v0463">#</a></h3>
+<p>Requested cosmetic upgrade: in <code><a href="commands.html#cmd-load">/load ipts</a></code> and <code><a href="commands.html#cmd-show">/show catalog</a></code>, colour the Class column by run role so trans/bkg/empty/ignore stand out at a glance. Scattering <code>S</code> bold green, transmission <code>T</code> cyan, background <code>BkgS</code>/<code>BkgT</code> yellow, empty beam <code>EmpT</code>/<code>EmpS</code> magenta, ignored <code>N</code> dim.</p>
+<p>TUI-only and data-safe: <code>app._render_table</code> now renders the Class cell as a styled <code>rich.Text</code> via <code>_class_cell</code> / <code>_CLASS_STYLES</code> (keyed by the RUN_CLASS_SHORT label), while the row dicts in <code>CommandResult.data</code> are untouched — so the headless JSON stays plain (no markup leaking into the protocol). Colours chosen to read on both light and dark terminals.</p>
+<p><strong>Files changed:</strong> <code>app.py</code>, CLAUDE.md, <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-26-dont-force-oncat-sign-in-at-launch-v0462">2026-09-26: don&#x27;t force ONCat sign-in at launch (v0.46.2)<a class="anchor" href="#2026-09-26-dont-force-oncat-sign-in-at-launch-v0462">#</a></h3>
 <p>Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which contradicted the intended in-TUI <code><a href="commands.html#cmd-oncat">/oncat login</a></code>. Cause: v0.46.0 added a launcher hook that ran <code>eqsanscli-oncat-login</code> (blocking on browser approval) before the TUI whenever no token existed. Removed it — the launcher just starts the TUI now.</p>
 <p>Instead the TUI shows a single non-blocking notice on startup when not signed in (<code>🔑 Not signed in to ONCat — type /oncat login …</code>), and data commands still prompt on demand (<code><a href="commands.html#cmd-load">/load ipts</a></code> → OncatAuthRequired → &quot;run /oncat login&quot;). Sign-in is the user&#x27;s choice of <code><a href="commands.html#cmd-oncat">/oncat login</a></code> (device URL in the pane, approve in a browser — works over SSH) or the standalone <code>eqsanscli-oncat-login</code>. No forced browser flow.</p>
@@ -683,7 +687,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-09-29 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-10-01 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

@@ -2,7 +2,7 @@
 absscale_reference/ and the shared .env.
 
 In the development tree they sit at the repo root, four levels above the
-modules that read them. In the stable release (`eqsanscli-safe`, a non-editable
+modules that read them. In the stable release (`eqsanscli-stable`, a non-editable
 install) the package lives in the venv's site-packages, so walking up from
 `__file__` lands inside the venv — the launcher therefore exports
 EQSANSCLI_ROOT pointing at the release folder, which holds copies of those

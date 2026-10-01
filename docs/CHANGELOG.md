@@ -7,6 +7,21 @@ the version it shipped in.
 
 ---
 
+### 2026-09-26: colour-code the catalog Class column (v0.46.3)
+
+Requested cosmetic upgrade: in `/load ipts` and `/show catalog`, colour the Class
+column by run role so trans/bkg/empty/ignore stand out at a glance. Scattering `S`
+bold green, transmission `T` cyan, background `BkgS`/`BkgT` yellow, empty beam
+`EmpT`/`EmpS` magenta, ignored `N` dim.
+
+TUI-only and data-safe: `app._render_table` now renders the Class cell as a styled
+`rich.Text` via `_class_cell` / `_CLASS_STYLES` (keyed by the RUN_CLASS_SHORT
+label), while the row dicts in `CommandResult.data` are untouched — so the headless
+JSON stays plain (no markup leaking into the protocol). Colours chosen to read on
+both light and dark terminals.
+
+**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
+
 ### 2026-09-26: don't force ONCat sign-in at launch (v0.46.2)
 
 Reported: starting eqsanscli asked for the ONCat browser sign-in by default, which

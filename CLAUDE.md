@@ -97,7 +97,8 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
-| 0.47.3 | 2026-09-29 | **Release channel `eqsanscli-safe`** (same protocol as `sansdir-stable`): users run a non-editable install of a tagged commit. Six data lookups (`.env`, `knowledge/`, `protocol.md`, `preset_configs/` ×2, `absscale_reference/`) walked up four levels from `__file__` — inside a site-packages install that is the venv, so they would have found nothing, silently. They now go through `eqsanscli.paths.app_root()`: `EQSANSCLI_ROOT` (exported by the launchers, previously unused) when it names a folder, else the repo root. `tests/test_paths.py` forbids the old pattern. |
+| 0.47.4 | 2026-10-01 | Naming: the release folder is **`eqsanscli-stable`** (was `eqsanscli-safe`), matching `sansdir-stable`. Rebuilt fresh at the new path (a venv bakes its own path into its scripts, so it is not moved), `/SNS/EQSANS/shared/bin/eqsanscli` repointed, the old folder removed. Docstring and CLAUDE.md only in the repo. |
+| 0.47.3 | 2026-09-29 | **Release channel `eqsanscli-safe`** (renamed `eqsanscli-stable` in 0.47.4; same protocol as `sansdir-stable`): users run a non-editable install of a tagged commit. Six data lookups (`.env`, `knowledge/`, `protocol.md`, `preset_configs/` ×2, `absscale_reference/`) walked up four levels from `__file__` — inside a site-packages install that is the venv, so they would have found nothing, silently. They now go through `eqsanscli.paths.app_root()`: `EQSANSCLI_ROOT` (exported by the launchers, previously unused) when it names a folder, else the repo root. `tests/test_paths.py` forbids the old pattern. |
 | 0.47.2 | 2026-09-29 | Fix: **autopilot found no stitchable groups** on IPTS-37681. Titles wrote the configuration without a space (`S-CTAB 1,3_0.1shear 4m2.5a`); `_extract_sample_name` only stripped the spaced form (`4m 2.5a`), so the name kept `_4m2.5a`, output doubled it (`…_4m2.5a_4m2.5a_Iq.dat`), and the 4 m and 8 m rows of one sample had different names — every group had one config. Names now drop a compact configuration word (`4m2.5a`, `8m10a`, `2p5m2p5a`, `…30hz`, whole words only), and `build_stitch_table` groups on the name without a configuration token (`strip_config_tokens`), so sessions matched before the fix stitch their existing files without re-reducing. STC-01. |
 | 0.47.1 | 2026-09-29 | Fix command forms the app itself told users to type. The `/session load` listing said `Usage: /load session <name>`, which refused with "Use /session load …" (a loop); README said `/save session …` (also refused). `/load session` and `/save session` now **forward** to `/session load`/`save`. `/help` listed `/confirm … (--status, --comment)` but `--status` never existed and unknown args were silently dropped — `/confirm --status No` would still confirm **Yes**; `/confirm` now refuses anything it does not parse. Found by auditing every `/command` mention (code strings, SKILL, README, knowledge, docs) against the router; `tests/test_command_forms.py` keeps the documented-flags check permanent. |
 | 0.47.0 | 2026-09-29 | **rheo-SANS matching + prefix-aware `/reclass`**, from IPTS-37681 (CTAB in a Couette cell, shear planes 1,3/2,3 × shear rates × 2 configs). (1) `/reclass --sample S-X bkg` now reaches only `S-` titles (a prefixed name matches only that prefix; before, the prefix was discarded, so "S-cup are bkg, T-cup are bkgtrans" set all ten runs BkgS then all BkgT); new prefix-aware class `background` (S-→BkgS, T-→BkgT); a literal class contradicting a run's prefix is warned; a name-based reclass no longer revives `ignore` runs. CAT-08. (2) `/matchruns`: a `_<rate>shear` token is a condition like `_dX` — every shear rate takes the plane's at-rest transmission (TBL-09); several empty beams/backgrounds per config are chosen per row by the distinguishing title token the sample shares (`empty beam 2,3` for `CTAB 2,3_…`), else first-found + warning as before (CAT-09; off with `--no-title-tokens`). `emptycup` is a background keyword. 20 → 0 rows missing transmission, and the 2,3 rows no longer get the 1,3 empty beam/cup. (3) Default OpenRouter model → `openai/gpt-6-luna-pro`. |
@@ -161,23 +162,23 @@ last multi-revision version.
 - Tag the Change Log heading with the version it shipped in, so history and
   builds line up.
 
-### Release channel (`eqsanscli-safe`)
+### Release channel (`eqsanscli-stable`)
 
 Users run a **frozen release**, not this tree — same protocol as `sansdir-stable`:
 
 ```
-/SNS/EQSANS/shared/script/eqsanscli-safe/
+/SNS/EQSANS/shared/script/eqsanscli-stable/
   bin/eqsanscli, bin/eqsanscli-headless, bin/eqsanscli-oncat-login   launchers
   .venv/            non-editable install of the tagged commit (site-packages)
   knowledge/ preset_configs/ absscale_reference/   extracted from the same tag
   .env              LLM key/model — local config, not in git, never overwritten
   update.sh         maintainer only
   VERSION           version, tag, commit, date
-/SNS/EQSANS/shared/bin/eqsanscli -> ../script/eqsanscli-safe/bin/eqsanscli
+/SNS/EQSANS/shared/bin/eqsanscli -> ../script/eqsanscli-stable/bin/eqsanscli
 ```
 
 To release: commit, bump, push, `git tag vX.Y.Z && git push origin vX.Y.Z`, then
-`/SNS/EQSANS/shared/script/eqsanscli-safe/update.sh vX.Y.Z`. `update.sh` installs
+`/SNS/EQSANS/shared/script/eqsanscli-stable/update.sh vX.Y.Z`. `update.sh` installs
 from `git archive <tag>`, so uncommitted edits can never reach a user, and it
 keeps already-installed dependencies frozen (adds only missing ones).
 
@@ -263,7 +264,24 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)
+
+v0.47.3 shipped the release channel as `eqsanscli-safe`; the agreed name is
+`eqsanscli-stable`, parallel to `sansdir-stable`. Built fresh at
+`/SNS/EQSANS/shared/script/eqsanscli-stable` (new venv from the same
+`constraints.txt`, the same `.env`, launchers and `update.sh` with the wording
+changed) and released this tag into it, rather than `mv`-ing the old folder: a
+venv bakes its absolute path into `bin/` scripts and `pyvenv.cfg`.
+`/SNS/EQSANS/shared/bin/eqsanscli` now points at it and `eqsanscli-safe` is gone.
+In the repo only the `paths.py` docstring and CLAUDE.md named the folder; the
+v0.47.3 entries keep the name it actually shipped under, with a pointer here.
+
+**Files changed:** `paths.py` (docstring), CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-29: release channel eqsanscli-safe; data folders via EQSANSCLI_ROOT (v0.47.3)
+
+(Renamed `eqsanscli-stable` in v0.47.4.)
 
 Asked to create a safe distribution folder for eqsanscli "as we did for
 sansdir": `sansdir-stable` holds its own venv with a non-editable install of a
@@ -420,18 +438,3 @@ Harmless for matching; left alone because it would rename output files.
 `services/llm_handler.py`, `app.py`, `knowledge/protocol.md`, SKILL.md,
 `.env.example`, tests, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-26: colour-code the catalog Class column (v0.46.3)
-
-Requested cosmetic upgrade: in `/load ipts` and `/show catalog`, colour the Class
-column by run role so trans/bkg/empty/ignore stand out at a glance. Scattering `S`
-bold green, transmission `T` cyan, background `BkgS`/`BkgT` yellow, empty beam
-`EmpT`/`EmpS` magenta, ignored `N` dim.
-
-TUI-only and data-safe: `app._render_table` now renders the Class cell as a styled
-`rich.Text` via `_class_cell` / `_CLASS_STYLES` (keyed by the RUN_CLASS_SHORT
-label), while the row dicts in `CommandResult.data` are untouched — so the headless
-JSON stays plain (no markup leaking into the protocol). Colours chosen to read on
-both light and dark terminals.
-
-**Files changed:** `app.py`, CLAUDE.md, `src/eqsanscli/__init__.py`.
