@@ -170,7 +170,9 @@ Users run a **frozen release**, not this tree — same protocol as `sansdir-stab
 ```
 /SNS/EQSANS/shared/script/eqsanscli-stable/
   bin/eqsanscli, bin/eqsanscli-headless, bin/eqsanscli-oncat-login   launchers
-  .venv/            non-editable install of the tagged commit (site-packages)
+  python/           the release's own Python 3.11 (pixi, conda-forge) on GPFS
+  .venv/            built on python/; non-editable install of the tagged commit
+  constraints.txt   pinned dependency versions (snapshot of the tested dev venv)
   knowledge/ preset_configs/ absscale_reference/   extracted from the same tag
   .env              LLM key/model — local config, not in git, never overwritten
   update.sh         maintainer only
@@ -182,6 +184,18 @@ To release: commit, bump, push, `git tag vX.Y.Z && git push origin vX.Y.Z`, then
 `/SNS/EQSANS/shared/script/eqsanscli-stable/update.sh vX.Y.Z`. `update.sh` installs
 from `git archive <tag>`, so uncommitted edits can never reach a user, and it
 keeps already-installed dependencies frozen (adds only missing ones).
+
+**The interpreter must live on the shared filesystem.** A venv does not contain
+Python — its `bin/python` links to the interpreter it was built from. Built on
+`/usr/bin/python3.11` (an optional RPM, node-local), the release failed on
+analysis-node23, which lacks it (2026-10-02: "stable-release venv not found").
+`python/` is a pixi project (`pixi.toml`, `python = "3.11.13.*"`); `update.sh`
+creates `.venv` from it when missing and refuses to run without it. Verified by
+running the user launcher in a mount namespace with `/usr/bin/python3.11` and
+`/usr/lib64/python3.11` hidden. (`sansdir-stable` is still built on the system
+Python — not yet changed.) Recreate from scratch: `cd python && pixi install`,
+remove `.venv`, `./update.sh <tag>`; pixi needs
+`HTTPS_PROXY=http://bl-proxy1.sns.gov:3128`.
 
 The launchers export `EQSANSCLI_ROOT` = the release folder; **every data lookup
 must go through `eqsanscli.paths.app_root()`**, never `Path(__file__)` walking
