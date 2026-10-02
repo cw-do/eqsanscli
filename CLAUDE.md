@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.47.5 | 2026-10-02 | Startup banner: one line under Getting Started — *Best viewed in a terminal window of at least 120×35*. Chosen over auto-resizing the window (`ESC[8;35;120t`), which only some terminals honour (VTE, macOS Terminal, PuTTY; not xterm by default, Windows Terminal, VS Code, tmux/screen) and which would leave the user's window resized after exit. Text only. |
 | 0.47.4 | 2026-10-01 | Naming: the release folder is **`eqsanscli-stable`** (was `eqsanscli-safe`), matching `sansdir-stable`. Rebuilt fresh at the new path (a venv bakes its own path into its scripts, so it is not moved), `/SNS/EQSANS/shared/bin/eqsanscli` repointed, the old folder removed. Docstring and CLAUDE.md only in the repo. |
 | 0.47.3 | 2026-09-29 | **Release channel `eqsanscli-safe`** (renamed `eqsanscli-stable` in 0.47.4; same protocol as `sansdir-stable`): users run a non-editable install of a tagged commit. Six data lookups (`.env`, `knowledge/`, `protocol.md`, `preset_configs/` ×2, `absscale_reference/`) walked up four levels from `__file__` — inside a site-packages install that is the venv, so they would have found nothing, silently. They now go through `eqsanscli.paths.app_root()`: `EQSANSCLI_ROOT` (exported by the launchers, previously unused) when it names a folder, else the repo root. `tests/test_paths.py` forbids the old pattern. |
 | 0.47.2 | 2026-09-29 | Fix: **autopilot found no stitchable groups** on IPTS-37681. Titles wrote the configuration without a space (`S-CTAB 1,3_0.1shear 4m2.5a`); `_extract_sample_name` only stripped the spaced form (`4m 2.5a`), so the name kept `_4m2.5a`, output doubled it (`…_4m2.5a_4m2.5a_Iq.dat`), and the 4 m and 8 m rows of one sample had different names — every group had one config. Names now drop a compact configuration word (`4m2.5a`, `8m10a`, `2p5m2p5a`, `…30hz`, whole words only), and `build_stitch_table` groups on the name without a configuration token (`strip_config_tokens`), so sessions matched before the fix stitch their existing files without re-reducing. STC-01. |
@@ -264,6 +265,20 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-02: banner recommends a 120×35 window (v0.47.5)
+
+Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible
+only as a request to the terminal (`ESC[8;rows;cols t`, what `resize -s` sends),
+honoured by VTE terminals (the analysis-cluster desktop), macOS Terminal and
+PuTTY, but ignored by xterm (allowWindowOps off by default), Windows Terminal,
+VS Code, tmux/screen and maximized windows — and a resize outlives the program.
+The user preferred an instruction: the Getting Started banner now ends with
+"Best viewed in a terminal window of at least 120×35 — enlarge it for readable
+tables." Text only.
+
+**Files changed:** `app.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)
 
 v0.47.3 shipped the release channel as `eqsanscli-safe`; the agreed name is
@@ -378,63 +393,4 @@ permanent check (no false positives today). Pass 2 is too noisy for a test.
 
 **Files changed:** `commands/session.py`, `commands/export.py`, `app.py`,
 README.md, `tests/test_command_forms.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-29: rheo-SANS matching, prefix-aware /reclass, default model (v0.47.0)
-
-Field report from IPTS-37681 (CTAB in a Couette cell, two shear planes × six
-shear rates × 4m2.5a/8m10a). Three problems, one session:
-
-**`/reclass --sample` could not tell S- from T-.** The user wrote "S-emptycupbob
-are background scattering and T-emptycupbob are background transmission"; the LLM
-emitted `/reclass --sample EmptyCupBob bkg` then `… bkgtrans`. Both ran, but
-`_match_catalog_title` strips the title's S-/T- prefix and the LLM had to drop the
-pattern's, so each command hit all ten runs: first all BkgS, then all BkgT. It
-also revived two runs the user had set to `ignore` (N → BkgS). Now a pattern
-starting `S-`/`T-` matches only titles with that prefix; a new prefix-aware class
-`background` (alias `bkgsample`) does S-→BkgS / T-→BkgT like `sample` does; a
-literal class that contradicts a run's prefix is applied but warned; and a
-name-based reclass leaves `ignore` runs alone (naming the run by number still
-revives it — `ignore` is only ever set by hand). LLM prompt: the example "treat
-emptyticell as background" now emits `background`, plus the S-/T- split example.
-CAT-08.
-
-**20 rows missing transmission.** The transmission is measured once, at rest,
-per plane (`T-CTAB 1,3_0shear 4m2.5a`) and serves every shear rate
-(`S-CTAB 1,3_1000shear …`, `…_0shear-return …`). `_match_base` now strips a
-`_<rate>shear` token as it strips `_d<N>`; the plane token is kept, so a plane
-never borrows the other's transmission. TBL-09.
-
-**The plane was also wrong for empty beam and background.** Each config holds
-`T-empty beam 1,3` and `T-empty beam 2,3` (different beam paths through the
-cell → different beam centres) and `EmptyCupBob 1,3`/`2,3`; every row got the
-first. New `_pick_by_shared_token`: among several candidates of one role, a row
-takes the one whose *distinguishing* tokens (not common to all candidates; config
-tokens like `4m2.5a` excluded) its own name shares — only on a unique pick; else
-the first-found default and the CAT-03/04 warning stand, exactly as before. The
-background transmission follows the chosen background by name. `bg<N>` (BKG-04)
-wins; `--no-title-tokens` turns it off. The CAT-03/04 warnings moved after the
-row loop so they fire only when some row actually fell back. CAT-09. `emptycup` /
-`empty cup` added to `BKG_KEYWORDS`, so `EmptyCupBob` classifies as background
-without a `/reclass`.
-
-Measured on the real catalog (fresh classification, user's ignores kept): 28
-rows, 0 missing transmission or empty beam; each 1,3 row → 188898/188899 empty,
-188908/188910 cup; each 2,3 row → 188918/188919, 188909/188911.
-
-Also: default OpenRouter model `google/gemini-3-flash-preview` →
-`openai/gpt-6-luna-pro` (checked present in OpenRouter's model list), first in
-`/models`; `.env.example` updated (the local `.env` pinned Gemini and overrides
-the code default — updated too, not committed).
-
-Not changed: a config written without a space (`4m2.5a`) is not stripped from
-sample names by `_extract_sample_name`, so names read `CTAB_1,3_0.1shear_4m2.5a`.
-Harmless for matching; left alone because it would rename output files.
-
-`tests/test_reclass.py` (+6), `tests/test_rheo_matching.py` (+5). 374 tests.
-
-**Files changed:** `commands/catalog.py`, `commands/matching.py`,
-`commands/models.py`, `config/settings.py`, `services/matching_service.py`,
-`services/llm_handler.py`, `app.py`, `knowledge/protocol.md`, SKILL.md,
-`.env.example`, tests, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.

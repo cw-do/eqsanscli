@@ -177,6 +177,7 @@ class EQSANSApp(App):
             "\n"
             "  [dim]Type [bold]/help[/bold] for all commands, or just ask in natural language.[/dim]\n"
             "  [dim]Type [bold]/guide[/bold] to dock a quickstart side pane, or [bold]/help --simple[/bold] for an inline quickstart.[/dim]\n"
+            "  [dim]Best viewed in a terminal window of at least [bold]120×35[/bold] — enlarge it for readable tables.[/dim]\n"
         )
         log.write(Text.from_markup(logo))
 

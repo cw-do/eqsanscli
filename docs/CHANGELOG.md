@@ -7,6 +7,65 @@ the version it shipped in.
 
 ---
 
+### 2026-09-29: rheo-SANS matching, prefix-aware /reclass, default model (v0.47.0)
+
+Field report from IPTS-37681 (CTAB in a Couette cell, two shear planes × six
+shear rates × 4m2.5a/8m10a). Three problems, one session:
+
+**`/reclass --sample` could not tell S- from T-.** The user wrote "S-emptycupbob
+are background scattering and T-emptycupbob are background transmission"; the LLM
+emitted `/reclass --sample EmptyCupBob bkg` then `… bkgtrans`. Both ran, but
+`_match_catalog_title` strips the title's S-/T- prefix and the LLM had to drop the
+pattern's, so each command hit all ten runs: first all BkgS, then all BkgT. It
+also revived two runs the user had set to `ignore` (N → BkgS). Now a pattern
+starting `S-`/`T-` matches only titles with that prefix; a new prefix-aware class
+`background` (alias `bkgsample`) does S-→BkgS / T-→BkgT like `sample` does; a
+literal class that contradicts a run's prefix is applied but warned; and a
+name-based reclass leaves `ignore` runs alone (naming the run by number still
+revives it — `ignore` is only ever set by hand). LLM prompt: the example "treat
+emptyticell as background" now emits `background`, plus the S-/T- split example.
+CAT-08.
+
+**20 rows missing transmission.** The transmission is measured once, at rest,
+per plane (`T-CTAB 1,3_0shear 4m2.5a`) and serves every shear rate
+(`S-CTAB 1,3_1000shear …`, `…_0shear-return …`). `_match_base` now strips a
+`_<rate>shear` token as it strips `_d<N>`; the plane token is kept, so a plane
+never borrows the other's transmission. TBL-09.
+
+**The plane was also wrong for empty beam and background.** Each config holds
+`T-empty beam 1,3` and `T-empty beam 2,3` (different beam paths through the
+cell → different beam centres) and `EmptyCupBob 1,3`/`2,3`; every row got the
+first. New `_pick_by_shared_token`: among several candidates of one role, a row
+takes the one whose *distinguishing* tokens (not common to all candidates; config
+tokens like `4m2.5a` excluded) its own name shares — only on a unique pick; else
+the first-found default and the CAT-03/04 warning stand, exactly as before. The
+background transmission follows the chosen background by name. `bg<N>` (BKG-04)
+wins; `--no-title-tokens` turns it off. The CAT-03/04 warnings moved after the
+row loop so they fire only when some row actually fell back. CAT-09. `emptycup` /
+`empty cup` added to `BKG_KEYWORDS`, so `EmptyCupBob` classifies as background
+without a `/reclass`.
+
+Measured on the real catalog (fresh classification, user's ignores kept): 28
+rows, 0 missing transmission or empty beam; each 1,3 row → 188898/188899 empty,
+188908/188910 cup; each 2,3 row → 188918/188919, 188909/188911.
+
+Also: default OpenRouter model `google/gemini-3-flash-preview` →
+`openai/gpt-6-luna-pro` (checked present in OpenRouter's model list), first in
+`/models`; `.env.example` updated (the local `.env` pinned Gemini and overrides
+the code default — updated too, not committed).
+
+Not changed: a config written without a space (`4m2.5a`) is not stripped from
+sample names by `_extract_sample_name`, so names read `CTAB_1,3_0.1shear_4m2.5a`.
+Harmless for matching; left alone because it would rename output files.
+
+`tests/test_reclass.py` (+6), `tests/test_rheo_matching.py` (+5). 374 tests.
+
+**Files changed:** `commands/catalog.py`, `commands/matching.py`,
+`commands/models.py`, `config/settings.py`, `services/matching_service.py`,
+`services/llm_handler.py`, `app.py`, `knowledge/protocol.md`, SKILL.md,
+`.env.example`, tests, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-26: colour-code the catalog Class column (v0.46.3)
 
 Requested cosmetic upgrade: in `/load ipts` and `/show catalog`, colour the Class
