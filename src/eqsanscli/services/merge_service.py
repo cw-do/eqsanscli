@@ -439,6 +439,32 @@ def _config_sort_key(entry: tuple[str, str, float, float]) -> tuple[float, float
     return (0.0, 0.0, 500.0)
 
 
+def merged_file_name(sample: str, configs: list[str], naming: str = "short") -> str:
+    """`merged_<sample>_Iq.txt` (short) or `merged_<sample>_<cfg1>_<cfg2>…_Iq.txt` (full)."""
+    if naming == "full":
+        return f"merged_{sample}_{'_'.join(configs)}_Iq.txt"
+    return f"merged_{sample}_Iq.txt"
+
+
+def assign_merged_names(groups: list[StitchGroup], naming: str = "short",
+                        output_dir: str | None = None) -> None:
+    """Name every stitchable group's output file by `naming` ("short" default
+    since v0.54.3; the configs are in the merged header either way). A short name
+    already taken by another group — one sample stitched in two config sets — falls
+    back to the full name for the later group, so nothing is overwritten."""
+    used: set[str] = set()
+    for g in groups:
+        if len(g.configs) < 2:
+            continue
+        d = os.path.dirname(g.output_file) if g.output_file else (output_dir or ".")
+        name = merged_file_name(g.sample_name, g.configs, naming)
+        path = os.path.join(d, name)
+        if path in used:
+            path = os.path.join(d, merged_file_name(g.sample_name, g.configs, "full"))
+        used.add(path)
+        g.output_file = path
+
+
 def _build_groups(
     sample_files: dict[str, list[tuple[str, str, float, float]]], output_dir: str
 ) -> list[StitchGroup]:

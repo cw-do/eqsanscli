@@ -7,6 +7,43 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: per-frame incoherent-fit parameters for frame skipping (v0.53.1)
+
+Asked how `incohfit_qmin`/`incohfit_qmax` work in frame-skipping mode. From the
+drtsans 1.35.0 source: `correction_api.listify_incohfit_parameter` turns each of
+`fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`,
+`incohfit_intensityweighted` into `[frame 0, frame 1]` (a scalar is used for
+both; `selectMinIncoh` is not per frame); `split_by_frame` puts the skip frame
+(long wavelengths, low Q) at index 0 and the lead frame at 1; `reduction_api`
+runs `inelastic_correction` per frame with that frame's values; within a frame
+`calculate_incoherence_correction_factors` uses the Q bins between qmin and qmax
+when both are set, else the widest range common to every wavelength,
+`incohfit_factor` then tunes the lower edge, and b(λ) is the offset from the
+frame's reference wavelength averaged over the window. One window for both
+frames is therefore usually wrong for one of them.
+
+eqsanscli could not express two values: `/set config … incohfit_qmin 0.02,0.10`
+(or `[0.02, 0.10]`) was stored and written to the json as a string, which
+drtsans's validator rejects ("is not a number or a list") — verified in the
+drtsans env — and `fitinelasticincoh true,false` was parsed as a bool and became
+False. `config_manager.PER_FRAME_PARAMS` / `_parse_per_frame` now accept one
+value or two (`a,b`, `[a, b]`, `a b`, `(a,b)`), store a real list, allow `none`
+for one frame, and refuse ≤ 0, more than two values or text; the confirmation
+names which frame is which. Verified: the json eqsanscli now builds passes
+`drtsans.tof.eqsans.reduction_parameters(…, permissible=True)` (as
+`eqsans_reduction.py` loads it) and `parse_correction_config` yields
+qmin [0.02, 0.1], qmax [0.04, 0.25].
+
+Also: the LLM context listed a non-existent `doincoherentinelasticcorrection`
+key instead of the real incoherent-fit parameters; knowledge (configurations.md
+section on frame skipping, CFG-02 per frame), SKILL.md and the LLM reference
+updated. `tests/test_per_frame_params.py` (+6). 432 tests.
+
+**Files changed:** `services/config_manager.py`, `services/llm_handler.py`,
+`knowledge/configurations.md`, `knowledge/protocol.md`, SKILL.md,
+`tests/test_per_frame_params.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: /export script reproduces every parameter; --stitch (v0.53.0)
 
 From the sansbook planning review (item B8). `services/script_exporter.py` wrote

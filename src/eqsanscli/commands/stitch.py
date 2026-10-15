@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from eqsanscli.commands.router import CommandResult
 from eqsanscli.models.sample_match import sample_matches
 from eqsanscli.services.merge_service import (
+    assign_merged_names,
     StitchGroup,
     build_stitch_table,
     generate_stitch_script,
@@ -108,6 +109,7 @@ async def _handle_build(args: list[str], state: SessionState) -> CommandResult:
             defaulted.append(g.sample_name)
         if tg is not None and 0 <= int(tg) < len(g.configs):
             g.target_profile_index = int(tg)
+    assign_merged_names(groups, state.stitch_naming, state.output_directory)
     state.stitch_groups = groups
     stitchable = [g for g in groups if g.status != "1 config"]
     single = [g for g in groups if g.status == "1 config"]
@@ -235,6 +237,7 @@ async def _handle_smart(args: list[str], state: SessionState) -> CommandResult:
         )
 
         state.stitch_groups.append(group)
+        assign_merged_names(state.stitch_groups, state.stitch_naming, output_dir)
 
         # Build status message
         all_cfgs = sg.get("all_configs", sg["configs"])
@@ -378,6 +381,7 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             message="Usage: /stitch set <idx|sample|all> overlap <q1 q2 ...>\n"
             "       /stitch set <idx|sample|all> overlap auto [n=6]\n"
             "       /stitch set <idx|sample|all> target <index|config_id>\n"
+            "       /stitch set <idx|sample|all> output short|full|<file>   (short = merged_<sample>_Iq.txt, default)\n"
             "       /stitch set <idx|sample|all> trim <config|all> [--first N] [--last N] [--qmin Q] [--qmax Q]\n"
             "         (frame skipping: configs are <cfg>_frame0 (low Q) / <cfg>_frame1 (high Q);\n"
             "          a Q limit given for <cfg> or 'all' applies to every frame)\n"
@@ -516,6 +520,19 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
                 f"{cfg_arg}_frame1 for the high-Q frame), use --qmin/--qmax, or /trim the merged file.[/yellow]")
         return CommandResult(success=True, message=(
             "Trim before stitching (applied by /stitch run):\n" + "\n".join(results)))
+
+    if field == "output" and args[2].lower() in ("short", "full"):
+        naming = args[2].lower()
+        if selector.lower() == "all":
+            state.stitch_naming = naming       # also for later builds and autopilot
+            assign_merged_names(groups, naming, state.output_directory)
+        else:
+            assign_merged_names(target_groups, naming, state.output_directory)
+        names = [f"  {g.sample_name} → {os.path.basename(g.output_file)}" for g in target_groups
+                 if len(g.configs) >= 2]
+        scope = "all samples (and future builds)" if selector.lower() == "all" else selector
+        return CommandResult(success=True, message=(
+            f"Merged file names: {naming} for {scope}:\n" + "\n".join(names)))
 
     if field == "output":
         for group in target_groups:
@@ -693,6 +710,7 @@ async def _handle_removeconfig(args: list[str], state: SessionState) -> CommandR
                 success=False,
                 message=f"Config '{config_to_remove}' not found in any stitch group",
             )
+        assign_merged_names(groups, state.stitch_naming)
 
         return CommandResult(
             success=True,
@@ -721,6 +739,7 @@ async def _handle_removeconfig(args: list[str], state: SessionState) -> CommandR
 
     if len(group.configs) < 2:
         group.status = "1 config"
+    assign_merged_names(groups, state.stitch_naming)
 
     return CommandResult(
         success=True,

@@ -1404,6 +1404,8 @@ def run_autopilot_sync(
                     group.target_profile_index = _default_target_index(group.configs)
 
                 state.stitch_groups.append(group)
+            from eqsanscli.services.merge_service import assign_merged_names
+            assign_merged_names(state.stitch_groups, state.stitch_naming, output_dir)
 
             # Display smart analysis results
             write("\n[bold]Step 11/13:[/bold] Smart overlap analysis...")
@@ -1501,8 +1503,12 @@ def run_autopilot_sync(
                             removed_configs=[],
                         )
                         from eqsanscli.services import scale_service
+                        named = next((g.output_file for g in state.stitch_groups
+                                      if g.sample_name == sample and list(g.configs) == list(configs)
+                                      and g.output_file), None)
                         output_file = stitch_service.execute_plan(
-                            plan, unit=scale_service.unit_for_configs(state, configs))
+                            plan, unit=scale_service.unit_for_configs(state, configs),
+                            output_file=named)
                         _record_stitch(state, sample, plan.record)
                         for w in plan.record.get("warnings", []):
                             write(f"    [yellow]⚠[/yellow] {w}")

@@ -61,6 +61,9 @@ class SessionState:
     # ("8m12a|4m2.5a"): {"overlaps": {key: [..]}, "target": {key: idx}}. A rebuilt
     # table gives new samples these instead of auto-suggested values.
     stitch_defaults: dict = field(default_factory=dict)
+    # Merged file names: "short" (merged_<sample>_Iq.txt, default) or "full"
+    # (merged_<sample>_<cfg1>_<cfg2>_Iq.txt). /stitch set all output short|full.
+    stitch_naming: str = "short"
     output_directory: str = "./output/"
     reduced_files: list[str] = field(default_factory=list)
     command_history: list[str] = field(default_factory=list)
@@ -228,6 +231,7 @@ class SessionState:
             "stitch_groups": [g.to_dict() if hasattr(g, "to_dict") else g
                               for g in (self.stitch_groups or [])],
             "stitch_defaults": self.stitch_defaults,
+            "stitch_naming": self.stitch_naming,
             "command_history": self.command_history[-500:],  # keep last 500
         }
         if os.path.basename(path) == "_autosave.json":
@@ -340,6 +344,7 @@ class SessionState:
             instrument_provenance=data.get("instrument_provenance", {}) or {},
             scale_provenance=data.get("scale_provenance", {}) or {},
             stitch_defaults=data.get("stitch_defaults", {}) or {},
+            stitch_naming=data.get("stitch_naming", "short") or "short",
             command_history=data.get("command_history", []),
         )
         state.tables = {

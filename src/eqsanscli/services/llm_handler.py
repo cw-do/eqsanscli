@@ -147,6 +147,8 @@ WORKING TABLE:
 /trim <file|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out|--inplace] - Remove first/last N points (or a Q range) from finished I(Q) files; writes <name>_trim beside them
   "remove the first 3 and last 5 points of the merged data" → /trim merged_*_Iq.txt --first 3 --last 5
   "drop the last 5 points of 4m2.5a before stitching" → /stitch set all trim 4m2.5a --last 5   (then /stitch run)
+  "name merged files without config names" / "short merged names" → /stitch set all output short   (default)
+  "put the configs back in the merged file names" → /stitch set all output full
   "stitch … while trimming q<0.006" / "cut Q below 0.006 before merging" → /stitch set <sample|all> trim all --qmin 0.006
   FRAME SKIPPING (…30hz): stitch groups hold <cfg>_frame0 (low Q) and <cfg>_frame1 (high Q), e.g.
   4m2.5a30hz_frame0. For --qmin/--qmax use the frame name, the base cfg or "all" (all frames). For

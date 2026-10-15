@@ -747,7 +747,8 @@ class SmartStitchService:
 
         return plan
 
-    def execute_plan(self, plan: StitchPlan, unit: str | None = None) -> str:
+    def execute_plan(self, plan: StitchPlan, unit: str | None = None,
+                     output_file: str | None = None) -> str:
         """Execute a stitch plan and return output file path (record on plan.record)."""
         from eqsanscli.services.merge_service import stitch_and_save
 
@@ -770,7 +771,8 @@ class SmartStitchService:
 
         # Generate output filename
         configs_str = "_".join(cfg.config_id for cfg in plan.selected_configs)
-        output_file = Path(plan.selected_configs[0].file_path).parent / f"merged_{plan.sample_name}_{configs_str}_Iq.txt"
+        if not output_file:
+            output_file = Path(plan.selected_configs[0].file_path).parent / f"merged_{plan.sample_name}_{configs_str}_Iq.txt"
 
         plan.record = stitch_and_save(
             [c.file_path for c in plan.selected_configs],

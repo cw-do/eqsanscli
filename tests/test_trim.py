@@ -225,3 +225,41 @@ def test_all_and_ambiguous_first_last(tmp_path):
     assert st.stitch_groups[0].trims == {} and "ambiguous" in res.message
     _run(handle_stitch(["set", "a06", "trim", "4m2.5a30hz_frame1", "--last", "5"], st))
     assert st.stitch_groups[0].trims == {"4m2.5a30hz_frame1": {"last": 5}}
+
+
+# --- merged file names (v0.54.3) ---------------------------------------------------
+
+def test_short_names_by_default_with_full_on_clash(tmp_path, monkeypatch):
+    from eqsanscli.commands import stitch as stitch_cmd
+    groups = lambda: [
+        StitchGroup(sample_name="a06", files=["/o/1", "/o/2"], configs=["8m12a", "4m2.5a"],
+                    output_file=str(tmp_path / "merged_a06_8m12a_4m2.5a_Iq.txt")),
+        StitchGroup(sample_name="a06", files=["/o/3", "/o/4"], configs=["4m2.5a30hz_frame0", "4m2.5a30hz_frame1"],
+                    output_file=str(tmp_path / "merged_a06_4m2.5a30hz_frame0_4m2.5a30hz_frame1_Iq.txt")),
+        StitchGroup(sample_name="eq1", files=["/o/5", "/o/6"], configs=["8m12a", "4m2.5a"],
+                    output_file=str(tmp_path / "merged_eq1_8m12a_4m2.5a_Iq.txt")),
+    ]
+    monkeypatch.setattr(stitch_cmd, "build_stitch_table", lambda t, o: groups())
+    st = SessionState(); st.output_directory = str(tmp_path)
+    assert st.stitch_naming == "short"
+    _run(handle_stitch(["build"], st))
+    names = [Path(g.output_file).name for g in st.stitch_groups]
+    assert names == ["merged_a06_Iq.txt",                                   # first a06 gets the short name
+                     "merged_a06_4m2.5a30hz_frame0_4m2.5a30hz_frame1_Iq.txt",  # clash → full, nothing overwritten
+                     "merged_eq1_Iq.txt"]
+
+    res = _run(handle_stitch(["set", "all", "output", "full"], st))
+    assert res.success and st.stitch_naming == "full"
+    assert Path(st.stitch_groups[0].output_file).name == "merged_a06_8m12a_4m2.5a_Iq.txt"
+    st = SessionState.load(st.save(str(tmp_path / "s.json")))
+    assert st.stitch_naming == "full"
+    _run(handle_stitch(["build"], st))                                     # remembered for later builds
+    assert Path(st.stitch_groups[2].output_file).name == "merged_eq1_8m12a_4m2.5a_Iq.txt"
+    _run(handle_stitch(["set", "eq1", "output", "short"], st))             # one sample only
+    assert Path(st.stitch_groups[2].output_file).name == "merged_eq1_Iq.txt" and st.stitch_naming == "full"
+
+
+def test_explicit_output_file_still_works(tmp_path):
+    st = _stitch_state(tmp_path)
+    _run(handle_stitch(["set", "s1", "output", str(tmp_path / "mine.txt")], st))
+    assert st.stitch_groups[0].output_file == str(tmp_path / "mine.txt")

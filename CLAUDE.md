@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.54.3 | 2026-10-15 | **Merged files get short names by default: `merged_<sample>_Iq.txt`** (was `merged_<sample>_<cfg1>_<cfg2>…_Iq.txt`, e.g. `merged_a06_4m2.5a30hz_frame0_4m2.5a30hz_frame1_Iq.txt`). `/stitch set all output full|short` switches and is remembered in the session (later `/stitch build`, `/stitch smart`, config removal and autopilot use it); one sample: `/stitch set <sample> output short|full|<file>`. When one sample is stitched in two config sets, the later group keeps the full name, so nothing is overwritten. The configs, overlaps, factors and trims stay in the merged header. |
 | 0.54.2 | 2026-10-15 | Fix: **trim before stitching skipped frame-skipping groups.** Their configs are `<cfg>_frame0` (low Q) / `<cfg>_frame1` (high Q); "stitch … while trimming q<0.006" became `/stitch set a06 trim 4m2.5a30hz --qmin 0.006`, which matched nothing and was skipped for every sample (IPTS-38077). Now a base config (`4m2.5a30hz`) or `all` reaches every frame for `--qmin/--qmax` (a Q limit means the same on either frame); `--first/--last` with a name that covers several curves is refused as ambiguous, pointing to `_frame0`/`_frame1`. LLM reference explains frame names and routes "trim q<x" to `trim all --qmin x`. Checked on IPTS-38077 a06 (frame 0: 70 → 69, merged starts at 0.0066). |
 | 0.54.1 | 2026-10-15 | Fix: **`/stitch build` threw away the overlaps/target you set.** IPTS-38077: after `/stitch set all overlap 0.05 0.06`, new runs were reduced and "stitch the newly reduced data" ran `/stitch build`, which rebuilt every group with auto-suggested overlaps. A rebuild now keeps a sample's overlaps, target and trims when its configs are unchanged, and gives a new sample the overlaps/target last set with `/stitch set all …` for that configuration sequence (`state.stitch_defaults`, saved with the session); only otherwise auto-suggests. The message says which samples were kept / given your values / auto. `/stitch set all overlap auto` forgets the remembered overlaps. |
 | 0.54.0 | 2026-10-15 | **New `/trim`, and per-config trim before stitching.** `/trim <files|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out | --inplace]` removes edge points from finished I(Q) files (reduced or merged); "points" are real ones (NaN/empty edge rows don't count); writes `<name>_trim<ext>` beside the original (not matched by `*_Iq.dat` globs) with a `# trimmed:` header line, or `--inplace` keeping `<name>.untrimmed`. `/stitch set <idx|sample|all> trim <config> --first/--last/--qmin/--qmax` (or `none`) trims a configuration's curve before stitching — kept in the stitch table (saved, survives `/stitch build`), applied by `/stitch run`, recorded in the merged header and data, reproduced by `/export script --stitch`. Fix: that exported stitch block (v0.53.0) could not run — drtsans's `load_iqmod` defaults to a pandas header, not the tab MantidAscii `_Iq.dat`; now it reads/writes MantidAscii. Checked in drtsans: exported trimmed stitch == eqsanscli's (IPTS-38269 porsil, 128 rows, Δ=0). Also: headless "ready" reply moved inside the `try` (a SIGTERM right after it could kill the process silently). |
@@ -291,6 +292,29 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: short merged file names by default (v0.54.3)
+
+Asked for merged files without the configuration names, short names as the
+default. `merge_service.merged_file_name` / `assign_merged_names(groups,
+naming)` name every stitchable group `merged_<sample>_Iq.txt` ("short") or with
+the configs ("full"); a short name already taken by another group in the table
+(one sample stitched in two config sets, e.g. 60 Hz and 30 Hz) falls back to the
+full name for the later group. Applied after `/stitch build`, `/stitch smart`,
+`/stitch removeconfig`, and in autopilot (Step 11 names the stored groups;
+Step 12's `execute_plan` writes to that name via a new `output_file` argument).
+`SessionState.stitch_naming` ("short" default, also for sessions saved before);
+`/stitch set all output short|full` sets it, renames the table and is
+remembered; `/stitch set <sample> output short|full|<file>` for one sample. The
+merged header already records configs, overlaps, factors and trims (v0.51.0),
+so nothing is lost. Existing merged files are not renamed on disk.
+
+`tests/test_trim.py` (+2). 445 tests.
+
+**Files changed:** `services/merge_service.py`, `services/smart_stitch.py`,
+`services/autopilot.py`, `commands/stitch.py`, `models/session_state.py`,
+`services/llm_handler.py`, SKILL.md, `tests/test_trim.py`, CLAUDE.md, docs
+(regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: trim before stitching works for frame-skipping groups (v0.54.2)
 
 Reported from IPTS-38077: "stitch a06, eq1-0, … using overlap range 0.04,0.05
@@ -400,40 +424,3 @@ the next launch, independent of this release).
 
 **Files changed:** `config/settings.py`, `commands/models.py`, `.env.example`,
 CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: per-frame incoherent-fit parameters for frame skipping (v0.53.1)
-
-Asked how `incohfit_qmin`/`incohfit_qmax` work in frame-skipping mode. From the
-drtsans 1.35.0 source: `correction_api.listify_incohfit_parameter` turns each of
-`fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`,
-`incohfit_intensityweighted` into `[frame 0, frame 1]` (a scalar is used for
-both; `selectMinIncoh` is not per frame); `split_by_frame` puts the skip frame
-(long wavelengths, low Q) at index 0 and the lead frame at 1; `reduction_api`
-runs `inelastic_correction` per frame with that frame's values; within a frame
-`calculate_incoherence_correction_factors` uses the Q bins between qmin and qmax
-when both are set, else the widest range common to every wavelength,
-`incohfit_factor` then tunes the lower edge, and b(λ) is the offset from the
-frame's reference wavelength averaged over the window. One window for both
-frames is therefore usually wrong for one of them.
-
-eqsanscli could not express two values: `/set config … incohfit_qmin 0.02,0.10`
-(or `[0.02, 0.10]`) was stored and written to the json as a string, which
-drtsans's validator rejects ("is not a number or a list") — verified in the
-drtsans env — and `fitinelasticincoh true,false` was parsed as a bool and became
-False. `config_manager.PER_FRAME_PARAMS` / `_parse_per_frame` now accept one
-value or two (`a,b`, `[a, b]`, `a b`, `(a,b)`), store a real list, allow `none`
-for one frame, and refuse ≤ 0, more than two values or text; the confirmation
-names which frame is which. Verified: the json eqsanscli now builds passes
-`drtsans.tof.eqsans.reduction_parameters(…, permissible=True)` (as
-`eqsans_reduction.py` loads it) and `parse_correction_config` yields
-qmin [0.02, 0.1], qmax [0.04, 0.25].
-
-Also: the LLM context listed a non-existent `doincoherentinelasticcorrection`
-key instead of the real incoherent-fit parameters; knowledge (configurations.md
-section on frame skipping, CFG-02 per frame), SKILL.md and the LLM reference
-updated. `tests/test_per_frame_params.py` (+6). 432 tests.
-
-**Files changed:** `services/config_manager.py`, `services/llm_handler.py`,
-`knowledge/configurations.md`, `knowledge/protocol.md`, SKILL.md,
-`tests/test_per_frame_params.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
