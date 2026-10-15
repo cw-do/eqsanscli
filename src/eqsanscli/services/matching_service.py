@@ -288,6 +288,30 @@ def _match_base(sample_name: str) -> str:
     return s.lower()
 
 
+# A displacement written with dashes ("sebs-5wt-SiNPs--d26", "sebs-sinp-d0").
+# Dashes collide with deuteration labels (PS-d8, toluene-d8, DMSO-d6), so this
+# token is ignored only for a *series*: two or more scattering rows of one
+# configuration with the same name and different N (TBL-09). `d2o` never matches
+# — the digits must end the token.
+_DASH_D_RE = re.compile(r"-{1,2}d(\d+)(?=[-_]|$)", re.IGNORECASE)
+
+
+def _dash_series_bases(names) -> set[str]:
+    """Names (lowercased, token removed) that occur with ≥2 different -d<N>."""
+    seen: dict[str, set[str]] = {}
+    for name in names:
+        m = _DASH_D_RE.search(name)
+        if m:
+            seen.setdefault(_DASH_D_RE.sub("", name, count=1).lower(), set()).add(m.group(1))
+    return {b for b, ns in seen.items() if len(ns) >= 2}
+
+
+def loose_base(name: str) -> str:
+    """_match_base with any -d<N> token removed too — for *suggestions* only
+    ("which rows might this unused transmission belong to"), never for pairing."""
+    return _DASH_D_RE.sub("", _match_base(name))
+
+
 def _extract_sample_name(title: str) -> str:
     """Extract a clean sample name from an ONCat run title.
 
@@ -467,6 +491,10 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
         # plain transmission run, an unmatched normal scattering row can only mean
         # that run — assign it, but record it so the user can see it was matched by
         # configuration rather than by name.
+        dash_bases = _dash_series_bases(s.sample_name for s in all_scattering
+                                        if not (s.is_background or s.is_empty))
+        by_condition: list[str] = []
+
         sole_trans = [r for r in runs if r.run_type == "transmission"]
         sole_trans_run = str(sole_trans[0].run_number) if len(sole_trans) == 1 else ""
         by_config_assigned: list[str] = []
@@ -479,6 +507,15 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
                 trans_run = trans_lookup_base.get(_match_base(s.sample_name), "")
                 if trans_run:
                     matched_by = "base"
+            if not trans_run and dash_bases:
+                stripped = _DASH_D_RE.sub("", s.sample_name, count=1)
+                if stripped != s.sample_name and stripped.lower() in dash_bases:
+                    trans_run = (trans_lookup.get(stripped.lower(), "")
+                                 or trans_lookup_base.get(_match_base(stripped), ""))
+                    if trans_run:
+                        matched_by = "base"
+            if matched_by == "base" and not (s.is_background or s.is_empty):
+                by_condition.append(s.sample_name)
 
             row_empty = default_empty
             if len(empty_trans_runs) > 1:
@@ -567,6 +604,14 @@ def match_runs(catalog: pd.DataFrame, ipts: int = 0,
                     f"shares with it: {', '.join(sorted(picked))}.\n"
                     f"  Verify with /show table; /matchruns --no-title-tokens uses the first one."
                 )
+
+        if by_condition:
+            ex = by_condition[0] if len(by_condition) == 1 else f"{by_condition[0]} … {by_condition[-1]}"
+            warnings.append(
+                f"[{cfg_label}] transmission matched with a condition token ignored "
+                f"(displacement -dN/_dN, shear rate, temperature) on {len(by_condition)} row(s): {ex}.\n"
+                f"  Verify with /show table; /set <row> trans <run> to override."
+            )
 
         if by_config_assigned:
             n = len(by_config_assigned)
@@ -776,3 +821,29 @@ def assign_background(
         f"Assigned '{bkg_sample_name}' as background for {count} rows.\n"
         f"  Configs: {', '.join(configs_found)}"
     )
+
+
+def transmission_report(catalog: pd.DataFrame, table: WorkingTable) -> dict:
+    """Sample rows without a transmission, and transmission runs nothing uses.
+
+    For each unused run, the rows without one whose name (condition tokens
+    removed) starts with the run's name — the likely owners. A missing
+    transmission stays a warning (owner: data may be reduced without one), so
+    this list is how a pairing miss gets noticed (IPTS-37953: 56 rows, 13 runs).
+    """
+    from eqsanscli.models.config_id import make_config_id
+    rows_without = [r for r in table.rows if not str(r.transmission_run).strip()]
+    used = {str(r.transmission_run).strip() for r in table.rows} | \
+           {str(r.background_trans).strip() for r in table.rows}
+    unused = []
+    for cr in _classify_catalog(catalog):
+        if cr.run_type != "transmission" or str(cr.run_number) in used:
+            continue
+        cfg = make_config_id(cr.config_key[0], cr.config_key[1], cr.config_key[2])
+        key = loose_base(cr.sample_name)
+        closest = [r for r in rows_without
+                   if r.physical_configuration == cfg and loose_base(r.sample_name).startswith(key)]
+        unused.append({"run": str(cr.run_number), "title": cr.title, "config": cfg,
+                       "closest_rows": [r.index for r in closest],
+                       "closest_names": [r.sample_name for r in closest]})
+    return {"rows_without": [r.index for r in rows_without], "unused": unused}

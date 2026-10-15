@@ -144,6 +144,7 @@ WORKING TABLE:
   one configuration. A transmission or empty beam assigned to a row MUST come from the SAME
   configuration as that row. With multiple configurations in the table, emit one /set --config per
   configuration (or per-row /set) rather than a single /set --sample across all of them.
+/check                          - Run protocol checks (missing empty beam/transmission, unused transmissions, run-role clashes, scale origin). "check the table", "anything wrong?", "validate" → /check
 /reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/background/ignore)
 /reclass --sample <name> <class> - Override run classification by sample name (matches title after S-/T- prefix;
                                    a name starting with S- or T- matches ONLY titles with that prefix)

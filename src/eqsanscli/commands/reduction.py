@@ -97,6 +97,20 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
     blocked, advisory = preflight(selected)
     report = format_preflight(blocked, advisory, n_selected=len(selected))
 
+    # Protocol rules marked blocking (TBL-06, BKG-01/02, CFG-01) stop the batch
+    # too; --force overrides. A missing transmission is never one of them: data
+    # may be reduced without one (TBL-02 is a warning).
+    from eqsanscli.services import protocol
+    proto_block = [f for f in protocol.check(state) if f.severity == "blocking"]
+    if proto_block and not force:
+        return CommandResult(success=False, message=(
+            "[red]✗ Protocol checks block this reduction:[/red]\n"
+            + "\n".join(f"    {f}" for f in proto_block)
+            + "\n  [dim]/check for everything; /reduce … --force to reduce anyway.[/dim]"))
+    if proto_block and force:
+        report = ("[yellow]⚠ --force: reducing despite protocol findings: "
+                  + "; ".join(f.rule for f in proto_block) + "[/yellow]\n" + report)
+
     if blocked and not (force or skip_missing):
         return CommandResult(success=False, message=report)
 

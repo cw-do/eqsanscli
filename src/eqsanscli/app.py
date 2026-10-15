@@ -929,6 +929,7 @@ class EQSANSApp(App):
             "[bold cyan]Working Table:[/]\n"
             "  /show table                   — Show current working table\n"
             "  /show table --sample <name>   — Filter by sample name (read-only)\n"
+            "  /check                        — Protocol checks: missing runs, unused transmissions, clashes, scale origin\n"
             "  /reclass <runs> <class>       — Override run class (scatt/trans/bkg/bkgtrans/empty/sample/background/ignore)\n"
             "  /reclass --sample <name> <class> — Reclass all runs whose title contains <name>\n"
             "                                  (S-<name>/T-<name> = only those; 'background' → S-→BkgS, T-→BkgT)\n"

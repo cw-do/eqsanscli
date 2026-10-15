@@ -110,10 +110,26 @@ def _tbl_04(state) -> list[str]:
             for r in _rows(state) if r.background_scatt and not r.background_trans]
 
 
+# Role pairs a run legitimately holds across rows: a background cell is its own
+# sample row and the other rows' background; its transmission is that row's
+# transmission and the others' background transmission; an empty beam doubles as
+# the transmission reference. (Before v0.49.0 only the last was allowed, so a
+# correct rheo-SANS table — IPTS-37681, empty cups per shear plane — gave 8
+# blocking findings.)
+_ALLOWED_ROLE_PAIRS = {
+    frozenset({"sample", "background"}),
+    frozenset({"transmission", "background transmission"}),
+    frozenset({"empty beam", "transmission"}),
+}
+
+
 def _tbl_06(state) -> list[str]:
-    """One run, one role per configuration."""
+    """One run, one role per configuration (bar the pairs above, across rows)."""
+    from itertools import combinations
     seen: dict[tuple[str, str], set[str]] = {}
+    same_row: set[tuple[str, str]] = set()
     for r in _rows(state):
+        roles_here: dict[str, set[str]] = {}
         for role, run in (("sample", r.scattering_run),
                           ("transmission", r.transmission_run),
                           ("background", r.background_scatt),
@@ -121,11 +137,14 @@ def _tbl_06(state) -> list[str]:
                           ("empty beam", r.empty_beam)):
             for one in (part.strip() for part in str(run).split(",") if part.strip()):
                 seen.setdefault((r.configuration, one), set()).add(role)
+                roles_here.setdefault(one, set()).add(role)
+        for one, roles in roles_here.items():
+            if {"sample", "background"} <= roles:      # its own background (BKG-02 too)
+                same_row.add((r.configuration, one))
     out = []
     for (config, run), roles in sorted(seen.items()):
-        # A background cell legitimately serves as its own sample row, and an
-        # empty beam is routinely both empty-beam and transmission reference.
-        if len(roles) > 1 and roles != {"empty beam", "transmission"}:
+        bad = [p for p in combinations(sorted(roles), 2) if frozenset(p) not in _ALLOWED_ROLE_PAIRS]
+        if bad or (config, run) in same_row:
             out.append(f"{config}: run {run} is used as {' and '.join(sorted(roles))}")
     return out
 

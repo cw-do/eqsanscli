@@ -108,10 +108,11 @@ empty-beam rows therefore get **no** background subtraction of their own.
 **TBL-01** · blocking · enforced (`blocking_problems`)
 Every row has a scattering run.
 
-**TBL-02** · warning · enforced (`advisory_problems`, autopilot Step 3)
+**TBL-02** · warning · enforced (`advisory_problems`, `/matchruns` transmission report, `/check`, autopilot Step 3)
 Every sample row has its own transmission run, at the same configuration.
-Reduction proceeds without one — drtsans accepts a transmission *value* instead —
-but the result is not what most experiments intend.
+Reducing without one is allowed, so this warns, never blocks. A missing one is
+usually a pairing miss: `/matchruns` and `/check` list transmission runs **nothing
+uses**, each beside the rows it most likely belongs to.
 
 **TBL-03** · warning · enforced (`advisory_problems`, autopilot Step 3)
 Every sample row has a background scattering run, except the background sample
@@ -125,9 +126,11 @@ transmission correction is inconsistent with how the sample was treated.
 Thickness is a positive number. Typical range 0.01–1 cm; outside that, suspect a
 unit error. Default when unstated: 0.1 cm.
 
-**TBL-06** · blocking · enforced (`services/protocol.py`)
-A run appears in only one role per configuration. The same run used as both
-sample and background, or as both transmission and empty beam, is an error.
+**TBL-06** · blocking · enforced (`services/protocol.py`, `/check`, `/reduce`)
+A run has one role per configuration, except across rows: sample + background (a
+background cell's own row), transmission + background transmission, and empty
+beam + transmission. Any other mix, or a row that is its own background, blocks
+`/reduce` (`--force` overrides).
 
 **TBL-07** · warning · enforced (`sync_state_configs` straddle check)
 All rows in one configuration resolve to the same calibration cycle. Runs
@@ -142,7 +145,9 @@ or `/autopilot --thickness` afterwards still wins.
 **TBL-09** · info · enforced (`services/matching_service.py:_match_base`)
 A transmission measured once serves a sample series that varies only in a
 *condition* token: a displacement `_d<N>` or a rheo-SANS shear rate
-`_<rate>shear` (`_0.1shear`, `_1000shear`, `_0shear-return`). Those tokens are
+`_<rate>shear`, or a dash-written `-d<N>`/`--d<N>` — that one only for a series
+(≥2 rows, same name, different N): a lone `-d8` is a deuteration label (`PS-d8`).
+Such matches are reported. Those tokens are
 dropped only when the exact name finds no transmission; every other token (the
 shear plane `1,3` / `2,3`) must still agree, so a plane never borrows the other
 plane's transmission.
@@ -327,24 +332,15 @@ configuration**: `--applynow` applies only to the configuration named by the
 standard's own file. A factor set explicitly by the user is SCL-04's case.
 
 **SCL-03** · warning · enforced (`/calibrate`, `/set config`, `/show config`)
-A scale outside **0.01–50** indicates a bad fit, the wrong reference, or a unit
-slip. Warned, never refused. The calibration also reports the spread of the
-reference/measured ratio over the window and the factor in the two neighbouring
-windows; more than 2 % either way warns that the curve does not follow the
-reference's shape there.
+A scale outside **0.01–50** warns (never refuses). `/calibrate` also warns when the
+ratio's spread over the window, or the factor in a neighbouring window, exceeds 2 %.
 
 **SCL-04** · warning · enforced (`services/scale_service.py`, `state.scale_provenance`)
-Every scale carries its origin: `default` (1.0, nothing calibrated → a.u.),
-`calibrate` (file, reference, window, spread, and the scale the standard was
-reduced with), or `user` (set explicitly → assumed correct, absolute, even when
-borrowed from another experiment — the user's decision). **Presets never carry a
-scale**: theirs came from other experiments and were silently inherited
-(IPTS-37953: a 4 m 10 Å preset's 0.1917 on a 4 m 2.5 Å 30 Hz config with no
-standard, written as 1/cm). `/calibrate --applynow` sets **s0 × f**, where s0 is
-the scale the standard was reduced with (from its input json), so calibrating
-is correct whatever the standard was reduced at; without s0 it refuses. A scale
-with no recorded origin (sessions from before this rule) other than 1.0 is
-flagged wherever it is shown.
+Every scale records its origin: `default` (1.0 → a.u.), `calibrate`, or `user`
+(set explicitly → assumed correct and absolute, even if borrowed). **Presets
+never carry a scale** (theirs were other experiments'). `--applynow` sets
+**s0 × f**, s0 being the scale the standard was reduced with (its input json);
+without s0 it refuses. A non-1.0 scale with no recorded origin is flagged.
 
 ---
 

@@ -7,6 +7,42 @@ the version it shipped in.
 
 ---
 
+### 2026-09-29: release channel eqsanscli-safe; data folders via EQSANSCLI_ROOT (v0.47.3)
+
+(Renamed `eqsanscli-stable` in v0.47.4.)
+
+Asked to create a safe distribution folder for eqsanscli "as we did for
+sansdir": `sansdir-stable` holds its own venv with a non-editable install of a
+tagged commit, launchers that use only that venv, an `update.sh` that installs
+from `git archive <tag>` (never the working copy), and a `VERSION` file.
+
+eqsanscli could not be installed that way as it stood. `knowledge/`,
+`preset_configs/`, `absscale_reference/` and the shared `.env` live at the repo
+root, outside the package, and six call sites found them with
+`Path(__file__).resolve().parent.parent.parent.parent` (protocol.py with four
+nested `dirname`s). From site-packages that resolves inside the venv — no
+presets, no always-loaded protocol, no absolute-scale reference, no LLM key —
+and each lookup degrades quietly rather than failing. The launchers already
+exported `EQSANSCLI_ROOT`, but nothing read it.
+
+New `eqsanscli/paths.py:app_root()` returns `EQSANSCLI_ROOT` when it names an
+existing folder, else the repo root (so the dev tree and tests are unchanged);
+all six sites use it. The release folder carries copies of the three data
+folders extracted from the same tag as the code. Chosen over packaging them as
+wheel data because the cwd overrides (`./knowledge`, `./preset_configs`) and the
+shared `.env` are folder-based anyway, and it keeps one mechanism for dev and
+release.
+
+`tests/test_paths.py` (+4): default is the repo root; the env root wins and
+moves `protocol_path()`; a missing env root falls back; no module walks up from
+its own file. Release procedure documented under *Release channel* above.
+
+**Files changed:** `paths.py` (new), `config/settings.py`,
+`services/knowledge.py`, `services/protocol.py`, `services/preset_service.py`,
+`services/calibration_service.py`, `services/smart_stitch.py`,
+`tests/test_paths.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)
 
 Reported after a full autopilot on IPTS-37681: "28 reduced … ⚠ No stitchable

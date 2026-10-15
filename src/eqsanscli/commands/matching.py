@@ -190,6 +190,8 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     missing_bkg = [r for r in table.rows if not r.background_scatt]
     missing_empty = [r for r in table.rows if not r.empty_beam]
 
+    from eqsanscli.services.matching_service import transmission_report
+    trans_report = transmission_report(catalog, table)
     if missing_trans or missing_bkg or missing_empty:
         classified = _classify_catalog(catalog)
 
@@ -208,18 +210,24 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
         lines: list[str] = []
 
         if missing_trans:
-            lines.append(f"\n⚠ {len(missing_trans)} row(s) missing transmission:")
-            for r in missing_trans:
+            unused = trans_report["unused"]
+            lines.append(f"\n⚠ transmission: {len(missing_trans)} row(s) without one; "
+                         f"{len(unused)} transmission run(s) unused"
+                         + (" — likely a pairing miss: check the titles" if unused else ""))
+            for u in unused:
+                names = u["closest_names"]
+                hint = ""
+                if names:
+                    span = names[0] if len(names) == 1 else f"{names[0]} … {names[-1]}"
+                    hint = f"   ← closest rows: {span} ({len(names)})"
+                lines.append(f"    {u['run']}  {u['title']}  [{u['config']}]{hint}")
+            if unused:
+                lines.append("    Fix: /retitle the run, /set <rows> trans <run>, or /matchruns after "
+                             "correcting titles. Reducing without a transmission is allowed.")
+            for r in missing_trans[:15]:
                 lines.append(f"  Row {r.index}: {r.sample_name} ({r.configuration})")
-            avail_trans = [
-                cr for cr in classified
-                if cr.run_type == "transmission" and str(cr.run_number) not in used_runs
-            ]
-            if avail_trans:
-                lines.append("  Available transmission runs (unused):")
-                for cr in avail_trans:
-                    cfg = make_config_id(cr.config_key[0], cr.config_key[1], cr.config_key[2])
-                    lines.append(f"    {cr.run_number}  {cr.title}  [{cfg}]")
+            if len(missing_trans) > 15:
+                lines.append(f"  ... and {len(missing_trans) - 15} more")
 
         if missing_bkg:
             lines.append(f"\n⚠ {len(missing_bkg)} row(s) missing background:")
@@ -242,7 +250,7 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     return CommandResult(
         success=True,
         message=summary,
-        data={"type": "working_table", "rows": rows},
+        data={"type": "working_table", "rows": rows, "transmission_report": trans_report},
     )
 
 

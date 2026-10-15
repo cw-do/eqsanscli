@@ -456,6 +456,7 @@ before sign-in returns "Not signed in to ONCat".
 
 | Command | Purpose |
 |---------|---------|
+| `/check` | Run the protocol checks on the session: validators (TBL-04/06, BKG-01/02, CFG-01), rows without empty beam/transmission/background, unused transmission runs, absolute-scale origin and range. Returns `data` `{"type": "check", "findings": [{"rule", "severity", "message", "rows"}], "unenforced": [...]}`. Read-only; `/reduce` refuses on its blocking findings unless `--force` |
 | `/reclass <runs> <class>` | Override run classification. Classes: scatt, trans, bkg, bkgtrans, empty, emptyscatt, sample, background, ignore (aliases i, n). `sample`/`background` follow the S-/T- title prefix |
 | `/reclass --sample <name> <class>` | Reclass all runs matching sample name (e.g. `--sample BkgG sample`, `--sample banjo i`). A name starting `S-`/`T-` matches only those titles (`--sample T-EmptyCup bkgtrans`). Runs already ignored (N) are left alone — name them by run number to revive |
 | `/retitle <run> <new title>` | Correct one run's title in this session, e.g. `/retitle 181470 T-L62_0 4m 10A`. `/matchruns` pairs **by title**, so this is how a mislabeled transmission is fixed at the source |

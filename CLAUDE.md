@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.49.0 | 2026-10-15 | **Transmission pairing for dash-written displacement series + a `/check` command** (sansbook review A5/B4). `/matchruns` pairs `-d<N>`/`--d<N>` series (`S-sebs-5wt-SiNPs--d26` → `T-sebs-5wt-SiNPs`) — only when ≥2 rows share the name with different N, so a lone `PS-d8` (deuteration) never borrows `PS`'s transmission; condition-token matches are reported. On IPTS-37953's catalog the 56 rows reduced without a transmission now all pair, each to its own sample. `/matchruns` leads with "N rows without a transmission; M runs unused", each unused run beside its likely rows, and returns `transmission_report` in `data`. A missing transmission still **never blocks** (owner). New `/check` (findings as `data`): protocol validators, missing empty beam/transmission/background, unused transmissions, scale origin/range. `/reduce` refuses on blocking protocol findings (`--force` overrides). TBL-06 fixed: it flagged legitimate background-cell roles (8 false blocking findings on IPTS-37681). |
 | 0.48.0 | 2026-10-15 | **Absolute scale gets an origin and a unit; `/calibrate` fixed** (sansbook review A2/A3). Every config's `standardabsolutescale` now records where it came from (`state.scale_provenance`, `services/scale_service.py`): `default` (1.0, nothing calibrated → **a.u.**), `calibrate`, or `user` (explicit `/set config`, assumed correct → 1/cm). **Presets no longer carry a scale** — 4 of 6 held another experiment's 0.19, inherited silently (IPTS-37953: no standard, 0.1917, written as 1/cm). **`--applynow` sets s0 × f** (s0 = scale the porsil was reduced with, from its json; refuses without it) — it set f alone before. `/calibrate` also: parses `…30hz_frame_0_Iq.dat`; unknown reference or flag is an error (was silent NG3 / ignored); reports spread + neighbouring-window factors (>2 % warns); returns `data` (`type: calibration`) and writes `calibration_<cfg>.json`/`.png` + `calibration_history.jsonl`; one default window 0.01–0.03. `/show config`, `/matchruns`, plots (`I (a.u.)`) show the unit. Inexact preset matches prefer the same wavelength and warn. Autopilot uses the data payload and keeps a user-set scale. SCL-01..03 updated, SCL-04 new, STC-05 0.01–1000. |
 | 0.47.6 | 2026-10-15 | **`/plot` no longer uploads figures by itself.** With `DISPLAY` unset it saved the PNG and then uploaded it to here.now — a public 24 h link — without being asked, from every headless run, SSH session and autopilot plot step (sansbook review A1). It now only saves the PNG and says so; uploading is an explicit `/share`, which still works everywhere (TUI and headless) and now says the link is public. LLM routing emits `/share` only when the user asks to share/upload/publish. |
 | 0.47.5 | 2026-10-02 | Startup banner: one line under Getting Started — *Best viewed in a terminal window of at least 120×35*. Chosen over auto-resizing the window (`ESC[8;35;120t`), which only some terminals honour (VTE, macOS Terminal, PuTTY; not xterm by default, Windows Terminal, VS Code, tmux/screen) and which would leave the user's window resized after exit. Text only. |
@@ -281,6 +282,56 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: dash displacement series pair; unused transmissions reported; /check (v0.49.0)
+
+From the sansbook planning review (items A5, B4), with the owner's change: a
+missing transmission must **not** stop a reduction ("one can reduce data without
+transmission if needed") — so it is reported, not enforced.
+
+**Pairing.** IPTS-37953's samples were titled `S-sebs-5wt-SiNPs--d26 4m 2.5Afs
+5mmsa` (dash displacement) and its transmissions `T-sebs-5wt-SiNPs …`; `_match_base`
+stripped only `_d<N>`, the sole-transmission fallback did not apply (7 plain
+transmissions), and all 56 rows were reduced without a transmission. Now
+`-d<N>`/`--d<N>` is ignored for transmission lookup **only for a series** —
+two or more rows of the configuration with the same name and different N
+(`_dash_series_bases`) — because dashes collide with deuteration labels (`PS-d8`,
+`toluene-d8`); `d2o` never matches. Re-run on 37953's catalog (from its saved
+autopilot session): 0 of the 56 without a transmission, every series paired with
+its own sample's run (189212 → 23 SiNPs rows, 189198 → 5 sinp rows, …); the one
+row left is a different config with none measured. Condition-token matches
+(displacement, shear rate, temperature) are now reported per config.
+
+**Report.** An "unused transmission" list existed but came after a row-by-row
+list of every row without one (56 lines). `/matchruns` now leads with "N row(s)
+without one; M transmission run(s) unused", puts each unused run beside the rows
+whose loosened name (`loose_base`) starts with its own, caps the row list at 15,
+and returns `transmission_report` (`rows_without`, `unused` with `closest_rows`)
+in `data`.
+
+**/check** (new, `commands/check.py`): the registered protocol validators,
+EMP-01 (no empty beam, blocking), TBL-02/03/05 (warnings), unused transmissions,
+SCL-03/04 (scale range, unknown origin). Returns `{"type": "check", "findings":
+[{rule, severity, message, rows}], "unenforced": [...]}`. `/reduce` now also
+refuses on *protocol* blocking findings (`--force` overrides) — never on a
+missing transmission.
+
+**TBL-06 was wrong.** Run on IPTS-37681's real session it gave 8 blocking
+findings, all legitimate: an empty cup is its own sample row and the others'
+background, its transmission their background transmission. The code comment
+said that was allowed; the code only allowed empty-beam + transmission. Now
+three cross-row pairings are allowed and a row that is its own background still
+fails. Fixed before `/reduce` started relying on it.
+
+`protocol.md` was trimmed to stay under the 20 000-character always-loaded
+budget (`test_always_loaded_text_stays_small`; 19 281). `tests/
+test_transmission_pairing.py` (+8). 405 tests.
+
+**Files changed:** `services/matching_service.py`, `services/protocol.py`,
+`commands/matching.py`, `commands/check.py` (new), `commands/reduction.py`,
+`commands/registry.py`, `services/llm_handler.py`, `app.py`,
+`knowledge/protocol.md`, SKILL.md, `tests/test_transmission_pairing.py`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: absolute-scale provenance and a correct /calibrate (v0.48.0)
 
 From the sansbook planning review (2026-10-15, items A2, A3, B10-calibrate), each
@@ -399,40 +450,4 @@ In the repo only the `paths.py` docstring and CLAUDE.md named the folder; the
 v0.47.3 entries keep the name it actually shipped under, with a pointer here.
 
 **Files changed:** `paths.py` (docstring), CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
-
-### 2026-09-29: release channel eqsanscli-safe; data folders via EQSANSCLI_ROOT (v0.47.3)
-
-(Renamed `eqsanscli-stable` in v0.47.4.)
-
-Asked to create a safe distribution folder for eqsanscli "as we did for
-sansdir": `sansdir-stable` holds its own venv with a non-editable install of a
-tagged commit, launchers that use only that venv, an `update.sh` that installs
-from `git archive <tag>` (never the working copy), and a `VERSION` file.
-
-eqsanscli could not be installed that way as it stood. `knowledge/`,
-`preset_configs/`, `absscale_reference/` and the shared `.env` live at the repo
-root, outside the package, and six call sites found them with
-`Path(__file__).resolve().parent.parent.parent.parent` (protocol.py with four
-nested `dirname`s). From site-packages that resolves inside the venv — no
-presets, no always-loaded protocol, no absolute-scale reference, no LLM key —
-and each lookup degrades quietly rather than failing. The launchers already
-exported `EQSANSCLI_ROOT`, but nothing read it.
-
-New `eqsanscli/paths.py:app_root()` returns `EQSANSCLI_ROOT` when it names an
-existing folder, else the repo root (so the dev tree and tests are unchanged);
-all six sites use it. The release folder carries copies of the three data
-folders extracted from the same tag as the code. Chosen over packaging them as
-wheel data because the cwd overrides (`./knowledge`, `./preset_configs`) and the
-shared `.env` are folder-based anyway, and it keeps one mechanism for dev and
-release.
-
-`tests/test_paths.py` (+4): default is the repo root; the env root wins and
-moves `protocol_path()`; a missing env root falls back; no module walks up from
-its own file. Release procedure documented under *Release channel* above.
-
-**Files changed:** `paths.py` (new), `config/settings.py`,
-`services/knowledge.py`, `services/protocol.py`, `services/preset_service.py`,
-`services/calibration_service.py`, `services/smart_stitch.py`,
-`tests/test_paths.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
