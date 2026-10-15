@@ -154,3 +154,38 @@ def test_export_stitch_block_reads_mantid_ascii_and_trims(tmp_path):
     assert "header_type='MantidAscii'" in s and "sep='\\t'" in s
     assert "_trim(load_iqmod(" in s and "{'last': 5}" in s
     compile(s, str(out), "exec")
+
+
+# --- /stitch build keeps what the user set (v0.54.1) ----------------------------
+# IPTS-38077, 2026-10-15: /stitch set all overlap 0.05 0.06, then new runs were
+# reduced and "stitch the newly reduced data" ran /stitch build — every sample
+# went back to auto-suggested overlaps and the range had to be set again.
+
+def test_rebuild_keeps_overlaps_and_gives_new_samples_the_all_choice(tmp_path, monkeypatch):
+    from eqsanscli.commands import stitch as stitch_cmd
+    cfgs = ["4m2.5a30hz_frame0", "4m2.5a30hz_frame1"]
+
+    def build(names):
+        return [StitchGroup(sample_name=n, files=[f"/o/{n}_0.dat", f"/o/{n}_1.dat"], configs=list(cfgs),
+                            overlaps=[0.01, 0.02], target_profile_index=0) for n in names]
+
+    st = SessionState(); st.output_directory = str(tmp_path)
+    monkeypatch.setattr(stitch_cmd, "build_stitch_table", lambda t, o: build(["a06"]))
+    _run(handle_stitch(["build"], st))
+    _run(handle_stitch(["set", "all", "overlap", "0.05", "0.06"], st))
+    _run(handle_stitch(["set", "a06", "target", "1"], st))          # per-sample choice
+    st = SessionState.load(st.save(str(tmp_path / "s.json")))       # survives the session file
+
+    monkeypatch.setattr(stitch_cmd, "build_stitch_table", lambda t, o: build(["a06", "EQ1-0"]))
+    res = _run(handle_stitch(["build"], st))
+    g = {x.sample_name: x for x in st.stitch_groups}
+    assert g["a06"].overlaps == [0.05, 0.06] and g["a06"].target_profile_index == 1
+    assert g["EQ1-0"].overlaps == [0.05, 0.06]                     # new sample: the 'all' choice
+    assert "Kept your overlaps" in res.message and "EQ1-0" in res.message
+
+    monkeypatch.setattr(stitch_cmd, "_auto_overlap_centered", lambda files, n: ([0.011, 0.021], "auto"))
+    _run(handle_stitch(["set", "all", "overlap", "auto"], st))
+    monkeypatch.setattr(stitch_cmd, "build_stitch_table", lambda t, o: build(["a06", "EQ1-0", "EQ2-0"]))
+    _run(handle_stitch(["build"], st))
+    g = {x.sample_name: x for x in st.stitch_groups}
+    assert g["EQ2-0"].overlaps == [0.01, 0.02]                     # back to the builder's suggestion

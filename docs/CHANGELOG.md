@@ -7,6 +7,51 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: headless events, cancel, read-only, session lock, one reply per command (v0.52.0)
+
+From the sansbook planning review (item B5), for an agent driving
+`eqsanscli-headless`.
+
+**Before.** Progress was free text on stderr; `/reduce` ran serially with no
+way to cancel; the `start_reduction` / `start_autopilot` runners sat outside the
+per-command `try`, so an exception there ended the process with no JSON reply;
+and two processes on one folder both autosaved, the last to exit winning (a
+`/show` during a long `/reduce` could overwrite its row statuses).
+
+**Now.** `run_headless(argv)` takes `--events` (JSON events on stderr:
+`row_start`, `row_done` with `outputs`/`note`/`error`, `slice` from drtsans's
+per-slice `SaveNexus` lines, `batch_done`) and `--readonly`. The whole
+per-command body is in one `try`: any exception becomes a reply with
+`data.type = "error"` and a traceback tail, and the loop carries on. SIGTERM:
+during a reduction it sets the cancel event `reduce_row` already honours
+(drtsans child terminated, row `cancelled`, the rest untouched), the summary
+reports `cancelled`, the session is saved and the process exits after replying;
+idle, it saves and exits through the end-of-input path. The reduction summary
+adds `ok` (no failures, not cancelled) beside `success` (kept true for
+compatibility). The first reply carries `{"type": "ready", "read_only", "events"}`.
+
+`services/session_lock.py`: the first eqsanscli (TUI or headless) on a folder
+writes `.eqsanscli/sessions/_autosave.lock` ({pid, host, started, kind}),
+released at exit; a lock is honoured while its pid lives on this host, or for
+24 h from another node. A second process runs read-only:
+`SessionState.READ_ONLY` makes autosave a no-op and `/reduce` / `/autopilot`
+refuse with the reason; the TUI says so in a 🔒 line at startup.
+
+A test of mine saved a fake session before changing into its temp folder and
+overwrote the repo's own `.eqsanscli/sessions/_autosave.json` (an empty
+September session); the v0.50.0 autosave history kept the original as
+`_autosave.1.json`, which was restored. Subprocess tests run the app venv's
+python (HOME moved to tmp hides system python's user-site packages).
+
+`tests/test_headless.py` (+5: events/ready, second process read-only, idle
+SIGTERM, runner exception still replies, SIGTERM mid-reduce cancels and exits).
+423 tests.
+
+**Files changed:** `headless.py`, `services/session_lock.py` (new),
+`models/session_state.py`, `commands/reduction.py`, `commands/autopilot.py`,
+`app.py`, SKILL.md, `tests/test_headless.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: stitch records, NOTE.md results, plain headless data, /version data (v0.51.0)
 
 From the sansbook planning review (items B1, B2, B3, B6, B7, B9, B10).

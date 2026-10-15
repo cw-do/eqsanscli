@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.54.1 | 2026-10-15 | Fix: **`/stitch build` threw away the overlaps/target you set.** IPTS-38077: after `/stitch set all overlap 0.05 0.06`, new runs were reduced and "stitch the newly reduced data" ran `/stitch build`, which rebuilt every group with auto-suggested overlaps. A rebuild now keeps a sample's overlaps, target and trims when its configs are unchanged, and gives a new sample the overlaps/target last set with `/stitch set all …` for that configuration sequence (`state.stitch_defaults`, saved with the session); only otherwise auto-suggests. The message says which samples were kept / given your values / auto. `/stitch set all overlap auto` forgets the remembered overlaps. |
 | 0.54.0 | 2026-10-15 | **New `/trim`, and per-config trim before stitching.** `/trim <files|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out | --inplace]` removes edge points from finished I(Q) files (reduced or merged); "points" are real ones (NaN/empty edge rows don't count); writes `<name>_trim<ext>` beside the original (not matched by `*_Iq.dat` globs) with a `# trimmed:` header line, or `--inplace` keeping `<name>.untrimmed`. `/stitch set <idx|sample|all> trim <config> --first/--last/--qmin/--qmax` (or `none`) trims a configuration's curve before stitching — kept in the stitch table (saved, survives `/stitch build`), applied by `/stitch run`, recorded in the merged header and data, reproduced by `/export script --stitch`. Fix: that exported stitch block (v0.53.0) could not run — drtsans's `load_iqmod` defaults to a pandas header, not the tab MantidAscii `_Iq.dat`; now it reads/writes MantidAscii. Checked in drtsans: exported trimmed stitch == eqsanscli's (IPTS-38269 porsil, 128 rows, Δ=0). Also: headless "ready" reply moved inside the `try` (a SIGTERM right after it could kill the process silently). |
 | 0.53.2 | 2026-10-15 | Default OpenRouter model `openai/gpt-6-luna-pro` → **`openai/gpt-6-luna`** (owner's choice; checked listed on OpenRouter). Code default, first in `/models` (luna-pro stays selectable), `.env.example`; the local dev and `eqsanscli-stable` `.env` files, which override the code default, updated too (not in git). |
 | 0.53.1 | 2026-10-15 | Fix: **per-frame incoherent-fit parameters in frame-skipping mode.** drtsans takes `fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted` as one value (both frames) or `[frame 0, frame 1]` (frame 0 = skip frame, long λ, low Q). `/set config` stored `0.02,0.10` / `[0.02, 0.10]` as a **string** — drtsans rejects it (`is not a number or a list`), so the reduction failed — and `true,false` for the flag as **False** (correction silently off for both frames). Now `a,b`, `[a, b]` or `a b` become a real two-element list, one value stays a scalar, `none` clears one frame, numbers must be > 0 (schema). Checked in drtsans: the new JSON validates (`reduction_parameters`, as `eqsans_reduction.py` loads it) and parses to per-frame windows. |
@@ -289,6 +290,30 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: /stitch build keeps the overlaps you set (v0.54.1)
+
+Reported from IPTS-38077: the overlap range was changed, the catalog refreshed,
+`/matchruns --update` run and the new datasets reduced; asking to "stitch newly
+reduced data xx, yy, zz" then used other overlaps. NOTE.md shows why: 13:21
+`/stitch set all overlap 0.05 0.06`; 13:46 the request became `/stitch build` +
+`/stitch run …`, and `_handle_build` replaced the whole table with groups from
+`build_stitch_table`, whose overlaps are `_auto_suggest_overlaps` — so every
+sample, old and new, lost 0.05–0.06 (re-set by hand at 13:47).
+
+Now `_handle_build` carries over, per sample with an unchanged config sequence,
+its overlaps, target index and trims; and `/stitch set all overlap …` /
+`… target …` record the choice in `state.stitch_defaults` (keyed
+"cfgA|cfgB", saved in the session), which a rebuild applies to samples new to
+the table. Auto-suggestion remains for samples with neither; `/stitch set all
+overlap auto` removes the remembered overlaps. The build message lists what
+was kept, defaulted or auto.
+
+`tests/test_trim.py` (+1, replays the IPTS-38077 sequence incl. a session
+save/load). 441 tests.
+
+**Files changed:** `commands/stitch.py`, `models/session_state.py`, SKILL.md,
+`tests/test_trim.py`, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: /trim, and trimming a configuration before stitching (v0.54.0)
 
 Asked for a command to remove the first N or last N points of I(Q) data,
@@ -422,48 +447,3 @@ pins a case that is not.
 **Files changed:** `services/script_exporter.py`, `commands/export.py`,
 `services/llm_handler.py`, SKILL.md, `tests/test_export_complete.py`, CLAUDE.md,
 docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: headless events, cancel, read-only, session lock, one reply per command (v0.52.0)
-
-From the sansbook planning review (item B5), for an agent driving
-`eqsanscli-headless`.
-
-**Before.** Progress was free text on stderr; `/reduce` ran serially with no
-way to cancel; the `start_reduction` / `start_autopilot` runners sat outside the
-per-command `try`, so an exception there ended the process with no JSON reply;
-and two processes on one folder both autosaved, the last to exit winning (a
-`/show` during a long `/reduce` could overwrite its row statuses).
-
-**Now.** `run_headless(argv)` takes `--events` (JSON events on stderr:
-`row_start`, `row_done` with `outputs`/`note`/`error`, `slice` from drtsans's
-per-slice `SaveNexus` lines, `batch_done`) and `--readonly`. The whole
-per-command body is in one `try`: any exception becomes a reply with
-`data.type = "error"` and a traceback tail, and the loop carries on. SIGTERM:
-during a reduction it sets the cancel event `reduce_row` already honours
-(drtsans child terminated, row `cancelled`, the rest untouched), the summary
-reports `cancelled`, the session is saved and the process exits after replying;
-idle, it saves and exits through the end-of-input path. The reduction summary
-adds `ok` (no failures, not cancelled) beside `success` (kept true for
-compatibility). The first reply carries `{"type": "ready", "read_only", "events"}`.
-
-`services/session_lock.py`: the first eqsanscli (TUI or headless) on a folder
-writes `.eqsanscli/sessions/_autosave.lock` ({pid, host, started, kind}),
-released at exit; a lock is honoured while its pid lives on this host, or for
-24 h from another node. A second process runs read-only:
-`SessionState.READ_ONLY` makes autosave a no-op and `/reduce` / `/autopilot`
-refuse with the reason; the TUI says so in a 🔒 line at startup.
-
-A test of mine saved a fake session before changing into its temp folder and
-overwrote the repo's own `.eqsanscli/sessions/_autosave.json` (an empty
-September session); the v0.50.0 autosave history kept the original as
-`_autosave.1.json`, which was restored. Subprocess tests run the app venv's
-python (HOME moved to tmp hides system python's user-site packages).
-
-`tests/test_headless.py` (+5: events/ready, second process read-only, idle
-SIGTERM, runner exception still replies, SIGTERM mid-reduce cancels and exits).
-423 tests.
-
-**Files changed:** `headless.py`, `services/session_lock.py` (new),
-`models/session_state.py`, `commands/reduction.py`, `commands/autopilot.py`,
-`app.py`, SKILL.md, `tests/test_headless.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.

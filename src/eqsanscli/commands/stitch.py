@@ -81,12 +81,33 @@ async def _handle_build(args: list[str], state: SessionState) -> CommandResult:
             "  Check /set outputdir or /list iq to verify files exist.",
         )
 
-    # A rebuild keeps the per-config trims already set for a sample.
-    old = {g.sample_name: g.trims for g in (getattr(state, "stitch_groups", None) or [])
-           if getattr(g, "trims", None)}
+    # A rebuild must not throw away what the user set (it used to: "stitch the
+    # newly reduced data" → /stitch build → every sample back to auto-suggested
+    # overlaps). Same sample, same configs: keep its overlaps, target and trims.
+    # A new sample takes what `/stitch set all …` chose for that config sequence.
+    kept, defaulted = [], []
+    old = {g.sample_name: g for g in (getattr(state, "stitch_groups", None) or [])}
+    defaults = state.stitch_defaults or {}
     for g in groups:
-        if g.sample_name in old:
-            g.trims = {c: t for c, t in old[g.sample_name].items() if c in g.configs}
+        if len(g.configs) < 2:
+            continue
+        prev = old.get(g.sample_name)
+        if prev is not None and getattr(prev, "trims", None):
+            g.trims = {c: t for c, t in prev.trims.items() if c in g.configs}
+        if prev is not None and list(prev.configs) == list(g.configs) \
+                and len(prev.overlaps) == 2 * (len(g.configs) - 1):
+            g.overlaps = list(prev.overlaps)
+            g.target_profile_index = prev.target_profile_index
+            kept.append(g.sample_name)
+            continue
+        key = _cfg_key(g.configs)
+        ov = (defaults.get("overlaps") or {}).get(key)
+        tg = (defaults.get("target") or {}).get(key)
+        if ov is not None and len(ov) == 2 * (len(g.configs) - 1):
+            g.overlaps = list(ov)
+            defaulted.append(g.sample_name)
+        if tg is not None and 0 <= int(tg) < len(g.configs):
+            g.target_profile_index = int(tg)
     state.stitch_groups = groups
     stitchable = [g for g in groups if g.status != "1 config"]
     single = [g for g in groups if g.status == "1 config"]
@@ -95,6 +116,14 @@ async def _handle_build(args: list[str], state: SessionState) -> CommandResult:
         f"Built stitch table from {state.output_directory}\n"
         f"  {len(stitchable)} groups ready for stitching, {len(single)} with only 1 config."
     )
+    if kept:
+        msg += f"\n  Kept your overlaps/target for {len(kept)} existing sample(s)."
+    if defaulted:
+        msg += (f"\n  New sample(s) given your '/stitch set all' overlaps: "
+                f"{', '.join(defaulted[:8])}{' …' if len(defaulted) > 8 else ''}")
+    auto = [g.sample_name for g in stitchable if g.sample_name not in kept and g.sample_name not in defaulted]
+    if auto:
+        msg += f"\n  Auto-suggested overlaps: {', '.join(auto[:8])}{' …' if len(auto) > 8 else ''}"
     return CommandResult(
         success=True,
         message=msg,
@@ -275,6 +304,11 @@ async def _handle_show(args: list[str], state: SessionState) -> CommandResult:
     )
 
 
+def _cfg_key(configs: list[str]) -> str:
+    """The stitch-defaults key for a configuration sequence ('8m12a|4m2.5a')."""
+    return "|".join(configs)
+
+
 def _resolve_target_index(value: str, configs: list[str]) -> int | None:
     """Resolve target to index: accepts integer or config_id (e.g., '4m10a')."""
     try:
@@ -377,6 +411,8 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             for group in target_groups:
                 overlaps, detail = _auto_overlap_centered(group.files, n_points)
                 group.overlaps = overlaps
+                if selector.lower() == "all":       # back to automatic for this config set
+                    state.stitch_defaults.get("overlaps", {}).pop(_cfg_key(group.configs), None)
                 results.append(f"  {group.sample_name}: {detail}")
             return CommandResult(
                 success=True,
@@ -389,6 +425,10 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             return CommandResult(success=False, message="Overlap values must be numbers.")
         for group in target_groups:
             group.overlaps = overlap_values
+            if selector.lower() == "all":
+                # Remember it, so a later /stitch build gives new samples the same
+                # overlaps instead of auto-suggested ones.
+                state.stitch_defaults.setdefault("overlaps", {})[_cfg_key(group.configs)] = overlap_values
         if selector.lower() == "all":
             return CommandResult(success=True, message=f"Set overlaps for all {len(target_groups)} samples: {overlap_values}")
         return CommandResult(success=True, message=f"Set overlaps for {selector}: {overlap_values}")
@@ -404,6 +444,8 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
                 results.append(f"  [red]✗[/red] {group.sample_name}: index {idx} out of range (0-{len(group.configs)-1})")
                 continue
             group.target_profile_index = idx
+            if selector.lower() == "all":
+                state.stitch_defaults.setdefault("target", {})[_cfg_key(group.configs)] = idx
             config_name = group.configs[idx] if group.configs else str(idx)
             results.append(f"  [green]✓[/green] {group.sample_name}: target={idx} ({config_name})")
         

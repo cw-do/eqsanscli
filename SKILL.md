@@ -640,6 +640,7 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/stitch smart` | Auto-analyze and stitch (recommended) |
 | `/stitch set <idx\|sample\|all> target <config_id>` | Set normalization target |
 | `/stitch set <idx\|sample\|all> overlap auto` | Auto-detect overlap Q ranges (widens until >=2 pts per profile) |
+| `/stitch build` (again) | Rebuilding keeps what you set: a sample already in the table with the same configs keeps its overlaps, target and trims; a new sample gets the overlaps/target last set with `/stitch set all …` for that config sequence (remembered in the session); only otherwise are overlaps auto-suggested. The message says which samples were kept, given your `all` values, or auto. `/stitch set all overlap auto` drops the remembered overlaps |
 | `/stitch run [sample]` | Execute stitching. Returns `data` `{"type": "stitch_result", "groups": [{"sample", "status", "files", "configs", "target_index", "target_config", "overlaps", "factors", "pairs": [{"pair", "overlap", "factor", "points_target", "points_other"}], "inputs": [{"file", "sha256"}], "unit", "output_file", "warnings"}]}`. The merged file's `#` header carries the same (target, per-pair overlap/factor/points, input sha256s, unit `1/cm` or `a.u.`); a factor outside 0.01–1000 warns (STC-05). The stitch table, with these results, is saved in the session |
 | `/stitch removerow <idx\|all\|--sample name>` | Remove stitch group(s) |
 | `/stitch removeconfig <idx\|all> <config_id>` | Remove a config from group(s) |
