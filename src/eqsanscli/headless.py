@@ -271,9 +271,12 @@ def run_headless() -> None:
                     continue
 
                 if data_type == "start_reduction":
+                    snapshot = state.snapshot_for_reduction()
                     reduction_result = _run_reduction_sync(
                         state, result.data["indices"], loop, router,
                     )
+                    if isinstance(reduction_result, dict) and snapshot:
+                        reduction_result["state_snapshot"] = snapshot
                     _emit({
                         "success": True,
                         "message": _strip_markup(result.message) if result.message else "",

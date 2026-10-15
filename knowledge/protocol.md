@@ -342,6 +342,12 @@ never carry a scale** (theirs were other experiments'). `--applynow` sets
 **s0 × f**, s0 being the scale the standard was reduced with (its input json);
 without s0 it refuses. A non-1.0 scale with no recorded origin is flagged.
 
+**SCL-05** · warning · enforced (`scale_service.stale_reason`; `/show config`, `/check`, `/reduce`)
+A calibration fits only the reduction it was made from. When a parameter that
+shapes the standard's I(Q) (mask, Q binning, incoherent fit, TOF cuts, wavelength
+step, flood, flux, normalization) differs from what the standard was reduced
+with, the scale is **stale**: recalibrate.
+
 ---
 
 ## STC — stitching

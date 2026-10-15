@@ -107,6 +107,12 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
             "[red]✗ Protocol checks block this reduction:[/red]\n"
             + "\n".join(f"    {f}" for f in proto_block)
             + "\n  [dim]/check for everything; /reduce … --force to reduce anyway.[/dim]"))
+    from eqsanscli.services import scale_service
+    stale_cfgs = sorted({r.configuration for r in selected
+                         if scale_service.stale_reason(state, r.configuration)})
+    stale_note = "\n".join(
+        f"[yellow]⚠ {c}: absolute scale is stale — {scale_service.stale_reason(state, c)}; "
+        f"recalibrate before trusting absolute units (SCL-05).[/yellow]" for c in stale_cfgs)
     if proto_block and force:
         report = ("[yellow]⚠ --force: reducing despite protocol findings: "
                   + "; ".join(f.rule for f in proto_block) + "[/yellow]\n" + report)
@@ -137,6 +143,8 @@ async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
         )
     elif advisory:
         prefix = report + "\n"
+    if stale_note:
+        prefix = stale_note + "\n" + prefix
 
     # Every output directory in play must be writable, or those rows would fail
     # the same way (or, before the guard, crash the app). Rows can each target a

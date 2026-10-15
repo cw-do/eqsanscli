@@ -270,14 +270,36 @@ async def handle_continue(args: list[str], state: SessionState) -> CommandResult
     except Exception as e:
         return CommandResult(success=False, message=f"Failed to load {best.name}: {e}")
 
+    # Resuming another folder's autosave (via the global breadcrumb) replaces
+    # this session with someone else's state — one way a folder's work is lost.
+    import re
+    force = any(a.lower() in ("--force", "-f") for a in args)
+    other_folder = best != cwd_autosave and best.parent != _sessions_dir()
+    m = re.search(r"/IPTS-(\d+)(?:/|$)", os.getcwd())
+    cwd_ipts = int(m.group(1)) if m else None
+    here_has_rows = any(t.rows for t in state.tables.values())
+    if other_folder and here_has_rows and not force:
+        return CommandResult(success=False, message=(
+            f"Not replacing this session ({sum(len(t.rows) for t in state.tables.values())} rows, "
+            f"IPTS-{state.ipts}) with another folder's autosave:\n  {best}\n"
+            f"  /continue --force to do it anyway, or /session load <name> for a saved one."))
+
     state.restore_from(loaded)
+
+    notes = ""
+    if other_folder:
+        notes += (f"\n  [yellow]⚠ This autosave belongs to another folder "
+                  f"({best.parent.parent.parent}), not {os.getcwd()}.[/yellow]")
+    if cwd_ipts and loaded.ipts and int(loaded.ipts) != cwd_ipts:
+        notes += (f"\n  [yellow]⚠ It is IPTS-{loaded.ipts}, but this folder is "
+                  f"IPTS-{cwd_ipts}.[/yellow]")
 
     return CommandResult(
         success=True,
         message=f"Continued from {source} (IPTS-{loaded.ipts}, "
         f"{len(loaded.tables)} tables, "
         f"{sum(len(t.rows) for t in loaded.tables.values())} total rows).\n"
-        f"  [dim]Path: {best}[/dim]",
+        f"  [dim]Path: {best}[/dim]" + notes,
     )
 
 

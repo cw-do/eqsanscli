@@ -89,8 +89,9 @@ def describe(state: "SessionState", cfg: str) -> str:
     if kind == "calibrate":
         how = (f"calibrate {p.get('measured_name', '?')}, {p.get('reference_name', '?')}, "
                f"{p.get('qmin')}–{p.get('qmax')}")
-        if p.get("stale"):
-            how += f"; STALE: {p['stale']}"
+        stale = stale_reason(state, cfg)
+        if stale:
+            how += f"; STALE: {stale} — recalibrate"
         text = f"{v:.7g} ({how}) → 1/cm"
     elif kind == "user":
         note = f": {p['note']}" if p.get("note") else ""
@@ -115,3 +116,56 @@ def plausibility(value: float) -> str:
 def unknown_origin(state: "SessionState", configs) -> list[str]:
     """Configs whose scale is not 1.0 and has no recorded origin (pre-0.48 sessions)."""
     return [c for c in configs if is_relative(state, c) is None]
+
+
+# --- staleness (SCL-05) ---------------------------------------------------------
+# Parameters that change the standard's I(Q), so a calibration made before they
+# changed no longer fits (mask, Q binning, incoherent fit, TOF cuts, wavelength
+# binning, flood, flux, normalization).
+CALIBRATION_PHYSICS = (
+    "maskfilename", "usedefaultmask", "defaultmask", "usemaskbacktubes",
+    "numqbins", "qbintype", "1dqbintype", "logqbinsperdecade",
+    "fitinelasticincoh", "selectminincoh", "incohfit_qmin", "incohfit_qmax",
+    "incohfit_factor", "incohfit_intensityweighted",
+    "cuttofmin", "cuttofmax", "wavelengthstep", "wavelengthsteptype",
+    "sensitivityfilename", "beamfluxfilename", "normalization",
+)
+
+
+def physics_snapshot(json_path) -> dict:
+    """The CALIBRATION_PHYSICS values the standard was actually reduced with,
+    from its drtsans input json ({} if unreadable)."""
+    import json
+    from eqsanscli.services.preset_service import _flatten_config
+    try:
+        with open(json_path) as f:
+            flat = _flatten_config(json.load(f))
+    except (OSError, ValueError):
+        return {}
+    # Only what the json states: a parameter it does not mention cannot be said
+    # to have changed (a partial or hand-made json would otherwise look stale).
+    return {k: flat[k] for k in CALIBRATION_PHYSICS if k in flat}
+
+
+def _same(a, b) -> bool:
+    if a in (None, "") and b in (None, ""):
+        return True
+    try:
+        return abs(float(a) - float(b)) <= 1e-9 * max(1.0, abs(float(a)))
+    except (TypeError, ValueError):
+        return str(a).strip().lower() == str(b).strip().lower()
+
+
+def stale_reason(state: "SessionState", cfg: str) -> str:
+    """'' when the calibration still fits the config, else which parameters moved."""
+    p = provenance(state, cfg) or {}
+    snap = p.get("physics")
+    if p.get("kind") != "calibrate" or not snap:
+        return ""
+    from eqsanscli.services.config_manager import get_config
+    cur = get_config(_key(state, cfg), state.configurations)
+    moved = [k for k, v in snap.items() if not _same(cur.get(k), v)]
+    if not moved:
+        return ""
+    more = f" (+{len(moved) - 3} more)" if len(moved) > 3 else ""
+    return f"{', '.join(moved[:3])}{more} changed since the standard was reduced"

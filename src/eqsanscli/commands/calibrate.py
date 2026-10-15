@@ -180,6 +180,7 @@ async def handle_calibrate(args: list[str], state: SessionState) -> CommandResul
             qmin=result.qmin, qmax=result.qmax, n_points=result.n_points,
             factor=f, std_rel=result.std_rel, porsil_scale_at_calibration=s0,
             record=payload.get("record"),
+            physics=scale_service.physics_snapshot(cal.input_json(measured_file)),
         )
 
     return CommandResult(success=True, message=msg, data=payload)

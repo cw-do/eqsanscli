@@ -556,6 +556,10 @@ class EQSANSApp(App):
             # thread starts — otherwise two fast submissions could both pass the
             # guard before the first worker sets it.
             self._set_job_running(True)
+            # The exact state these outputs come from, kept beside them.
+            snap = self.state.snapshot_for_reduction()
+            if snap:
+                log.write(Text.from_markup(f"  [dim]State for this reduction saved: {snap}[/dim]"))
             self.run_reduction_batch(
                 self.state.current_table,
                 data["indices"],

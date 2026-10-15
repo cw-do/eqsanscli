@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.50.0 | 2026-10-15 | **Stale calibrations flagged; session state kept** (sansbook review A4/A6). A calibration now stores the 21 I(Q)-shaping parameters the standard was actually reduced with (from its input json: mask, Q binning, incoherent fit, TOF cuts, wavelength step, flood, flux, normalization); when the config's current values differ — by any route, `/set`, preset or instrument resolver — the scale is **STALE** in `/show config`, `/check` (SCL-05) and a `/reduce` warning, until recalibrated. Verified no false alarms on IPTS-38269. Session state: the autosave keeps 5 generations, rotated when the session's shape changes (IPTS, tables, row counts, configs), so a session emptied by mistake survives in `_autosave.1.json`; every reduction (TUI, headless, autopilot) writes its exact state to `<outputdir>/.eqsanscli_reduce/<UTC>.json`; `/continue` warns on another folder/IPTS and won't replace a non-empty session with another folder's state without `--force`. |
 | 0.49.0 | 2026-10-15 | **Transmission pairing for dash-written displacement series + a `/check` command** (sansbook review A5/B4). `/matchruns` pairs `-d<N>`/`--d<N>` series (`S-sebs-5wt-SiNPs--d26` → `T-sebs-5wt-SiNPs`) — only when ≥2 rows share the name with different N, so a lone `PS-d8` (deuteration) never borrows `PS`'s transmission; condition-token matches are reported. On IPTS-37953's catalog the 56 rows reduced without a transmission now all pair, each to its own sample. `/matchruns` leads with "N rows without a transmission; M runs unused", each unused run beside its likely rows, and returns `transmission_report` in `data`. A missing transmission still **never blocks** (owner). New `/check` (findings as `data`): protocol validators, missing empty beam/transmission/background, unused transmissions, scale origin/range. `/reduce` refuses on blocking protocol findings (`--force` overrides). TBL-06 fixed: it flagged legitimate background-cell roles (8 false blocking findings on IPTS-37681). |
 | 0.48.0 | 2026-10-15 | **Absolute scale gets an origin and a unit; `/calibrate` fixed** (sansbook review A2/A3). Every config's `standardabsolutescale` now records where it came from (`state.scale_provenance`, `services/scale_service.py`): `default` (1.0, nothing calibrated → **a.u.**), `calibrate`, or `user` (explicit `/set config`, assumed correct → 1/cm). **Presets no longer carry a scale** — 4 of 6 held another experiment's 0.19, inherited silently (IPTS-37953: no standard, 0.1917, written as 1/cm). **`--applynow` sets s0 × f** (s0 = scale the porsil was reduced with, from its json; refuses without it) — it set f alone before. `/calibrate` also: parses `…30hz_frame_0_Iq.dat`; unknown reference or flag is an error (was silent NG3 / ignored); reports spread + neighbouring-window factors (>2 % warns); returns `data` (`type: calibration`) and writes `calibration_<cfg>.json`/`.png` + `calibration_history.jsonl`; one default window 0.01–0.03. `/show config`, `/matchruns`, plots (`I (a.u.)`) show the unit. Inexact preset matches prefer the same wavelength and warn. Autopilot uses the data payload and keeps a user-set scale. SCL-01..03 updated, SCL-04 new, STC-05 0.01–1000. |
 | 0.47.6 | 2026-10-15 | **`/plot` no longer uploads figures by itself.** With `DISPLAY` unset it saved the PNG and then uploaded it to here.now — a public 24 h link — without being asked, from every headless run, SSH session and autopilot plot step (sansbook review A1). It now only saves the PNG and says so; uploading is an explicit `/share`, which still works everywhere (TUI and headless) and now says the link is public. LLM routing emits `/share` only when the user asks to share/upload/publish. |
@@ -282,6 +283,50 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: stale calibrations flagged; the state behind each reduction kept (v0.50.0)
+
+From the sansbook planning review (items A4, A6).
+
+**A4 — stale calibration.** A calibration fits only the reduction it came from;
+change the mask or the Q binning and the porsil curve changes, but nothing said
+the scale was out of date (IPTS-38269 was recalibrated by hand three times in
+one afternoon). Rather than hooking `/set config` (which misses presets and the
+instrument resolver), the calibrate record now stores `physics`: the values of
+21 I(Q)-shaping parameters (`scale_service.CALIBRATION_PHYSICS`) **as the
+standard was reduced**, read from its input json — only those the json states,
+so a partial json cannot look stale. `stale_reason()` compares them with the
+config's current values whenever the scale is shown: `/show config`
+("STALE: maskfilename changed since the standard was reduced — recalibrate"),
+`/check` (SCL-05, warning) and a one-line `/reduce` warning. Recalibrating
+writes a new snapshot and clears it. Checked on IPTS-38269's real session: all
+21 parameters match both porsil jsons, no false alarm.
+
+**A6 — state kept.** `_autosave.json` was the only full copy of a session and
+was rewritten after every command; IPTS-37953's 56-row session was found
+replaced by an empty one. Now: (1) the autosave rotates to `_autosave.1…5.json`
+when the session's *shape* changes (IPTS, tables and row counts, config ids) —
+ordinary edits don't churn the history, and a session with rows is never
+overwritten by one without a copy surviving; (2) every reduction writes the
+exact state it runs with to `<outputdir>/.eqsanscli_reduce/<UTC>.json` — at the
+start of the TUI worker, the headless runner (`data.state_snapshot`) and
+autopilot's `_reduce_phase` (into the phase's own output dir), not in `/reduce`'s
+planning step; (3) `/continue` warns when it resumes another folder's autosave
+or an IPTS other than the folder's, and refuses to replace a session that has
+rows with another folder's state unless `--force`.
+
+Test hygiene: an existing autopilot test ran with the default `./output/` and
+would have written snapshots into the repo; it now uses `tmp_path`. My new test
+files use their own event loop (another test's `asyncio.run()` leaves none).
+
+`tests/test_records.py` (+5). 410 tests.
+
+**Files changed:** `services/scale_service.py`, `commands/calibrate.py`,
+`commands/check.py`, `commands/reduction.py`, `commands/session.py`,
+`models/session_state.py`, `services/autopilot.py`, `app.py`, `headless.py`,
+`services/llm_handler.py`, `knowledge/protocol.md`, SKILL.md,
+`tests/test_records.py`, `tests/test_autopilot_tostep.py`, tests (event loops),
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: dash displacement series pair; unused transmissions reported; /check (v0.49.0)
 
 From the sansbook planning review (items A5, B4), with the owner's change: a
@@ -435,19 +480,4 @@ The user preferred an instruction: the Getting Started banner now ends with
 tables." Text only.
 
 **Files changed:** `app.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
-
-### 2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)
-
-v0.47.3 shipped the release channel as `eqsanscli-safe`; the agreed name is
-`eqsanscli-stable`, parallel to `sansdir-stable`. Built fresh at
-`/SNS/EQSANS/shared/script/eqsanscli-stable` (new venv from the same
-`constraints.txt`, the same `.env`, launchers and `update.sh` with the wording
-changed) and released this tag into it, rather than `mv`-ing the old folder: a
-venv bakes its absolute path into `bin/` scripts and `pyvenv.cfg`.
-`/SNS/EQSANS/shared/bin/eqsanscli` now points at it and `eqsanscli-safe` is gone.
-In the repo only the `paths.py` docstring and CLAUDE.md named the folder; the
-v0.47.3 entries keep the name it actually shipped under, with a pointer here.
-
-**Files changed:** `paths.py` (docstring), CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.

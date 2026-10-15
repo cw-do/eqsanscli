@@ -219,6 +219,8 @@ class SessionState:
             "scale_provenance": self.scale_provenance,
             "command_history": self.command_history[-500:],  # keep last 500
         }
+        if os.path.basename(path) == "_autosave.json":
+            self._rotate_autosave(path, data)
         with open(path, "w") as f:
             json.dump(data, f, indent=2, default=str)
 
@@ -233,6 +235,57 @@ class SessionState:
             self.record_breadcrumb(path)
 
         return path
+
+    AUTOSAVE_GENERATIONS = 5
+
+    @staticmethod
+    def _shape(data: dict) -> tuple:
+        """What makes two autosaves different sessions, not two edits of one."""
+        tables = tuple(sorted((k, len((v or {}).get("rows", [])))
+                              for k, v in (data.get("tables") or {}).items()))
+        configs = tuple(sorted(k for k in (data.get("configurations") or {})))
+        return (data.get("ipts"), tables, configs)
+
+    def _rotate_autosave(self, path: str, new_data: dict) -> None:
+        """Keep _autosave.1 … .N when the session's shape changes.
+
+        The autosave was the only full copy of a session and was rewritten after
+        every command; IPTS-37953's 56-row, one-config state was found replaced
+        by an empty one with no trace of what did it. Rotating on a change of
+        shape (IPTS, tables and row counts, configurations) keeps history without
+        every edit pushing it out, and a session with rows is never overwritten
+        by one without a copy surviving in _autosave.1.json.
+        """
+        try:
+            with open(path) as f:
+                old = json.load(f)
+        except (OSError, ValueError):
+            return
+        if self._shape(old) == self._shape(new_data):
+            return
+        base = path[: -len(".json")]
+        n = self.AUTOSAVE_GENERATIONS
+        try:
+            if os.path.exists(f"{base}.{n}.json"):
+                os.remove(f"{base}.{n}.json")
+            for i in range(n - 1, 0, -1):
+                if os.path.exists(f"{base}.{i}.json"):
+                    os.replace(f"{base}.{i}.json", f"{base}.{i + 1}.json")
+            os.replace(path, f"{base}.1.json")
+        except OSError:
+            pass
+
+    def snapshot_for_reduction(self, output_dir: str | None = None) -> str | None:
+        """Write the exact state a reduction runs with beside its outputs:
+        <output_dir>/.eqsanscli_reduce/<UTC>.json. Returns the path (None on failure)."""
+        from datetime import datetime, timezone
+        try:
+            d = os.path.join(output_dir or self.output_directory, ".eqsanscli_reduce")
+            os.makedirs(d, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            return self.save(os.path.join(d, f"{stamp}.json"))
+        except OSError:
+            return None
 
     @classmethod
     def load(cls, name_or_path: str) -> SessionState:

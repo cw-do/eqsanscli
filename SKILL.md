@@ -643,7 +643,7 @@ Plot flags: `--save <path>`, `--loglog`, `--linlin`, `--kratky`, `--guinier`, `-
 
 | Command | Purpose |
 |---------|---------|
-| `/continue` | Resume previous session (cwd autosave, or the last one recorded anywhere) |
+| `/continue` | Resume previous session (cwd autosave, or the last one recorded anywhere). Warns when it is another folder's or another IPTS's; refuses to replace a session that has rows with another folder's state unless `--force`. History: the autosave keeps 5 generations (`_autosave.1…5.json`, rotated when the session's shape changes — IPTS, tables, row counts, configs), and every reduction writes the exact state it used to `<outputdir>/.eqsanscli_reduce/<UTC>.json` (headless: `data.state_snapshot`) |
 | `/session save [name]` | Save session (name optional) |
 | `/session load <name>` | Load named session |
 | `/session list` | Saved sessions, newest first, with date and IPTS |

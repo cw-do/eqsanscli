@@ -54,6 +54,11 @@ def collect_findings(state: SessionState) -> list[dict]:
         if scale_service.is_relative(state, cfg) is None:
             out.append({"rule": "SCL-04", "severity": "warning", "rows": [],
                         "message": f"{cfg}: {scale_service.describe(state, cfg)}"})
+        stale = scale_service.stale_reason(state, cfg)
+        if stale:
+            out.append({"rule": "SCL-05", "severity": "warning", "rows": [],
+                        "message": f"{cfg}: calibration is stale — {stale}; recalibrate "
+                                   f"(re-reduce the standard, /calibrate … --applynow)"})
         warn = scale_service.plausibility(scale_service.current_scale(state, cfg))
         if warn:
             out.append({"rule": "SCL-03", "severity": "warning", "rows": [],

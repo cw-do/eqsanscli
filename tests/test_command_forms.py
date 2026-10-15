@@ -29,7 +29,11 @@ from eqsanscli.models.session_state import SessionState
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()   # own loop: another test's asyncio.run() leaves none
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _router():

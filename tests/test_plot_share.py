@@ -25,7 +25,11 @@ from eqsanscli.services import share_service
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()   # own loop: another test's asyncio.run() leaves none
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_plot_without_display_saves_and_does_not_upload(tmp_path, monkeypatch):

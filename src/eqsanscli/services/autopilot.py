@@ -110,6 +110,10 @@ def _reduce_phase(
 
     Returns (n_success, n_fail). Stops early on cancellation.
     """
+    if rows:
+        snap = state.snapshot_for_reduction(output_dir)   # the state these outputs come from
+        if snap:
+            write(f"  [dim]State for this reduction saved: {snap}[/dim]")
     from eqsanscli.services.reduction_service import (
         blocking_problems, make_slice_progress, output_dir_problem, reduce_row,
         timeslice_estimate,

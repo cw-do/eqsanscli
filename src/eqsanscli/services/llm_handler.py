@@ -504,7 +504,8 @@ SETTINGS:
 /settings multiprocessing <n>   - Set parallel reduction jobs (1-4, default 1)
 
 SESSION:
-/continue                       - Resume most recent session (autosave or named)
+/continue                       - Resume most recent session (autosave or named); /continue --force replaces a non-empty session with another folder's
+  Earlier states: .eqsanscli/sessions/_autosave.1.json … .5.json (previous session shapes) and <outputdir>/.eqsanscli_reduce/<UTC>.json (state of each reduction) — load one with /session load <path>
 /session list                   - List saved sessions
 /session save [name]            - Save current session
 /session load <name>            - Load a saved session

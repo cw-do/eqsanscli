@@ -7,6 +7,21 @@ the version it shipped in.
 
 ---
 
+### 2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)
+
+v0.47.3 shipped the release channel as `eqsanscli-safe`; the agreed name is
+`eqsanscli-stable`, parallel to `sansdir-stable`. Built fresh at
+`/SNS/EQSANS/shared/script/eqsanscli-stable` (new venv from the same
+`constraints.txt`, the same `.env`, launchers and `update.sh` with the wording
+changed) and released this tag into it, rather than `mv`-ing the old folder: a
+venv bakes its absolute path into `bin/` scripts and `pyvenv.cfg`.
+`/SNS/EQSANS/shared/bin/eqsanscli` now points at it and `eqsanscli-safe` is gone.
+In the repo only the `paths.py` docstring and CLAUDE.md named the folder; the
+v0.47.3 entries keep the name it actually shipped under, with a pointer here.
+
+**Files changed:** `paths.py` (docstring), CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-29: release channel eqsanscli-safe; data folders via EQSANSCLI_ROOT (v0.47.3)
 
 (Renamed `eqsanscli-stable` in v0.47.4.)

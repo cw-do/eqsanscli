@@ -47,7 +47,11 @@ def _classes(s: SessionState) -> dict[int, str]:
 
 
 def _reclass(s: SessionState, *args: str):
-    return asyncio.get_event_loop().run_until_complete(handle_reclass(list(args), s))
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(handle_reclass(list(args), s))
+    finally:
+        loop.close()
 
 
 def test_prefixed_name_matches_only_that_prefix():

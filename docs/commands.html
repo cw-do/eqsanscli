@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.49.0</div>
+          data reduction tool &middot; v0.50.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -442,7 +442,7 @@ Autopilot steps (13 total):
 <h2 id="session">Session<a class="anchor" href="#session">#</a></h2>
 <section class="cmd" id="cmd-continue">
 <h3>/continue<a class="anchor" href="#cmd-continue">#</a><span class="src">session.py</span></h3>
-<p class="summary">Resume previous session (cwd autosave, or the last one recorded anywhere)</p>
+<p class="summary">Resume previous session (cwd autosave, or the last one recorded anywhere). Warns when it is another folder&#x27;s or another IPTS&#x27;s; refuses to replace a session that has rows with another folder&#x27;s state unless <code>--force</code>. History: the autosave keeps 5 generations (<code>_autosave.1…5.json</code>, rotated when the session&#x27;s shape changes — IPTS, tables, row counts, configs), and every reduction writes the exact state it used to <code>&lt;outputdir&gt;/.eqsanscli_reduce/&lt;UTC&gt;.json</code> (headless: <code>data.state_snapshot</code>)</p>
 </section>
 <section class="cmd" id="cmd-save">
 <h3>/save<a class="anchor" href="#cmd-save">#</a><span class="src">session.py</span></h3>

@@ -235,12 +235,13 @@ def test_snapshot_empty_when_only_matchruns_ran():
 
 # --- --from 9 must not re-apply scale (which would mark done rows modified) ----
 
-def test_from_9_skips_scale_block_and_keeps_done_rows(monkeypatch):
+def test_from_9_skips_scale_block_and_keeps_done_rows(monkeypatch, tmp_path):
     from eqsanscli.integrations.drtsans_runner import ReductionResult
     import eqsanscli.services.reduction_service as rs
     import eqsanscli.services.autopilot as ap
 
     st = SessionState()
+    st.output_directory = str(tmp_path)    # autopilot writes its session + state snapshot here
     st.ipts = 38151
     st.catalog = pd.DataFrame([dict(run_number=1, title="S-x 4m 2.5a",
                                     detector_distance=4.0, wavelength=2.5, frequency=30)])

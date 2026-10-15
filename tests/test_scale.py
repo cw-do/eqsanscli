@@ -38,7 +38,11 @@ REF = REPO / "absscale_reference" / "NG3_B1_1413_4col.dat"
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()   # own loop: another test's asyncio.run() leaves none
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _porsil(tmp: Path, stem: str, f_true: float, s0: float | None, suffix="_Iq.dat"):
