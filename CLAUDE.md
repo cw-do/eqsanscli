@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.47.6 | 2026-10-15 | **`/plot` no longer uploads figures by itself.** With `DISPLAY` unset it saved the PNG and then uploaded it to here.now — a public 24 h link — without being asked, from every headless run, SSH session and autopilot plot step (sansbook review A1). It now only saves the PNG and says so; uploading is an explicit `/share`, which still works everywhere (TUI and headless) and now says the link is public. LLM routing emits `/share` only when the user asks to share/upload/publish. |
 | 0.47.5 | 2026-10-02 | Startup banner: one line under Getting Started — *Best viewed in a terminal window of at least 120×35*. Chosen over auto-resizing the window (`ESC[8;35;120t`), which only some terminals honour (VTE, macOS Terminal, PuTTY; not xterm by default, Windows Terminal, VS Code, tmux/screen) and which would leave the user's window resized after exit. Text only. |
 | 0.47.4 | 2026-10-01 | Naming: the release folder is **`eqsanscli-stable`** (was `eqsanscli-safe`), matching `sansdir-stable`. Rebuilt fresh at the new path (a venv bakes its own path into its scripts, so it is not moved), `/SNS/EQSANS/shared/bin/eqsanscli` repointed, the old folder removed. Docstring and CLAUDE.md only in the repo. |
 | 0.47.3 | 2026-09-29 | **Release channel `eqsanscli-safe`** (renamed `eqsanscli-stable` in 0.47.4; same protocol as `sansdir-stable`): users run a non-editable install of a tagged commit. Six data lookups (`.env`, `knowledge/`, `protocol.md`, `preset_configs/` ×2, `absscale_reference/`) walked up four levels from `__file__` — inside a site-packages install that is the venv, so they would have found nothing, silently. They now go through `eqsanscli.paths.app_root()`: `EQSANSCLI_ROOT` (exported by the launchers, previously unused) when it names a folder, else the repo root. `tests/test_paths.py` forbids the old pattern. |
@@ -279,6 +280,29 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: /plot never uploads by itself (v0.47.6)
+
+From the sansbook planning review (2026-10-15, item A1), verified in code:
+`handle_plot` auto-saved the figure when `DISPLAY` was unset and then called
+`share_files([result_path])`, uploading it anonymously to here.now — a public
+URL, valid 24 h — with no flag and no prompt. That covered every headless run,
+every SSH session without X, and autopilot's step 13. NOTE.md logs commands, not
+their messages, so whether earlier experiments' figures were uploaded cannot be
+told from the records (the links have expired either way).
+
+Now: the PNG is saved and the message points to it, with a hint that `/share`
+exists. `/share` is unchanged in reach — an explicit request uploads, in the TUI
+and in headless mode (owner: "when requested explicitly, you can share") — and
+its reply says the link is public. The LLM prompt restricts `/share` to explicit
+share/upload/publish requests. SKILL.md and README say the same.
+
+`tests/test_plot_share.py` (+2): no-display `/plot` writes a PNG with
+`share_files` patched to fail the test; `/share` names the link as public.
+
+**Files changed:** `commands/data.py`, `commands/share.py`,
+`services/llm_handler.py`, SKILL.md, README.md, `tests/test_plot_share.py`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-02: banner recommends a 120×35 window (v0.47.5)
 
 Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible
@@ -372,39 +396,3 @@ under their existing names. STC-01 extended. `tests/test_rheo_matching.py` (+2).
 **Files changed:** `services/matching_service.py`, `services/merge_service.py`,
 `knowledge/protocol.md`, `tests/test_rheo_matching.py`, CLAUDE.md, docs
 (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-09-29: command forms the app tells you to type now work (v0.47.1)
-
-Reported: `/session load` lists sessions and ends "Usage: /load session <name>";
-typing that answered "Use /session load <name> or /session list instead." Asked to
-check the other usages for the same kind of error.
-
-Audit, three passes over every `/command` mention in the code's string literals,
-SKILL.md, README, `knowledge/` and `docs/pages/`:
-1. every top-level command resolves in the router — clean (hits were Rich markup
-   `[/dim]` and paths);
-2. every distinct `/command subcommand` form dispatched through the real router
-   on an empty session in a sandbox cwd/HOME (skipping shell, ONCat, share,
-   zipnsend, exit, rm/mv/cp/cd), flagging "Unknown …"/"… instead" replies — after
-   discarding noise (trailing punctuation, flags probed without their value,
-   prose like "/instrument find the mask"), two real errors: the listing hint
-   above and README's `/save session myexperiment`;
-3. every `--flag` written after a `/command` is parsed somewhere — one miss:
-   `/help` advertised `/confirm … (--status, --comment)`. There is no `--status`,
-   and `handle_confirm` silently skipped anything it did not parse, so
-   `/confirm --status No` would still write status=Yes to the IPTS record.
-
-Fixes: the listing hint reads `/session load <name>`; `/load session` and `/save
-session` forward to `/session load`/`save` instead of refusing (both spellings are
-natural, and the TUI does not special-case the session command); README uses
-`/session save`; `/help` shows `/confirm [ipts] [--comment <text>]`; `/confirm`
-refuses any argument it does not understand (autopilot calls `run_confirm_data`
-directly, unaffected).
-
-`tests/test_command_forms.py` (+4): the listing's hint round-trips to a load; both
-spellings forward; `/confirm --status No` writes nothing; and pass 3 as a
-permanent check (no false positives today). Pass 2 is too noisy for a test.
-
-**Files changed:** `commands/session.py`, `commands/export.py`, `app.py`,
-README.md, `tests/test_command_forms.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.

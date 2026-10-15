@@ -7,6 +7,42 @@ the version it shipped in.
 
 ---
 
+### 2026-09-29: command forms the app tells you to type now work (v0.47.1)
+
+Reported: `/session load` lists sessions and ends "Usage: /load session <name>";
+typing that answered "Use /session load <name> or /session list instead." Asked to
+check the other usages for the same kind of error.
+
+Audit, three passes over every `/command` mention in the code's string literals,
+SKILL.md, README, `knowledge/` and `docs/pages/`:
+1. every top-level command resolves in the router — clean (hits were Rich markup
+   `[/dim]` and paths);
+2. every distinct `/command subcommand` form dispatched through the real router
+   on an empty session in a sandbox cwd/HOME (skipping shell, ONCat, share,
+   zipnsend, exit, rm/mv/cp/cd), flagging "Unknown …"/"… instead" replies — after
+   discarding noise (trailing punctuation, flags probed without their value,
+   prose like "/instrument find the mask"), two real errors: the listing hint
+   above and README's `/save session myexperiment`;
+3. every `--flag` written after a `/command` is parsed somewhere — one miss:
+   `/help` advertised `/confirm … (--status, --comment)`. There is no `--status`,
+   and `handle_confirm` silently skipped anything it did not parse, so
+   `/confirm --status No` would still write status=Yes to the IPTS record.
+
+Fixes: the listing hint reads `/session load <name>`; `/load session` and `/save
+session` forward to `/session load`/`save` instead of refusing (both spellings are
+natural, and the TUI does not special-case the session command); README uses
+`/session save`; `/help` shows `/confirm [ipts] [--comment <text>]`; `/confirm`
+refuses any argument it does not understand (autopilot calls `run_confirm_data`
+directly, unaffected).
+
+`tests/test_command_forms.py` (+4): the listing's hint round-trips to a load; both
+spellings forward; `/confirm --status No` writes nothing; and pass 3 as a
+permanent check (no false positives today). Pass 2 is too noisy for a test.
+
+**Files changed:** `commands/session.py`, `commands/export.py`, `app.py`,
+README.md, `tests/test_command_forms.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-09-29: rheo-SANS matching, prefix-aware /reclass, default model (v0.47.0)
 
 Field report from IPTS-37681 (CTAB in a Couette cell, two shear planes × six

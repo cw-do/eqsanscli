@@ -243,17 +243,13 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
     if opts.save:
         msg += f"\n  Saved: [bold cyan]{os.path.abspath(result_path)}[/bold cyan]"
 
-    # In headless/no-display mode, auto-share the saved plot via here.now
+    # No display: the PNG stays on disk. It used to be uploaded to here.now
+    # automatically — a public link, without being asked, from every headless
+    # run, SSH session and autopilot plot. Uploading is now only ever an
+    # explicit /share.
     if no_display and opts.save and os.path.exists(result_path):
-        try:
-            from eqsanscli.services.share_service import share_files
-            ok, url, err = share_files([result_path])
-            if ok and url:
-                msg += f"\n  Shared: {url}"
-            elif err:
-                msg += f"\n  [dim]Share failed: {err}[/dim]"
-        except Exception as e:
-            msg += f"\n  [dim]Share failed: {e}[/dim]"
+        msg += ("\n  [dim]No display here — open the PNG on a machine with one, "
+                "or /share it for a public 24 h link.[/dim]")
 
     return CommandResult(success=True, message=msg)
 

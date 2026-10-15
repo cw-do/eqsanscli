@@ -420,6 +420,8 @@ STITCH:
 
 SHARE & EMAIL:
 /share <file|pattern>           - Share files via here.now (anonymous, 24h expiry, returns URL)
+  /share uploads to a PUBLIC host. Emit it ONLY when the user explicitly asks to share, upload,
+  publish or get a link — never just to show a plot ("plot X", "show me the curve" → /plot only).
 /zipnsend <email> [--pattern <glob>] [--dir <path>] [--subject <text>] - Zip files and email. Default pattern: merged*.txt from outputdir
   When user asks to "send", "mail", "email" data/files to someone, use /zipnsend.
   Examples of user intent → command:

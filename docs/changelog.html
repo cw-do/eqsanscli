@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.47.5</div>
+          data reduction tool &middot; v0.47.6</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,13 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-29-command-forms-the-app-tells-you-to-type-now-work-v0471">2026-09-29: command forms the app tells you to type now work (v0.47.1)<a class="anchor" href="#2026-09-29-command-forms-the-app-tells-you-to-type-now-work-v0471">#</a></h3>
+<p>Reported: <code><a href="commands.html#cmd-session">/session load</a></code> lists sessions and ends &quot;Usage: /load session &lt;name&gt;&quot;; typing that answered &quot;Use /session load &lt;name&gt; or /session list instead.&quot; Asked to check the other usages for the same kind of error.</p>
+<p>Audit, three passes over every <code>/command</code> mention in the code&#x27;s string literals, SKILL.md, README, <code>knowledge/</code> and <code>docs/pages/</code>:</p>
+<ol><li>every top-level command resolves in the router — clean (hits were Rich markup <code>[/dim]</code> and paths);</li><li>every distinct <code>/command subcommand</code> form dispatched through the real router on an empty session in a sandbox cwd/HOME (skipping shell, ONCat, share, zipnsend, exit, rm/mv/cp/cd), flagging &quot;Unknown …&quot;/&quot;… instead&quot; replies — after discarding noise (trailing punctuation, flags probed without their value, prose like &quot;/instrument find the mask&quot;), two real errors: the listing hint above and README&#x27;s <code><a href="commands.html#cmd-save">/save session myexperiment</a></code>;</li><li>every <code>--flag</code> written after a <code>/command</code> is parsed somewhere — one miss: <code><a href="commands.html#cmd-help">/help</a></code> advertised <code><a href="commands.html#cmd-confirm">/confirm … (--status, --comment)</a></code>. There is no <code>--status</code>, and <code>handle_confirm</code> silently skipped anything it did not parse, so <code><a href="commands.html#cmd-confirm">/confirm --status No</a></code> would still write status=Yes to the IPTS record.</li></ol>
+<p>Fixes: the listing hint reads <code><a href="commands.html#cmd-session">/session load &lt;name&gt;</a></code>; <code><a href="commands.html#cmd-load">/load session</a></code> and <code><a href="commands.html#cmd-save">/save session</a></code> forward to <code><a href="commands.html#cmd-session">/session load</a></code>/<code>save</code> instead of refusing (both spellings are natural, and the TUI does not special-case the session command); README uses <code><a href="commands.html#cmd-session">/session save</a></code>; <code><a href="commands.html#cmd-help">/help</a></code> shows <code><a href="commands.html#cmd-confirm">/confirm [ipts] [--comment &lt;text&gt;]</a></code>; <code><a href="commands.html#cmd-confirm">/confirm</a></code> refuses any argument it does not understand (autopilot calls <code>run_confirm_data</code> directly, unaffected).</p>
+<p><code>tests/test_command_forms.py</code> (+4): the listing&#x27;s hint round-trips to a load; both spellings forward; <code><a href="commands.html#cmd-confirm">/confirm --status No</a></code> writes nothing; and pass 3 as a permanent check (no false positives today). Pass 2 is too noisy for a test.</p>
+<p><strong>Files changed:</strong> <code>commands/session.py</code>, <code>commands/export.py</code>, <code>app.py</code>, README.md, <code>tests/test_command_forms.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-29-rheo-sans-matching-prefix-aware-reclass-default-model-v0470">2026-09-29: rheo-SANS matching, prefix-aware /reclass, default model (v0.47.0)<a class="anchor" href="#2026-09-29-rheo-sans-matching-prefix-aware-reclass-default-model-v0470">#</a></h3>
 <p>Field report from IPTS-37681 (CTAB in a Couette cell, two shear planes × six shear rates × 4m2.5a/8m10a). Three problems, one session:</p>
 <p><strong><code><a href="commands.html#cmd-reclass">/reclass --sample</a></code> could not tell S- from T-.</strong> The user wrote &quot;S-emptycupbob are background scattering and T-emptycupbob are background transmission&quot;; the LLM emitted <code><a href="commands.html#cmd-reclass">/reclass --sample EmptyCupBob bkg</a></code> then <code>… bkgtrans</code>. Both ran, but <code>_match_catalog_title</code> strips the title&#x27;s S-/T- prefix and the LLM had to drop the pattern&#x27;s, so each command hit all ten runs: first all BkgS, then all BkgT. It also revived two runs the user had set to <code>ignore</code> (N → BkgS). Now a pattern starting <code>S-</code>/<code>T-</code> matches only titles with that prefix; a new prefix-aware class <code>background</code> (alias <code>bkgsample</code>) does S-→BkgS / T-→BkgT like <code>sample</code> does; a literal class that contradicts a run&#x27;s prefix is applied but warned; and a name-based reclass leaves <code>ignore</code> runs alone (naming the run by number still revives it — <code>ignore</code> is only ever set by hand). LLM prompt: the example &quot;treat emptyticell as background&quot; now emits <code>background</code>, plus the S-/T- split example. <a href="protocol.html#rule-CAT-08" class="rule-ref">CAT-08</a>.</p>
@@ -697,7 +704,7 @@
 </main>
 <footer><div class="bar">
   <span>EQSANS &middot; SNS/ORNL &middot; <a href="https://github.com/cw-do/eqsanscli">github.com/cw-do/eqsanscli</a></span>
-  <span>Generated 2026-10-02 by <code>docs/generate.py</code></span>
+  <span>Generated 2026-10-15 by <code>docs/generate.py</code></span>
 </div></footer>
 <script src="search.js"></script>
 </body>

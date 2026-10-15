@@ -268,7 +268,7 @@ the browserless service options.
 
 | Command | Description |
 |---------|-------------|
-| `/share <file\|pattern>` | Share files via here.now (anonymous, 24h link) |
+| `/share <file\|pattern>` | Share files via here.now (anonymous, **public** 24h link). Only on request — `/plot` never uploads by itself |
 | `/share *.png` | Share all PNG files |
 | `/share *_4m10a_Iq.dat` | Share matching I(Q) files |
 | `/zipnsend <email>` | Zip `merged*.txt` from outputdir and email |

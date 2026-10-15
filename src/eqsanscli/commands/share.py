@@ -63,6 +63,7 @@ async def handle_share(args: list[str], state: SessionState) -> CommandResult:
     return CommandResult(
         success=True,
         message=f"Shared {len(resolved)} file(s) → [bold cyan]{url}[/bold cyan]\n"
-        f"  (anonymous, expires in 24 hours)\n\n"
+        f"  Uploaded to here.now: a PUBLIC link — anyone with the URL can open it "
+        f"until it expires in 24 hours.\n\n"
         f"Files:\n{file_list}",
     )

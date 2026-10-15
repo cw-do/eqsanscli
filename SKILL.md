@@ -374,6 +374,10 @@ To share plots or data files with the user:
 This returns a here.now URL (anonymous, expires in 24h). Send this URL to the user
 so they can view the results.
 
+**Only when the user asks.** `/share` uploads to a public host; anyone with the URL
+can open it. Never run it just to show a plot. `/plot` never uploads by itself — with
+no display it saves the PNG and reports the path (before v0.47.6 it auto-uploaded).
+
 ### Emailing Results
 
 To zip and email data files directly:
