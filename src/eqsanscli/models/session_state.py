@@ -193,7 +193,9 @@ class SessionState:
         if path is None:
             path = str(_sessions_dir() / f"{self.name}.json")
 
+        from eqsanscli import __version__
         data = {
+            "eqsanscli_version": __version__,     # which build wrote this file
             "name": self.name,
             "ipts": self.ipts,
             "catalog_data": self.catalog_data,
@@ -217,6 +219,10 @@ class SessionState:
             "instrument_provenance": self.instrument_provenance,
             "title_overrides": self.title_overrides,
             "scale_provenance": self.scale_provenance,
+            # The stitch table (with what each run produced) survives the process;
+            # before v0.51.0 it had to be rebuilt in the same process as /stitch run.
+            "stitch_groups": [g.to_dict() if hasattr(g, "to_dict") else g
+                              for g in (self.stitch_groups or [])],
             "command_history": self.command_history[-500:],  # keep last 500
         }
         if os.path.basename(path) == "_autosave.json":
@@ -327,6 +333,10 @@ class SessionState:
         state.tables = {
             k: WorkingTable.from_dict(v) for k, v in data.get("tables", {}).items()
         }
+        if data.get("stitch_groups"):
+            from eqsanscli.services.merge_service import StitchGroup
+            state.stitch_groups = [StitchGroup.from_dict(g) for g in data["stitch_groups"]
+                                   if isinstance(g, dict)]
         if not state.tables:
             state.tables = {"default": WorkingTable("default")}
         return state

@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.51.0 | 2026-10-15 | **Records of what was done** (sansbook review B1–B3, B6, B7, B9, B10). Merged files get a `#` header: eqsanscli version, target, per pair overlap/factor/points in the window, input sha256s, unit (`1/cm` or `a.u.` from the scale origin); a stitch factor outside 0.01–1000 warns (STC-05, now enforced). One function (`stitch_and_save`) produces the file, the `/stitch run` data (`type: stitch_result`) and the stitch-table record, so they agree; autopilot stores the target/overlaps/factors it actually used; the stitch table is saved in the session. NOTE.md logs results (`→` lines: calibration, stitch factors, check counts, matchruns pairing, reduction done/failed) and each day's eqsanscli version. Headless `data` is markup-free (Rich's parser — labels like `[4m2.5a30hz]` survive). Rows keep every output file and the rescue note. `/version` returns data incl. drtsans/Mantid (`--probe`, cached). `overlap auto` defaults to 6 as documented. |
 | 0.50.0 | 2026-10-15 | **Stale calibrations flagged; session state kept** (sansbook review A4/A6). A calibration now stores the 21 I(Q)-shaping parameters the standard was actually reduced with (from its input json: mask, Q binning, incoherent fit, TOF cuts, wavelength step, flood, flux, normalization); when the config's current values differ — by any route, `/set`, preset or instrument resolver — the scale is **STALE** in `/show config`, `/check` (SCL-05) and a `/reduce` warning, until recalibrated. Verified no false alarms on IPTS-38269. Session state: the autosave keeps 5 generations, rotated when the session's shape changes (IPTS, tables, row counts, configs), so a session emptied by mistake survives in `_autosave.1.json`; every reduction (TUI, headless, autopilot) writes its exact state to `<outputdir>/.eqsanscli_reduce/<UTC>.json`; `/continue` warns on another folder/IPTS and won't replace a non-empty session with another folder's state without `--force`. |
 | 0.49.0 | 2026-10-15 | **Transmission pairing for dash-written displacement series + a `/check` command** (sansbook review A5/B4). `/matchruns` pairs `-d<N>`/`--d<N>` series (`S-sebs-5wt-SiNPs--d26` → `T-sebs-5wt-SiNPs`) — only when ≥2 rows share the name with different N, so a lone `PS-d8` (deuteration) never borrows `PS`'s transmission; condition-token matches are reported. On IPTS-37953's catalog the 56 rows reduced without a transmission now all pair, each to its own sample. `/matchruns` leads with "N rows without a transmission; M runs unused", each unused run beside its likely rows, and returns `transmission_report` in `data`. A missing transmission still **never blocks** (owner). New `/check` (findings as `data`): protocol validators, missing empty beam/transmission/background, unused transmissions, scale origin/range. `/reduce` refuses on blocking protocol findings (`--force` overrides). TBL-06 fixed: it flagged legitimate background-cell roles (8 false blocking findings on IPTS-37681). |
 | 0.48.0 | 2026-10-15 | **Absolute scale gets an origin and a unit; `/calibrate` fixed** (sansbook review A2/A3). Every config's `standardabsolutescale` now records where it came from (`state.scale_provenance`, `services/scale_service.py`): `default` (1.0, nothing calibrated → **a.u.**), `calibrate`, or `user` (explicit `/set config`, assumed correct → 1/cm). **Presets no longer carry a scale** — 4 of 6 held another experiment's 0.19, inherited silently (IPTS-37953: no standard, 0.1917, written as 1/cm). **`--applynow` sets s0 × f** (s0 = scale the porsil was reduced with, from its json; refuses without it) — it set f alone before. `/calibrate` also: parses `…30hz_frame_0_Iq.dat`; unknown reference or flag is an error (was silent NG3 / ignored); reports spread + neighbouring-window factors (>2 % warns); returns `data` (`type: calibration`) and writes `calibration_<cfg>.json`/`.png` + `calibration_history.jsonl`; one default window 0.01–0.03. `/show config`, `/matchruns`, plots (`I (a.u.)`) show the unit. Inexact preset matches prefer the same wavelength and warn. Autopilot uses the data payload and keeps a user-set scale. SCL-01..03 updated, SCL-04 new, STC-05 0.01–1000. |
@@ -283,6 +284,56 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: stitch records, NOTE.md results, plain headless data, /version data (v0.51.0)
+
+From the sansbook planning review (items B1, B2, B3, B6, B7, B9, B10).
+
+**Stitch (B1, B2, B9).** The factor was computed in `_scaling_factor`, applied
+and discarded; the merged file said `# I(Q)` and nothing else; `/stitch run`
+returned only a message; `stitch_groups` was never saved; and autopilot stored a
+default target while it stitched with the smart plan's (and widened overlaps on
+retry), so the state disagreed with the file. Now `stitch_profiles` can record
+each pair, and `merge_service.stitch_and_save` is the one place that stitches,
+writes the header (version, UTC, target, per-pair overlap / factor / points of
+each profile in the window, inputs with sha256, unit) and returns the record —
+used by `/stitch run` (now `data: {"type": "stitch_result", "groups": […]}`) and
+by the smart planner (`StitchPlan.record`), from which autopilot's
+`_record_stitch` updates the stored group. `StitchGroup` gains `factors` and
+`pairs`, and the session saves `stitch_groups`. Units come from
+`scale_service.unit_for_configs` (a.u. when uncalibrated). Factors outside
+0.01–1000 warn (STC-05 enforced). Verified on IPTS-38269's porsil: identical to
+the old stitch to the file's 6 significant digits; factor 1.0045.
+
+**NOTE.md (B3).** `note_service.result_summary` adds an indented `→` line after
+`/calibrate`, `/stitch run`, `/check`, `/matchruns`, scale changes, and at the
+end of each reduction (TUI worker and headless runner). Day headers name the
+eqsanscli version and commit; session files record `eqsanscli_version`.
+
+**Headless (B6).** `_emit` strips Rich markup from `data` too; `_strip_markup`
+now uses Rich's own parser, so labels like `[4m2.5a30hz]` (which the old regex
+deleted from messages) survive. Rows store `outputs` (every file the reduction
+wrote) and `note`; `/show table` data adds `output_dir`, `output_override`,
+`outputs`, `note`.
+
+**/version (B7).** Already existed; it now returns data (`version_info`:
+eqsanscli, commit from the release's VERSION or git, root, drtsans channel,
+drtsans and Mantid versions). drtsans is asked only on `/version --probe`
+(runs a two-line script through the drtsans wrapper; 6 s here: drtsans 1.35.0,
+Mantid 6.16.1.2) and cached in `~/.eqsanscli/drtsans_versions.json`.
+
+**B10.** `/stitch set … overlap auto` defaulted to 4 points; its usage and
+`_auto_overlap_centered` said 6. Now 6.
+
+`tests/test_stitch_records.py` (+8). 418 tests.
+
+**Files changed:** `services/merge_service.py`, `services/smart_stitch.py`,
+`services/autopilot.py`, `services/scale_service.py`, `services/note_service.py`,
+`services/reduction_service.py`, `commands/stitch.py`, `commands/router.py`,
+`commands/catalog.py`, `models/session_state.py`, `models/working_table.py`,
+`version_info.py` (new), `headless.py`, `app.py`, `knowledge/protocol.md`,
+SKILL.md, `tests/test_stitch_records.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: stale calibrations flagged; the state behind each reduction kept (v0.50.0)
 
 From the sansbook planning review (items A4, A6).
@@ -467,17 +518,3 @@ share/upload/publish requests. SKILL.md and README say the same.
 **Files changed:** `commands/data.py`, `commands/share.py`,
 `services/llm_handler.py`, SKILL.md, README.md, `tests/test_plot_share.py`,
 CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-02: banner recommends a 120×35 window (v0.47.5)
-
-Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible
-only as a request to the terminal (`ESC[8;rows;cols t`, what `resize -s` sends),
-honoured by VTE terminals (the analysis-cluster desktop), macOS Terminal and
-PuTTY, but ignored by xterm (allowWindowOps off by default), Windows Terminal,
-VS Code, tmux/screen and maximized windows — and a resize outlives the program.
-The user preferred an instruction: the Getting Started banner now ends with
-"Best viewed in a terminal window of at least 120×35 — enlarge it for readable
-tables." Text only.
-
-**Files changed:** `app.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.

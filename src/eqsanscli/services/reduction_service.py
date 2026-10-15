@@ -214,6 +214,9 @@ def reduce_row(
     elif result.success:
         row.status = "done"
         row.output_file = result.output_file
+        row.outputs = sorted(glob.glob(os.path.join(effective_dir, f"{output_name}.*"))
+                             + glob.glob(os.path.join(effective_dir, f"{output_name}_*")))
+        row.note = getattr(result, "note", "") or ""
     else:
         row.status = "error"
 

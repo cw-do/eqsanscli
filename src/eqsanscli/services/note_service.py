@@ -76,6 +76,13 @@ def _append_with_day_header(path: str, line: str) -> None:
     with open(path, "a") as f:
         if needs_header:
             f.write("\n" + today + "\n")
+            try:
+                from eqsanscli.version_info import commit
+                from eqsanscli import __version__
+                c = commit()
+                f.write(f"_eqsanscli {__version__}{' (' + c + ')' if c else ''}_\n\n")
+            except Exception:
+                pass
         f.write(line)
         if not line.endswith("\n"):
             f.write("\n")
@@ -124,3 +131,60 @@ def tail_note(state: SessionState, n_lines: int) -> str | None:
         return None
     lines = [ln for ln in content.splitlines() if ln.strip()]
     return "\n".join(lines[-n_lines:])
+
+
+def _plain(text: str) -> str:
+    import re
+    return re.sub(r"\[/?[a-zA-Z0-9 #_.,=-]*\]", "", text)
+
+
+def result_summary(cmd_name: str, result) -> str | None:
+    """One line saying what a command produced — NOTE.md was a list of commands
+    with no numbers (sansbook review B3). None when there is nothing to add."""
+    d = result.data if isinstance(getattr(result, "data", None), dict) else {}
+    kind = d.get("type")
+    if kind == "calibration":
+        s = (f"f={d['factor']:.6g} over {d['qmin']}–{d['qmax']} ({d['n_points']} pts, "
+             f"spread {d['std_rel']:.1%}) vs {os.path.basename(d['reference'])}")
+        if d.get("applied"):
+            s += f"; applied {d['new_scale']:.6g} (= s0 {d['porsil_scale']:.6g} × f) to {d['config']}"
+        return s
+    if kind == "stitch_result":
+        parts = []
+        for g in d.get("groups", []):
+            if g.get("status") != "done":
+                parts.append(f"{g['sample']}: FAILED")
+                continue
+            ovl = "; ".join(f"{p['overlap'][0]:.4g}–{p['overlap'][1]:.4g} ×{p['factor']:.4g}"
+                            for p in g["pairs"])
+            parts.append(f"{g['sample']} (target {g['target_config']}, {g['unit']}): {ovl}")
+        return " | ".join(parts) if parts else None
+    if kind == "check":
+        f = d.get("findings", [])
+        nb = sum(x["severity"] == "blocking" for x in f)
+        rules = sorted({x["rule"] for x in f})
+        return f"{len(f)} finding(s), {nb} blocking: {', '.join(rules) or 'none'}"
+    if kind == "working_table" and cmd_name == "matchruns":
+        rep = d.get("transmission_report") or {}
+        return (f"{len(d.get('rows', []))} rows; {len(rep.get('rows_without', []))} without "
+                f"transmission; {len(rep.get('unused', []))} transmission run(s) unused")
+    if kind == "reduction_complete":
+        failed = [r["sample"] for r in d.get("results", []) if r.get("status") == "error"]
+        return (f"{d.get('success', 0)} done, {d.get('failed', 0)} failed"
+                + (f": {', '.join(failed[:10])}" if failed else ""))
+    for line in (result.message or "").splitlines():
+        if "Absolute scale:" in line:
+            return _plain(line.strip())
+    return None
+
+
+def log_result(state: SessionState, text: str | None) -> None:
+    """Append `    → text` under the last logged command. Silent on failure."""
+    if not text:
+        return
+    try:
+        path = note_path(state)
+        _ensure_note_file(path)
+        _append_with_day_header(path, f"    → {_plain(text)}")
+    except Exception:
+        pass

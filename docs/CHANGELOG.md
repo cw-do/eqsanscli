@@ -7,6 +7,20 @@ the version it shipped in.
 
 ---
 
+### 2026-10-02: banner recommends a 120×35 window (v0.47.5)
+
+Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible
+only as a request to the terminal (`ESC[8;rows;cols t`, what `resize -s` sends),
+honoured by VTE terminals (the analysis-cluster desktop), macOS Terminal and
+PuTTY, but ignored by xterm (allowWindowOps off by default), Windows Terminal,
+VS Code, tmux/screen and maximized windows — and a resize outlives the program.
+The user preferred an instruction: the Getting Started banner now ends with
+"Best viewed in a terminal window of at least 120×35 — enlarge it for readable
+tables." Text only.
+
+**Files changed:** `app.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)
 
 v0.47.3 shipped the release channel as `eqsanscli-safe`; the agreed name is

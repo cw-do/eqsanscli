@@ -310,6 +310,12 @@ def build_working_table_display(state: SessionState) -> list[dict]:
                 "BkgTr": _run_cell(row.background_trans, lookup),
                 "Empty": _run_cell(row.empty_beam, lookup),
                 "Status": row.status,
+                # Data-only fields (the TUI shows the columns above): where this
+                # row writes, everything it produced, and any rescue note.
+                "output_override": row.output_override,
+                "output_dir": (row.output_override or "").strip() or state.output_directory,
+                "outputs": list(row.outputs or []),
+                "note": row.note,
             }
         )
     return rows

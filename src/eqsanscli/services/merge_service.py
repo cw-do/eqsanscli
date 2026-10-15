@@ -21,6 +21,10 @@ class StitchGroup:
     target_profile_index: int = 0
     output_file: str = ""
     status: str = "ready"
+    # Filled by a run (stitch_and_save): the factor applied per adjacent pair and
+    # the full record — what produced output_file, also in its header.
+    factors: list[float] = field(default_factory=list)
+    pairs: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -31,6 +35,8 @@ class StitchGroup:
             "target_profile_index": self.target_profile_index,
             "output_file": self.output_file,
             "status": self.status,
+            "factors": self.factors,
+            "pairs": self.pairs,
         }
 
     @classmethod
@@ -75,6 +81,7 @@ def stitch_profiles(
     profiles: list[SimpleNamespace],
     overlaps: list[float],
     target_profile_index: int = 0,
+    record: list | None = None,
 ) -> SimpleNamespace:
     """Stitch together I(Q) profiles with overlapping Q domains.
 
@@ -136,6 +143,8 @@ def stitch_profiles(
         other = profiles[idx]
         start_q, end_q = overlap_pairs[idx]
         scale = _scaling_factor(target.mod_q, target.intensity, other.mod_q, other.intensity, start_q, end_q)
+        if record is not None:
+            record.append(_pair_record(idx, idx + 1, start_q, end_q, scale, target, other))
         other = _scale(other, scale)
         other = _extract(other, other.mod_q < end_q)
         target = _extract(target, target.mod_q > start_q)
@@ -148,6 +157,8 @@ def stitch_profiles(
         other = profiles[idx]
         start_q, end_q = overlap_pairs[idx - 1]
         scale = _scaling_factor(target.mod_q, target.intensity, other.mod_q, other.intensity, start_q, end_q)
+        if record is not None:
+            record.append(_pair_record(idx - 1, idx, start_q, end_q, scale, target, other))
         other = _scale(other, scale)
         other = _extract(other, other.mod_q > start_q)
         target = _extract(target, target.mod_q < end_q)
@@ -157,12 +168,26 @@ def stitch_profiles(
     return target
 
 
-def save_iq(profile: SimpleNamespace, path: str) -> None:
-    """Save I(Q) profile to tab-separated text file matching MantidAscii format."""
+def _pair_record(lo: int, hi: int, start_q: float, end_q: float, scale: float,
+                 target: SimpleNamespace, other: SimpleNamespace) -> dict:
+    in_t = int(np.sum((target.mod_q >= start_q) & (target.mod_q <= end_q)))
+    in_o = int(np.sum((other.mod_q >= start_q) & (other.mod_q <= end_q)))
+    return {"pair": [lo, hi], "overlap": [float(start_q), float(end_q)], "factor": float(scale),
+            "points_target": in_t, "points_other": in_o}
+
+
+def save_iq(profile: SimpleNamespace, path: str, header: list[str] | None = None,
+            unit: str = "1/cm") -> None:
+    """Save I(Q) profile to tab-separated text file matching MantidAscii format.
+
+    `header` lines are written as `# …` comments (numpy loadtxt, sasview and
+    drtsans readers skip them)."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write("# I(Q)\n")
-        f.write("#Q (1/A)\tI (1/cm)\tdI (1/cm)\n")
+        for line in header or []:
+            f.write(f"# {line}\n")
+        f.write(f"#Q (1/A)\tI ({unit})\tdI ({unit})\n")
         for i in range(len(profile.mod_q)):
             q = profile.mod_q[i]
             intensity = profile.intensity[i]
@@ -468,11 +493,59 @@ def _auto_suggest_overlaps(files: list[str]) -> list[float]:
     return overlaps
 
 
-def run_stitch(group: StitchGroup) -> str:
+def stitch_and_save(files: list[str], configs: list[str], overlaps: list[float],
+                    target_index: int, output_file: str, unit: str | None = None) -> dict:
+    """Stitch, write the merged file with a header saying how, return that record.
+
+    The record — target, per-pair overlap / factor / points in the window,
+    inputs with sha256, unit — is what `/stitch run` returns, what the stitch
+    table keeps, and what the file's header says, so the three agree (sansbook
+    review B1/B2/B9). A factor outside 0.01–1000 is flagged (STC-05).
+    """
+    from datetime import datetime, timezone
+
+    from eqsanscli import __version__
+    from eqsanscli.services.calibration_service import sha256
+    from eqsanscli.services.scale_service import STITCH_PLAUSIBLE
+
+    profiles = [load_iq_native(f) for f in files]
+    pairs: list[dict] = []
+    stitched = stitch_profiles(profiles, overlaps, target_index, record=pairs)
+    pairs.sort(key=lambda p: p["pair"][0])
+    lo, hi = STITCH_PLAUSIBLE
+    warnings = [f"pair {configs[p['pair'][0]]}+{configs[p['pair'][1]]}: factor {p['factor']:.4g} "
+                f"outside {lo}–{hi} (STC-05)" for p in pairs if not lo <= p["factor"] <= hi]
+    unit_label = unit or "1/cm"
+    header = [f"merged by eqsanscli {__version__} on "
+              f"{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+              f"target: {configs[target_index]} (index {target_index})"]
+    for k, p in enumerate(pairs, 1):
+        a, b = p["pair"]
+        header.append(f"pair {k}: {configs[a]} + {configs[b]}  overlap {p['overlap'][0]:.5g}–"
+                      f"{p['overlap'][1]:.5g}  factor {p['factor']:.6g}  points {configs[a]} "
+                      f"{p['points_target'] if a == target_index else p['points_other']} / "
+                      f"{configs[b]} {p['points_target'] if b == target_index else p['points_other']}")
+    inputs = [{"file": os.path.abspath(f), "sha256": sha256(f)} for f in files]
+    header.append("inputs: " + "; ".join(f"{os.path.basename(i['file'])} sha256 {i['sha256'][:16]}…"
+                                         for i in inputs))
+    header.append(f"units: I in {unit_label}"
+                  + ("  (relative: no calibrated standard)" if unit_label == "a.u." else ""))
+    save_iq(stitched, output_file, header=header,
+            unit=unit_label if unit_label in ("a.u.", "1/cm") else "1/cm")
+    return {"files": [os.path.abspath(f) for f in files], "configs": list(configs),
+            "target_index": target_index, "target_config": configs[target_index],
+            "overlaps": [float(v) for v in overlaps],
+            "factors": [p["factor"] for p in pairs], "pairs": pairs, "inputs": inputs,
+            "unit": unit_label, "output_file": os.path.abspath(output_file),
+            "warnings": warnings}
+
+
+def run_stitch(group: StitchGroup, unit: str | None = None) -> str:
     """Execute stitching for a single group. Returns output file path."""
-    profiles = [load_iq_native(f) for f in group.files]
-    stitched = stitch_profiles(profiles, group.overlaps, group.target_profile_index)
-    save_iq(stitched, group.output_file)
+    rec = stitch_and_save(group.files, group.configs, group.overlaps,
+                          group.target_profile_index, group.output_file, unit=unit)
+    group.factors = rec["factors"]
+    group.pairs = rec["pairs"]
     group.status = "done"
     return group.output_file
 

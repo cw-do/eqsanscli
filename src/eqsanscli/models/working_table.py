@@ -39,6 +39,11 @@ class WorkingTableRow:
     # here instead of the session-wide output dir — used to keep a data-heavy
     # (e.g. time-sliced) sample in its own folder. Empty = use session-wide.
     output_override: str = ""
+    # Every file the last reduction of this row produced (json, .out/.err, I(Q),
+    # Iqxqy, frame and slice files) and its rescue note, if any — before v0.51.0
+    # only one I(Q) path was kept.
+    outputs: list = field(default_factory=list)
+    note: str = ""
 
     # Fields that affect reduction output — changing any of these on a "done"
     # row means the previous output is stale and needs re-reduction.
@@ -103,6 +108,8 @@ class WorkingTableRow:
             "output_file": self.output_file,
             "configuration_override": self.configuration_override,
             "output_override": self.output_override,
+            "outputs": self.outputs,
+            "note": self.note,
         }
 
     @classmethod

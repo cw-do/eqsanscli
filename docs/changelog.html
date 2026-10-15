@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.50.0</div>
+          data reduction tool &middot; v0.51.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,9 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-10-02-banner-recommends-a-12035-window-v0475">2026-10-02: banner recommends a 120×35 window (v0.47.5)<a class="anchor" href="#2026-10-02-banner-recommends-a-12035-window-v0475">#</a></h3>
+<p>Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible only as a request to the terminal (<code>ESC[8;rows;cols t</code>, what <code>resize -s</code> sends), honoured by VTE terminals (the analysis-cluster desktop), macOS Terminal and PuTTY, but ignored by xterm (allowWindowOps off by default), Windows Terminal, VS Code, tmux/screen and maximized windows — and a resize outlives the program. The user preferred an instruction: the Getting Started banner now ends with &quot;Best viewed in a terminal window of at least 120×35 — enlarge it for readable tables.&quot; Text only.</p>
+<p><strong>Files changed:</strong> <code>app.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-10-01-release-folder-renamed-eqsanscli-stable-v0474">2026-10-01: release folder renamed eqsanscli-stable (v0.47.4)<a class="anchor" href="#2026-10-01-release-folder-renamed-eqsanscli-stable-v0474">#</a></h3>
 <p>v0.47.3 shipped the release channel as <code>eqsanscli-safe</code>; the agreed name is <code>eqsanscli-stable</code>, parallel to <code>sansdir-stable</code>. Built fresh at <code>/SNS/EQSANS/shared/script/eqsanscli-stable</code> (new venv from the same <code>constraints.txt</code>, the same <code>.env</code>, launchers and <code>update.sh</code> with the wording changed) and released this tag into it, rather than <code>mv</code>-ing the old folder: a venv bakes its absolute path into <code>bin/</code> scripts and <code>pyvenv.cfg</code>. <code>/SNS/EQSANS/shared/bin/eqsanscli</code> now points at it and <code>eqsanscli-safe</code> is gone. In the repo only the <code>paths.py</code> docstring and CLAUDE.md named the folder; the v0.47.3 entries keep the name it actually shipped under, with a pointer here.</p>
 <p><strong>Files changed:</strong> <code>paths.py</code> (docstring), CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>

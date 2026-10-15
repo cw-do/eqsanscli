@@ -620,7 +620,7 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/stitch smart` | Auto-analyze and stitch (recommended) |
 | `/stitch set <idx\|sample\|all> target <config_id>` | Set normalization target |
 | `/stitch set <idx\|sample\|all> overlap auto` | Auto-detect overlap Q ranges (widens until >=2 pts per profile) |
-| `/stitch run [sample]` | Execute stitching |
+| `/stitch run [sample]` | Execute stitching. Returns `data` `{"type": "stitch_result", "groups": [{"sample", "status", "files", "configs", "target_index", "target_config", "overlaps", "factors", "pairs": [{"pair", "overlap", "factor", "points_target", "points_other"}], "inputs": [{"file", "sha256"}], "unit", "output_file", "warnings"}]}`. The merged file's `#` header carries the same (target, per-pair overlap/factor/points, input sha256s, unit `1/cm` or `a.u.`); a factor outside 0.01–1000 warns (STC-05). The stitch table, with these results, is saved in the session |
 | `/stitch removerow <idx\|all\|--sample name>` | Remove stitch group(s) |
 | `/stitch removeconfig <idx\|all> <config_id>` | Remove a config from group(s) |
 | `/stitch reorder <idx\|all> <c1,c2,...>` | Reorder configs in group(s) |
@@ -682,7 +682,18 @@ apart from the samples it calibrates.
 | `/compare <a> <b>` | Side-by-side parameter diff of two configs or presets |
 
 Every successful command is auto-logged to `NOTE.md` (read-only commands
-excepted), so replaying it reproduces the reduction.
+excepted), so replaying it reproduces the reduction. Under `/calibrate`,
+`/stitch run`, `/check`, `/matchruns`, scale changes and each reduction an indented
+`→` line records the result (factor, window, spread, applied value; per-sample
+stitch factors; finding counts; unpaired rows; done/failed). Each day's header
+names the eqsanscli version and commit.
+
+Headless `data` is plain text (Rich markup is stripped from payloads as well as
+messages). `/version` returns `{"type": "version", "eqsanscli", "commit", "root",
+"drtsans_channel", "drtsans", "mantid", …}`; `/version --probe` asks drtsans for
+its and Mantid's versions once and caches them. Rows in `/show table` data carry
+`output_dir`, `output_override`, `outputs` (every file the last reduction wrote)
+and `note`.
 
 ### Settings and shell
 

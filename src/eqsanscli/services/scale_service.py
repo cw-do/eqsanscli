@@ -169,3 +169,17 @@ def stale_reason(state: "SessionState", cfg: str) -> str:
         return ""
     more = f" (+{len(moved) - 3} more)" if len(moved) > 3 else ""
     return f"{', '.join(moved[:3])}{more} changed since the standard was reduced"
+
+
+def unit_for_configs(state: "SessionState", configs) -> str:
+    """'a.u.', '1/cm', 'mixed a.u./1/cm' or '1/cm?' for the configs of one stitch
+    group (a 30 Hz pseudo-config 'cfg_frame0' maps to 'cfg')."""
+    import re
+    units = {unit(state, re.sub(r"_frame\d$", "", c)) for c in configs}
+    if units == {"a.u."}:
+        return "a.u."
+    if units == {"1/cm"}:
+        return "1/cm"
+    if "a.u." in units:
+        return "mixed a.u./1/cm"
+    return "1/cm?"

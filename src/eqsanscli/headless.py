@@ -27,8 +27,22 @@ from eqsanscli.commands.router import CommandResult, CommandRouter
 from eqsanscli.models.session_state import SessionState
 
 
+def _strip_data(obj: Any) -> Any:
+    """Markup-free copy of a data payload: table cells carried Rich tags
+    (`"172760\n[dim]title[/dim]"`, `"[bold cyan]*[/bold cyan]"`) into the JSON."""
+    if isinstance(obj, str):
+        return _strip_markup(obj) if "[" in obj else obj
+    if isinstance(obj, dict):
+        return {k: _strip_data(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_strip_data(v) for v in obj]
+    return obj
+
+
 def _emit(obj: dict[str, Any]) -> None:
-    """Write a JSON line to stdout and flush."""
+    """Write a JSON line to stdout and flush (data stripped of Rich markup)."""
+    if obj.get("data") is not None:
+        obj = {**obj, "data": _strip_data(obj["data"])}
     sys.stdout.write(json.dumps(obj, default=str) + "\n")
     sys.stdout.flush()
 
@@ -40,9 +54,16 @@ def _progress(msg: str) -> None:
 
 
 def _strip_markup(text: str) -> str:
-    """Remove Rich markup tags like [bold], [green], [/dim] etc."""
-    import re
-    return re.sub(r"\[/?[a-zA-Z_ #0-9.]+\]", "", text)
+    """Remove Rich markup tags like [bold], [green], [/dim] etc.
+
+    Rich's own parser, so only real tags go: the old regex also ate labels such
+    as "[4m2.5a30hz]" (a tag must start with a letter, #, / or @)."""
+    try:
+        from rich.text import Text
+        return Text.from_markup(text).plain
+    except Exception:
+        import re
+        return re.sub(r"\[/?[a-zA-Z_#@][a-zA-Z_ #0-9.]*\]", "", text)
 
 
 def _register_commands(router: CommandRouter, state: SessionState) -> None:
@@ -54,8 +75,11 @@ def _register_commands(router: CommandRouter, state: SessionState) -> None:
     register_all(router)
 
     async def _handle_version(args, state):
-        from eqsanscli import __version__
-        return CommandResult(success=True, message=f"eqsanscli v{__version__}")
+        import asyncio
+        from eqsanscli.version_info import version_info, version_message
+        probe = any(a.lower() == "--probe" for a in args)
+        info = await asyncio.to_thread(version_info, state.drtsans_version or "default", probe)
+        return CommandResult(success=True, message=version_message(info), data=info)
 
     async def _handle_exit(args, state):
         return CommandResult(success=True, message="exit")
@@ -277,6 +301,12 @@ def run_headless() -> None:
                     )
                     if isinstance(reduction_result, dict) and snapshot:
                         reduction_result["state_snapshot"] = snapshot
+                    try:
+                        from eqsanscli.services.note_service import log_result, result_summary
+                        log_result(state, result_summary("reduce", CommandResult(
+                            success=True, data=reduction_result)))
+                    except Exception:
+                        pass
                     _emit({
                         "success": True,
                         "message": _strip_markup(result.message) if result.message else "",

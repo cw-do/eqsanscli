@@ -507,6 +507,12 @@ class EQSANSApp(App):
             f"  Output: {output_dir}"
         )
         try:
+            from eqsanscli.services.note_service import log_result
+            log_result(self.state, f"reduction: {n_success} done, {n_fail} failed"
+                       + (f", {n_cancelled} cancelled" if n_cancelled else ""))
+        except Exception:
+            pass
+        try:
             self.state.save(SessionState.auto_save_path())
         except Exception:
             pass
@@ -1195,7 +1201,11 @@ class EQSANSApp(App):
         return CommandResult(success=True, message="Guide opened. Type /guide off to close. Scroll with mouse wheel or arrow keys when focused.")
 
     async def _handle_version(self, args: list[str], state: SessionState) -> CommandResult:
-        return CommandResult(success=True, message=f"eqsanscli v{__version__}")
+        import asyncio
+        from eqsanscli.version_info import version_info, version_message
+        probe = any(a.lower() == "--probe" for a in args)
+        info = await asyncio.to_thread(version_info, state.drtsans_version or "default", probe)
+        return CommandResult(success=True, message=version_message(info), data=info)
 
     async def _handle_list(self, args: list[str], state: SessionState) -> CommandResult:
         return CommandResult(

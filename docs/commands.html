@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.50.0</div>
+          data reduction tool &middot; v0.51.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -399,7 +399,7 @@ Autopilot steps (13 total):
 <tr><td><code>/stitch removeconfig</code></td><td>Remove a config from group(s)</td></tr>
 <tr><td><code>/stitch removerow</code></td><td>Remove stitch group(s)</td></tr>
 <tr><td><code>/stitch reorder</code></td><td>Reorder configs in group(s)</td></tr>
-<tr><td><code>/stitch run</code></td><td>Execute stitching</td></tr>
+<tr><td><code>/stitch run</code></td><td>Execute stitching. Returns <code>data</code> <code>{&quot;type&quot;: &quot;stitch_result&quot;, &quot;groups&quot;: [{&quot;sample&quot;, &quot;status&quot;, &quot;files&quot;, &quot;configs&quot;, &quot;target_index&quot;, &quot;target_config&quot;, &quot;overlaps&quot;, &quot;factors&quot;, &quot;pairs&quot;: [{&quot;pair&quot;, &quot;overlap&quot;, &quot;factor&quot;, &quot;points_target&quot;, &quot;points_other&quot;}], &quot;inputs&quot;: [{&quot;file&quot;, &quot;sha256&quot;}], &quot;unit&quot;, &quot;output_file&quot;, &quot;warnings&quot;}]}</code>. The merged file&#x27;s <code>#</code> header carries the same (target, per-pair overlap/factor/points, input sha256s, unit <code>1/cm</code> or <code>a.u.</code>); a factor outside 0.01–1000 warns (<a href="protocol.html#rule-STC-05" class="rule-ref">STC-05</a>). The stitch table, with these results, is saved in the session</td></tr>
 <tr><td><code>/stitch set</code></td><td>Set normalization target</td></tr>
 <tr><td><code>/stitch show</code></td><td>Display stitch table</td></tr>
 <tr><td><code>/stitch smart</code></td><td>Auto-analyze and stitch (recommended)</td></tr>

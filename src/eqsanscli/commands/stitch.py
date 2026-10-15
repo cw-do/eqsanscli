@@ -352,7 +352,7 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
 
     if field == "overlap":
         if args[2].lower() == "auto":
-            n_points = 4
+            n_points = 6   # matches the usage text and _auto_overlap_centered (was 4)
             if len(args) > 3:
                 try:
                     n_points = int(args[3].lstrip("n="))
@@ -420,21 +420,36 @@ async def _handle_run(args: list[str], state: SessionState) -> CommandResult:
     if not to_run:
         return CommandResult(success=False, message="No stitchable groups found.")
 
+    from eqsanscli.services import scale_service
+    from eqsanscli.services.merge_service import stitch_and_save
+
     results = []
+    records = []
     n_ok = 0
     n_fail = 0
     for group in to_run:
         try:
-            out = run_stitch(group)
+            rec = stitch_and_save(group.files, group.configs, group.overlaps,
+                                  group.target_profile_index, group.output_file,
+                                  unit=scale_service.unit_for_configs(state, group.configs))
+            group.factors, group.pairs, group.status = rec["factors"], rec["pairs"], "done"
             n_ok += 1
-            results.append(f"  [green]✓[/green] {group.sample_name} → {os.path.basename(out)}")
+            fac = ", ".join(f"{f:.4g}" for f in rec["factors"])
+            results.append(f"  [green]✓[/green] {group.sample_name} → {os.path.basename(group.output_file)}"
+                           f"  [dim](target {rec['target_config']}, factor {fac}, {rec['unit']})[/dim]")
+            results.extend(f"    [yellow]⚠ {w}[/yellow]" for w in rec["warnings"])
+            records.append({"sample": group.sample_name, "status": "done", **rec})
         except Exception as e:
             n_fail += 1
             group.status = "error"
             results.append(f"  [red]✗[/red] {group.sample_name} — {e}")
+            records.append({"sample": group.sample_name, "status": "error", "error": str(e),
+                            "files": group.files, "configs": group.configs,
+                            "overlaps": group.overlaps, "target_index": group.target_profile_index})
 
     msg = f"Stitch complete: {n_ok} succeeded, {n_fail} failed.\n" + "\n".join(results)
-    return CommandResult(success=n_fail == 0, message=msg)
+    return CommandResult(success=n_fail == 0, message=msg,
+                         data={"type": "stitch_result", "groups": records})
 
 
 async def _handle_save(args: list[str], state: SessionState) -> CommandResult:

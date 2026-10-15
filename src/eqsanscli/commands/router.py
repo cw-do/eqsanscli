@@ -119,8 +119,12 @@ class CommandRouter:
         # Auto-log successful commands to NOTE.md (best-effort, never break dispatch)
         if result.success:
             try:
-                from eqsanscli.services.note_service import maybe_log_command
+                from eqsanscli.services.note_service import (
+                    _LOG_DENYLIST, log_result, maybe_log_command, result_summary,
+                )
                 maybe_log_command(state, cmd_name, f"/{text}")
+                if cmd_name not in _LOG_DENYLIST:
+                    log_result(state, result_summary(cmd_name, result))
             except Exception:
                 pass
 

@@ -375,7 +375,7 @@ absolute scale.
 30 Hz frame-skipping data stitches its own `frame_0` + `frame_1` pair and is
 never mixed with 60 Hz data for the same sample.
 
-**STC-05** · warning · unenforced
+**STC-05** · warning · enforced (`merge_service.stitch_and_save`)
 Scale factors applied while stitching stay near 1 — a large factor means the
 configurations disagree, usually from a wrong background, transmission or
 absolute scale rather than a stitching problem. Plausible range: **0.01–1000**,

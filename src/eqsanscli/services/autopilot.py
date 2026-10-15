@@ -98,6 +98,30 @@ def _fmt(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
+def _record_stitch(state: SessionState, sample: str, rec: dict) -> None:
+    """Make the stored stitch group say what actually produced the merged file.
+
+    Step 12 stitches with the smart plan's target and, on retry, wider overlaps,
+    while the groups stored in Step 10/11 held a different default target and no
+    output file — so the state disagreed with the file (sansbook review B9).
+    """
+    from eqsanscli.services.merge_service import StitchGroup
+    if not rec:
+        return
+    group = next((g for g in state.stitch_groups if g.sample_name == sample), None)
+    if group is None:
+        group = StitchGroup(sample_name=sample)
+        state.stitch_groups.append(group)
+    group.files = rec["files"]
+    group.configs = rec["configs"]
+    group.overlaps = rec["overlaps"]
+    group.target_profile_index = rec["target_index"]
+    group.output_file = rec["output_file"]
+    group.factors = rec["factors"]
+    group.pairs = rec["pairs"]
+    group.status = "done"
+
+
 def _reduce_phase(
     rows: list,
     state: SessionState,
@@ -1476,7 +1500,12 @@ def run_autopilot_sync(
                             quality_metrics=[],
                             removed_configs=[],
                         )
-                        output_file = stitch_service.execute_plan(plan)
+                        from eqsanscli.services import scale_service
+                        output_file = stitch_service.execute_plan(
+                            plan, unit=scale_service.unit_for_configs(state, configs))
+                        _record_stitch(state, sample, plan.record)
+                        for w in plan.record.get("warnings", []):
+                            write(f"    [yellow]⚠[/yellow] {w}")
                         n_stitched += 1
                         label = f"n={n_pts}" if attempt > 0 else "n=6"
                         write(f"  [green]✓[/green] {sample} → {os.path.basename(output_file)} [{label}]")
