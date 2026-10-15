@@ -100,6 +100,8 @@ def export_reduction_script(
     output_dir: str,
     output_path: str,
     ipts: int = 0,
+    scale_notes: dict[str, str] | None = None,
+    stitch_groups: list | None = None,
 ) -> str:
     lines: list[str] = []
     _emit_header(lines, table, ipts, output_dir)
@@ -108,8 +110,8 @@ def export_reduction_script(
     # parameters (so a per-row override / cloned config is honoured), the second
     # names the output files. Filenames follow the physics config for the same
     # reason WorkingTableRow.output_stem does — a clone label like "4m10a_v2"
-    # must never reach a filename. (The emitted script keeps the legacy
-    # eqsanstools "." → "o" spelling, e.g. 2.5m2.5a → 2o5m2o5a.)
+    # must never reach a filename. Since v0.53.0 the names are the CLI's own
+    # (2.5m2.5a, not the legacy 2o5m2o5a), so the script's files are the CLI's.
     groups: dict[tuple[str, str], list] = {}
     for row in table.rows:
         groups.setdefault((row.configuration, row.physical_configuration), []).append(row)
@@ -133,8 +135,14 @@ def export_reduction_script(
         lines.append("")
 
     for config_label, file_label, rows, config_params in all_configs:
+        note = (scale_notes or {}).get(config_label)
+        if note:
+            lines.append(f"# Absolute scale ({config_label}): {note}")
         _emit_config_block(lines, config_label, rows, config_params, ipts,
                            path_replacements, file_label=file_label)
+
+    if stitch_groups:
+        _emit_stitch_block(lines, stitch_groups)
 
     lines.append(f"\nreduction_confirm({ipts})")
     lines.append("")
@@ -205,7 +213,13 @@ def _emit_config_block(
     lines.append(f"    eq._outputdir = output_directory")
     lines.append(f"    eq._ipts = ipts_number")
 
-    # Emit config params as EQVar attributes
+    # Emit config params as EQVar attributes. EQVar makes an attribute
+    # `_<key>` for every top-level key of its Default.json configuration and
+    # copies each into the drtsans json, so any such parameter can be set this
+    # way. Emit the classic list always, plus every other top-level parameter
+    # whose value differs from the template default — before v0.53.0 a
+    # non-default logqbinsperdecade, wedge, normalization, timeslice offset …
+    # was silently not reproduced (sansbook review B8).
     eqvar_map = {
         "standardabsolutescale": "_standardabsolutescale",
         "sampleaperturesize": "_sampleaperturesize",
@@ -233,6 +247,14 @@ def _emit_config_block(
         "usetimeslice": "_usetimeslice",
         "timesliceinterval": "_timesliceinterval",
     }
+    from eqsanscli.services.config_manager import _load_json_defaults
+    defaults = _load_json_defaults()
+    _skip = {"outputdir", "outputfilename"}
+    for key in sorted(config_params):
+        if key in eqvar_map or key in _skip or "." in key or key.startswith("elasticreference"):
+            continue
+        if key in defaults and config_params[key] != defaults[key]:
+            eqvar_map[key] = f"_{key}"
 
     for param_key, eqvar_attr in eqvar_map.items():
         val = config_params.get(param_key)
@@ -257,7 +279,27 @@ def _emit_config_block(
     lines.append("    eq._samscatt = str(samscatt[i])")
     lines.append("    eq._samtrans = str(samtrans[i])")
 
-    safe_label = file_label.replace(".", "o")
-    lines.append(f"    eq._filename = str(sample_names[i]) + '_{safe_label}'")
+    lines.append(f"    eq._filename = str(sample_names[i]) + '_{file_label}'")
     lines.append("    reduceNow(eq)")
+    lines.append("")
+
+
+def _emit_stitch_block(lines: list[str], groups: list) -> None:
+    """Re-create the session's merged files with drtsans's own stitch_profiles
+    (target, overlaps and inputs from the stitch table; `/export script --stitch`)."""
+    todo = [g for g in groups if len(getattr(g, "files", []) or []) >= 2 and g.output_file]
+    if not todo:
+        return
+    lines.append(f"# {'=' * 60}")
+    lines.append("# Stitching — from the session's stitch table (target index, overlaps)")
+    lines.append(f"# {'=' * 60}")
+    lines.append("stitch_table = [")
+    for g in todo:
+        lines.append(f"    ({g.files!r}, {list(g.overlaps)!r}, {int(g.target_profile_index)}, "
+                     f"{g.output_file!r}),")
+    lines.append("]")
+    lines.append("for files, overlaps, target, merged_file in stitch_table:")
+    lines.append("    profiles = [load_iqmod(f) for f in files]")
+    lines.append("    merged = stitch_profiles(profiles, overlaps, target_profile_index=target)")
+    lines.append("    save_iqmod(merged, merged_file)")
     lines.append("")

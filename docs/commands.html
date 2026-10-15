@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.52.0</div>
+          data reduction tool &middot; v0.53.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -379,7 +379,7 @@ Autopilot steps (13 total):
 </section>
 <section class="cmd" id="cmd-export-script">
 <h3>/export script<a class="anchor" href="#cmd-export-script">#</a><span class="src">export.py</span></h3>
-<p class="summary">Export standalone Python script (generated layout)</p>
+<p class="summary">Export standalone Python script (generated layout). Re-resolves the instrument calibration files first, writes every parameter that differs from the template default (as <code>eq._&lt;name&gt;</code>), names files as the CLI does (<code>2.5m2.5a</code>), and notes each config&#x27;s absolute scale and its origin. <code>--stitch</code> appends a <code>drtsans.stitch.stitch_profiles</code> block from the session&#x27;s stitch table (target, overlaps). Run in the drtsans env, it gives drtsans the same json the CLI does (checked on IPTS-38269: identical bar output dir and timestamp)</p>
 <pre class="example"><code>/export script
 /export script my_reduction.py</code></pre>
 </section>

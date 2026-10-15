@@ -626,7 +626,7 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/autopilot current --to <N>` | Stop after step N (aliases `--till`/`--until`); `--to 8` = reduce standard + find scale factor, then stop |
 | `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
 | `/calibrate <iq_file> --applynow` | Same, and set the config named in the filename to s0 × f (s0 = the scale the standard was reduced with), recording the calibration and marking affected rows for re-reduction |
-| `/export script [file]` | Export standalone Python script (generated layout) |
+| `/export script [file] [--stitch]` | Export standalone Python script (generated layout). Re-resolves the instrument calibration files first, writes every parameter that differs from the template default (as `eq._<name>`), names files as the CLI does (`2.5m2.5a`), and notes each config's absolute scale and its origin. `--stitch` appends a `drtsans.stitch.stitch_profiles` block from the session's stitch table (target, overlaps). Run in the drtsans env, it gives drtsans the same json the CLI does (checked on IPTS-38269: identical bar output dir and timestamp) |
 | `/export script --like <example.py> [-o <out>]` | Reproduce an existing script's style — keep its EQVar setup, config loops and stitching verbatim, refill only the run lists / sample names / thickness from the current table. Fails closed if the example's configurations don't match the table |
 | `/export script --like <example.py> --adapt` | Opt-in: when configs don't match, let an LLM revise the script (remove surplus config blocks, rewire stitch). Matched run arrays are still filled by code; the stitch call is marked `# attn.` and the output is review-required |
 

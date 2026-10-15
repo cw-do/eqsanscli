@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.53.0 | 2026-10-15 | **`/export script` reproduces the reduction** (sansbook review B8). It wrote a fixed list of ~25 parameters, so any other non-default value (log Q binning, normalization, wedges, time-slice offset…) was silently lost; it now writes every top-level parameter that differs from the template default (EQVar takes any `_<key>` of its Default.json), names files as the CLI does (`2.5m2.5a`, not `2o5m2o5a`), re-resolves instrument files first, notes each config's scale origin, and `--stitch` appends a `drtsans.stitch.stitch_profiles` block from the session's stitch table. Verified on IPTS-38269 (24 rows): the exported script, run in drtsans with `reduceNow` replaced by EQVar's `updateJsonFile`, produced jsons identical to eqsanscli's own bar output dir and timestamp. |
 | 0.52.0 | 2026-10-15 | **Headless mode for a driving agent** (sansbook review B5). `--events`: progress as JSON lines on stderr (`row_start`, `row_done` with outputs/note/error, `slice`, `batch_done`). One JSON reply per command always — the reduction/autopilot runners were outside the `try`, so an exception ended the process with no reply. SIGTERM during `/reduce` terminates the drtsans job, marks the row `cancelled`, saves, replies and exits; idle SIGTERM saves and exits. **One writer per folder**: a session lock (`_autosave.lock`, pid/host; stale if the holder is dead, or after 24 h from another node) — a second TUI or headless on the folder runs **read-only** (no autosave, `/reduce`/`/autopilot` refused); `--readonly` asks for it. Reduction summary adds `ok`, `cancelled`; first reply is `{"type": "ready", "read_only", "events"}`. |
 | 0.51.0 | 2026-10-15 | **Records of what was done** (sansbook review B1–B3, B6, B7, B9, B10). Merged files get a `#` header: eqsanscli version, target, per pair overlap/factor/points in the window, input sha256s, unit (`1/cm` or `a.u.` from the scale origin); a stitch factor outside 0.01–1000 warns (STC-05, now enforced). One function (`stitch_and_save`) produces the file, the `/stitch run` data (`type: stitch_result`) and the stitch-table record, so they agree; autopilot stores the target/overlaps/factors it actually used; the stitch table is saved in the session. NOTE.md logs results (`→` lines: calibration, stitch factors, check counts, matchruns pairing, reduction done/failed) and each day's eqsanscli version. Headless `data` is markup-free (Rich's parser — labels like `[4m2.5a30hz]` survive). Rows keep every output file and the rescue note. `/version` returns data incl. drtsans/Mantid (`--probe`, cached). `overlap auto` defaults to 6 as documented. |
 | 0.50.0 | 2026-10-15 | **Stale calibrations flagged; session state kept** (sansbook review A4/A6). A calibration now stores the 21 I(Q)-shaping parameters the standard was actually reduced with (from its input json: mask, Q binning, incoherent fit, TOF cuts, wavelength step, flood, flux, normalization); when the config's current values differ — by any route, `/set`, preset or instrument resolver — the scale is **STALE** in `/show config`, `/check` (SCL-05) and a `/reduce` warning, until recalibrated. Verified no false alarms on IPTS-38269. Session state: the autosave keeps 5 generations, rotated when the session's shape changes (IPTS, tables, row counts, configs), so a session emptied by mistake survives in `_autosave.1.json`; every reduction (TUI, headless, autopilot) writes its exact state to `<outputdir>/.eqsanscli_reduce/<UTC>.json`; `/continue` warns on another folder/IPTS and won't replace a non-empty session with another folder's state without `--force`. |
@@ -284,6 +285,41 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-10-15: /export script reproduces every parameter; --stitch (v0.53.0)
+
+From the sansbook planning review (item B8). `services/script_exporter.py` wrote
+a fixed map of ~25 parameters; a non-default value of anything else
+(`logqbinsperdecade`, `1dqbintype`, `uselogqbins*`, `incohfit_factor`,
+`normalization`, `usedefaultmask`, `timesliceoffset`/`period`, wedges, …) was
+silently not reproduced. EQVar (eqsanstools/eqsans_drtsans_script.py) creates an
+attribute `_<key>` for every top-level key of its Default.json configuration and
+`updateJsonFile` copies each into the drtsans json, so the exporter now adds
+every top-level parameter whose value differs from the template default
+(`config_manager._load_json_defaults`), skipping output dir/name, nested and
+elastic-reference keys (EQVar handles those itself). File names are the CLI's
+(`2.5m2.5a`; the legacy `.`→`o` spelling is gone), so script and CLI write the
+same files. `/export script` re-resolves the instrument calibration files first
+(`sync_state_configs`, as `/matchruns` does), puts each config's scale origin in
+a comment, returns `data` (`type: export_script`), and `--stitch` appends a block
+that re-creates the merged files with `drtsans.stitch.stitch_profiles` /
+`load_iqmod` / `save_iqmod` from the session's stitch table.
+
+**Verified, not assumed.** IPTS-38269's session (24 rows, 4m2.5a + 8m12a) was
+exported to scratch; the script was run in the drtsans env with `reduceNow`
+replaced by EQVar's `updateJsonFile`, `reduction_confirm` removed and the output
+dir pointed at scratch; the 24 jsons were compared field by field with
+`json_builder.build_reduction_json` for the same rows: identical except
+`dataDirectories` (the redirected output dir) and `schemaStamp`. The v0.52.0
+exporter on the same session differed only in `outputFileName` (`2o5`), because
+that session's non-defaults all happened to be in the old list — the new test
+pins a case that is not.
+
+`tests/test_export_complete.py` (+3). 426 tests.
+
+**Files changed:** `services/script_exporter.py`, `commands/export.py`,
+`services/llm_handler.py`, SKILL.md, `tests/test_export_complete.py`, CLAUDE.md,
+docs (regenerated), `src/eqsanscli/__init__.py`.
 
 ### 2026-10-15: headless events, cancel, read-only, session lock, one reply per command (v0.52.0)
 
@@ -473,71 +509,3 @@ test_transmission_pairing.py` (+8). 405 tests.
 `commands/registry.py`, `services/llm_handler.py`, `app.py`,
 `knowledge/protocol.md`, SKILL.md, `tests/test_transmission_pairing.py`,
 CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: absolute-scale provenance and a correct /calibrate (v0.48.0)
-
-From the sansbook planning review (2026-10-15, items A2, A3, B10-calibrate), each
-claim re-checked in code and on disk, with the owner's policy: no standard →
-scale 1.0, relative (a.u.); an explicitly set factor is assumed correct (absolute,
-even if borrowed); plausible scale 0.01–50, stitch factor 0.01–1000 (warnings).
-
-**What was wrong.** (1) The scale was a bare float with no origin. Four of the six
-presets carried another experiment's factor (0.1916573, IPTS-36548) and every
-preset apply — `/matchruns` auto-apply and `/apply preset` — copied it in.
-IPTS-37953 (no porsil; autopilot applied `conf_4m_10a_60hz` to `4m2.5a30hz`)
-has all 56 rows at 0.1916573, labelled 1/cm. (2) `--applynow` set the raw factor
-f, but f is relative to the scale s0 the porsil was reduced with — IPTS-38269's
-porsil at 0.1917 gave 10.65 instead of 2.04, hence a manual reset ritual.
-(3) `_parse_config_from_filename` stripped `_Iq.dat` before `_frame_0_Iq.dat`, so
-30 Hz standards never applied. (4) An unknown or missing reference silently
-became NG3. (5) No spread, no record: the factor lived only in the message and
-autopilot parsed it back out. (6) qmax default 0.03 in the command, 0.1 in the
-service and the knowledge file. (7) `/calibrate` ignored unknown flags.
-
-**Now.** `services/scale_service.py` keeps `state.scale_provenance[cfg]`
-(`default` / `calibrate` with file, reference, window, spread, s0, sha256s /
-`user`), saved with the session; `describe()` / `unit()` drive `/show config`
-(line + `data.scale`), `/matchruns` (one line per relative config, unknown-origin
-flags for pre-0.48 sessions), and `/plot` (y label `I (a.u.)` when every plotted
-file's configs are uncalibrated, "mixed" when not). `_load_matching_preset` and
-`/apply preset` drop a named preset's scale; a user's own JSON keeps its scale
-as `user`. `/set config … standardabsolutescale x` records `user` (exactly 1.0
-records `default`); outside 0.01–50 warns. `find_closest_preset`'s same-distance
-tier prefers the same wavelength (4m2.5a30hz → conf_4m_2.5a_60hz, not 4m_10a)
-and inexact matches warn in `/matchruns` and `/apply preset auto`.
-
-`/calibrate`: strict flags; strict references; longest-suffix stem parsing
-(`calibration_service.output_stem`); s0 from `<stem>.json`; `--applynow` sets
-s0 × f and refuses without s0; spread `std/mean` and the factor in the windows
-shifted ±½ width, > 2 % warns; payload `{"type": "calibration", factor, std_rel,
-n_points, qmin, qmax, neighbour_factors, reference(+sha256), measured(+sha256),
-porsil_scale, new_scale, config, applied, previous_scale, warnings, utc}` as
-`data`, written to `calibration_<cfg>.json`, appended to
-`calibration_history.jsonl`, plotted to `calibration_<cfg>.png`. Default window
-0.01–0.03 everywhere. Autopilot Step 7 calls `--applynow` and reads `data`;
-Step 6 resets only configs whose standard it reduces; Step 8 keeps a `user`
-scale (policy 2) instead of overwriting it with 1.0; the no-standard branch
-reports each config's scale with its origin.
-
-Checked on IPTS-38269 (records written to scratch, not the experiment): both
-porsils (reduced at the hand-calibrated 2.0459 / 0.45599) give f = 1.00000 and
-new = s0, as they must; 8m12a's ratio spread over 0.01–0.03 is 2.2 % with the
-upper window at −2.2 %, so it warns — a real observation, not a failure.
-
-Protocol: SCL-01 (relative = a.u.), SCL-02 (calibrated factor from that
-config's standard, enforced by `--applynow`), SCL-03 (0.01–50 + flatness),
-new SCL-04 (provenance; presets carry no scale; s0 × f), STC-05 (0.01–1000).
-`knowledge/absolute-scale.md`, SKILL.md, the LLM reference and the guide updated.
-
-`tests/test_scale.py` (+11). 397 tests. **Users will notice:** presets stop
-setting a scale; `--applynow` compounds with the porsil's scale; experiments
-without a standard are labelled relative.
-
-**Files changed:** `services/scale_service.py` (new),
-`services/calibration_service.py`, `commands/calibrate.py`, `commands/config.py`,
-`commands/preset.py`, `commands/matching.py`, `commands/data.py`,
-`services/config_manager.py`, `services/preset_service.py`,
-`services/autopilot.py`, `models/session_state.py`, `services/llm_handler.py`,
-`knowledge/protocol.md`, `knowledge/absolute-scale.md`, SKILL.md,
-`docs/pages/guide.md`, `tests/test_scale.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.

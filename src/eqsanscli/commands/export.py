@@ -25,6 +25,7 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
     like_path: str | None = None
     out_path: str | None = None
     adapt = False
+    with_stitch = False
     positional: list[str] = []
     i = 0
     while i < len(args):
@@ -37,6 +38,9 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
             i += 2
         elif a == "--adapt":
             adapt = True
+            i += 1
+        elif a == "--stitch":
+            with_stitch = True
             i += 1
         else:
             positional.append(a)
@@ -55,21 +59,46 @@ async def handle_export_script(args: list[str], state: SessionState) -> CommandR
             f"reduce_{state.ipts}_{table.name}.py",
         )
 
+    # The script freezes the calibration files: refresh them first, as
+    # /matchruns does, so it does not carry stale machine-physics paths.
+    refresh_note = ""
+    if state.auto_instrument_files:
+        try:
+            from eqsanscli.services.instrument_files import sync_state_configs
+            sync_state_configs(state)
+            refresh_note = "  Instrument calibration files re-resolved before export.\n"
+        except Exception as e:
+            refresh_note = f"  [yellow]⚠ instrument files not re-resolved: {e}[/yellow]\n"
+
+    from eqsanscli.services import scale_service
+    scale_notes = {cfg: scale_service.describe(state, cfg) for cfg in table.configurations}
+    groups = list(getattr(state, "stitch_groups", []) or []) if with_stitch else None
+    if with_stitch and not groups:
+        return CommandResult(success=False, message=(
+            "--stitch: no stitch table in this session. /stitch build (and /stitch set …) "
+            "first, or export without --stitch."))
+
     path = export_reduction_script(
         table=table,
         user_configs=state.configurations,
         output_dir=state.output_directory,
         output_path=output_path,
         ipts=state.ipts,
+        scale_notes=scale_notes,
+        stitch_groups=groups,
     )
 
     n_configs = len(table.configurations)
     n_rows = len(table.rows)
+    stitch_note = f"  Stitches {len(groups)} group(s) from the session's stitch table.\n" if groups else ""
     return CommandResult(
         success=True,
         message=f"Exported reduction script: {path}\n"
         f"  {n_rows} samples across {n_configs} configurations.\n"
+        + refresh_note + stitch_note +
         f"  Run with: drtsans {path}",
+        data={"type": "export_script", "path": path, "rows": n_rows,
+              "configs": list(table.configurations), "stitch": bool(groups)},
     )
 
 

@@ -389,7 +389,8 @@ REDUCTION:
                                   insists ("force it", "try anyway"). Expect failures.
   Missing transmission or background is a WARNING only — reduction proceeds (a background-cell row such as
   banjo legitimately has no background).
-/export script [filename]       - Export .py reduction script (generated layout)
+/export script [filename]       - Export .py reduction script (generated layout); every non-default parameter, CLI file names
+/export script --stitch         - Same, plus a stitching block from the session's stitch table ("export the script with stitching")
 /export script --like <example.py> [-o <out>] - Reproduce an EXISTING script's style: keep its EQVar setup, config loops and stitching verbatim, only refilling the run lists / sample names / thickness from the current table. Fails closed if the example's config count doesn't match the table.
   "write a reduction script following the style of script_style2.py" -> /export script --like script_style2.py
   "make a reduction script like my_reduce.py (the table is done)" -> /export script --like my_reduce.py
