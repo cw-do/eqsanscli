@@ -523,6 +523,8 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
 
     if field == "output" and args[2].lower() in ("short", "full"):
         naming = args[2].lower()
+        for g in target_groups:
+            g.custom_output = False            # back under the naming rule
         if selector.lower() == "all":
             state.stitch_naming = naming       # also for later builds and autopilot
             assign_merged_names(groups, naming, state.output_directory)
@@ -537,6 +539,7 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
     if field == "output":
         for group in target_groups:
             group.output_file = args[2]
+            group.custom_output = True
         if selector.lower() == "all":
             return CommandResult(success=True, message=f"Set output file for all {len(target_groups)} samples: {args[2]}")
         return CommandResult(success=True, message=f"Set output file for {selector}: {args[2]}")
@@ -557,6 +560,11 @@ async def _handle_run(args: list[str], state: SessionState) -> CommandResult:
 
     if not to_run:
         return CommandResult(success=False, message="No stitchable groups found.")
+
+    # Name by the session's current rule at run time: a table built or saved
+    # before (full names stored) used to keep writing the old names (IPTS-38077,
+    # after the v0.54.3 short-name default). Hand-set names are kept.
+    assign_merged_names(groups, state.stitch_naming, state.output_directory)
 
     from eqsanscli.services import scale_service
     from eqsanscli.services.merge_service import stitch_and_save

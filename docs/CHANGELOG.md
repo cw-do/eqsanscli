@@ -7,6 +7,19 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: default LLM model gpt-6-luna (v0.53.2)
+
+Asked to use `openai/gpt-6-luna` instead of `openai/gpt-6-luna-pro` (set in
+v0.47.0). Checked that the id is in OpenRouter's model list. Changed
+`config/settings.py:DEFAULT_MODEL`, put it first in `/models` (luna-pro kept as
+an option) and in `.env.example`. The `.env` files in the dev tree and in
+`eqsanscli-stable` pin `OPENROUTER_MODEL` and override the code default, so both
+were updated as well (local config, not in git; the stable one takes effect on
+the next launch, independent of this release).
+
+**Files changed:** `config/settings.py`, `commands/models.py`, `.env.example`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: per-frame incoherent-fit parameters for frame skipping (v0.53.1)
 
 Asked how `incohfit_qmin`/`incohfit_qmax` work in frame-skipping mode. From the

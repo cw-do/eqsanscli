@@ -28,6 +28,9 @@ class StitchGroup:
     # Per-config trim applied to that curve before stitching:
     # {config: {"first": N, "last": M, "qmin": q, "qmax": q}} (trim_service.TrimSpec).
     trims: dict = field(default_factory=dict)
+    # True when the user named the merged file (/stitch set <s> output <file>):
+    # never renamed by the short/full naming.
+    custom_output: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -41,6 +44,7 @@ class StitchGroup:
             "factors": self.factors,
             "pairs": self.pairs,
             "trims": self.trims,
+            "custom_output": self.custom_output,
         }
 
     @classmethod
@@ -452,9 +456,9 @@ def assign_merged_names(groups: list[StitchGroup], naming: str = "short",
     since v0.54.3; the configs are in the merged header either way). A short name
     already taken by another group — one sample stitched in two config sets — falls
     back to the full name for the later group, so nothing is overwritten."""
-    used: set[str] = set()
+    used: set[str] = {g.output_file for g in groups if g.custom_output and g.output_file}
     for g in groups:
-        if len(g.configs) < 2:
+        if len(g.configs) < 2 or g.custom_output:
             continue
         d = os.path.dirname(g.output_file) if g.output_file else (output_dir or ".")
         name = merged_file_name(g.sample_name, g.configs, naming)

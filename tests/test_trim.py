@@ -263,3 +263,17 @@ def test_explicit_output_file_still_works(tmp_path):
     st = _stitch_state(tmp_path)
     _run(handle_stitch(["set", "s1", "output", str(tmp_path / "mine.txt")], st))
     assert st.stitch_groups[0].output_file == str(tmp_path / "mine.txt")
+
+
+def test_run_applies_the_naming_to_a_table_saved_with_full_names(tmp_path):
+    # IPTS-38077: /session load of a table built before v0.54.3, then /stitch run
+    # → still the long names, although the session's naming was "short".
+    st = _stitch_state(tmp_path)
+    st.stitch_groups[0].output_file = str(tmp_path / "merged_s1_8m12a_4m2.5a_Iq.txt")
+    st = SessionState.load(st.save(str(tmp_path / "s.json")))
+    res = _run(handle_stitch(["run"], st))
+    assert Path(res.data["groups"][0]["output_file"]).name == "merged_s1_Iq.txt"
+    assert (tmp_path / "merged_s1_Iq.txt").exists()
+    _run(handle_stitch(["set", "s1", "output", str(tmp_path / "mine.txt")], st))
+    _run(handle_stitch(["run"], st))                     # a hand-set name is kept
+    assert (tmp_path / "mine.txt").exists() and st.stitch_groups[0].custom_output

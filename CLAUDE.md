@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.54.4 | 2026-10-15 | Fix: **short merged names were not used for a stitch table saved before v0.54.3.** IPTS-38077: `/session load` of a table built earlier (full names stored per group), then `/stitch run` → still `merged_<sample>_<cfgs>_Iq.txt`, although the session's naming was "short" — names were applied only at build/rename time. `/stitch run` now names groups by the current rule at run time. Names set by hand (`/stitch set <s> output <file>`) are flagged `custom_output` and never renamed; `output short|full` clears the flag. |
 | 0.54.3 | 2026-10-15 | **Merged files get short names by default: `merged_<sample>_Iq.txt`** (was `merged_<sample>_<cfg1>_<cfg2>…_Iq.txt`, e.g. `merged_a06_4m2.5a30hz_frame0_4m2.5a30hz_frame1_Iq.txt`). `/stitch set all output full|short` switches and is remembered in the session (later `/stitch build`, `/stitch smart`, config removal and autopilot use it); one sample: `/stitch set <sample> output short|full|<file>`. When one sample is stitched in two config sets, the later group keeps the full name, so nothing is overwritten. The configs, overlaps, factors and trims stay in the merged header. |
 | 0.54.2 | 2026-10-15 | Fix: **trim before stitching skipped frame-skipping groups.** Their configs are `<cfg>_frame0` (low Q) / `<cfg>_frame1` (high Q); "stitch … while trimming q<0.006" became `/stitch set a06 trim 4m2.5a30hz --qmin 0.006`, which matched nothing and was skipped for every sample (IPTS-38077). Now a base config (`4m2.5a30hz`) or `all` reaches every frame for `--qmin/--qmax` (a Q limit means the same on either frame); `--first/--last` with a name that covers several curves is refused as ambiguous, pointing to `_frame0`/`_frame1`. LLM reference explains frame names and routes "trim q<x" to `trim all --qmin x`. Checked on IPTS-38077 a06 (frame 0: 70 → 69, merged starts at 0.0066). |
 | 0.54.1 | 2026-10-15 | Fix: **`/stitch build` threw away the overlaps/target you set.** IPTS-38077: after `/stitch set all overlap 0.05 0.06`, new runs were reduced and "stitch the newly reduced data" ran `/stitch build`, which rebuilt every group with auto-suggested overlaps. A rebuild now keeps a sample's overlaps, target and trims when its configs are unchanged, and gives a new sample the overlaps/target last set with `/stitch set all …` for that configuration sequence (`state.stitch_defaults`, saved with the session); only otherwise auto-suggests. The message says which samples were kept / given your values / auto. `/stitch set all overlap auto` forgets the remembered overlaps. |
@@ -292,6 +293,27 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: /stitch run applies the naming rule (v0.54.4)
+
+Reported right after v0.54.3 reached stable: "i just stitched but it didn't use
+short file name." NOTE.md: `/session load default` (a table built under v0.54.0,
+each group's `output_file` stored with the configs), `/stitch set all trim all
+--qmin 0.006`, `/stitch run` — merged files still had the long names. v0.54.3
+assigned names in `/stitch build`, `/stitch smart`, removeconfig, autopilot and
+`/stitch set … output short|full`, but not when running an existing table.
+
+`_handle_run` now calls `assign_merged_names` before stitching. To keep a name
+the user typed, `StitchGroup.custom_output` (saved) is set by `/stitch set <s>
+output <file>` and cleared by `output short|full`; `assign_merged_names` skips
+such groups and reserves their names against clashes. Read-only check on the
+IPTS-38077 autosave: all 8 groups map to `merged_<sample>_Iq.txt`, trims kept.
+Merged files already on disk under the old names are not removed.
+
+`tests/test_trim.py` (+1). 446 tests.
+
+**Files changed:** `services/merge_service.py`, `commands/stitch.py`,
+`tests/test_trim.py`, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: short merged file names by default (v0.54.3)
 
 Asked for merged files without the configuration names, short names as the
@@ -411,16 +433,3 @@ with no reply (the idle-SIGTERM test caught it intermittently).
 `services/script_exporter.py`, `services/note_service.py`,
 `services/llm_handler.py`, `headless.py`, `app.py`, SKILL.md,
 `tests/test_trim.py`, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: default LLM model gpt-6-luna (v0.53.2)
-
-Asked to use `openai/gpt-6-luna` instead of `openai/gpt-6-luna-pro` (set in
-v0.47.0). Checked that the id is in OpenRouter's model list. Changed
-`config/settings.py:DEFAULT_MODEL`, put it first in `/models` (luna-pro kept as
-an option) and in `.env.example`. The `.env` files in the dev tree and in
-`eqsanscli-stable` pin `OPENROUTER_MODEL` and override the code default, so both
-were updated as well (local config, not in git; the stable one takes effect on
-the next launch, independent of this release).
-
-**Files changed:** `config/settings.py`, `commands/models.py`, `.env.example`,
-CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
