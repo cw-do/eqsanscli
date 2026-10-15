@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.53.0</div>
+          data reduction tool &middot; v0.53.1</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -100,7 +100,7 @@
 <tr><td><code>scalecomponents.detector1</code></td><td><code>[x, y, z]</code> scale of the detector geometry — from AgBe calibration</td></tr>
 <tr><td><code>fitinelasticincoh</code></td><td>Whether to fit and remove incoherent inelastic scattering</td></tr>
 <tr><td><code>selectminincoh</code></td><td>Used only when <code>fitinelasticincoh</code> is on</td></tr>
-<tr><td><code>incohfit_qmin</code> / <code>incohfit_qmax</code></td><td>Q window that fit uses; must lie inside the configuration&#x27;s range (<a href="protocol.html#rule-CFG-02" class="rule-ref">CFG-02</a>)</td></tr>
+<tr><td><code>incohfit_qmin</code> / <code>incohfit_qmax</code></td><td>Q window that fit uses; must lie inside the configuration&#x27;s range (<a href="protocol.html#rule-CFG-02" class="rule-ref">CFG-02</a>). Frame skipping: one value per frame, see below</td></tr>
 <tr><td><code>useerrorweighting</code></td><td>Weight by uncertainty when binning</td></tr>
 <tr><td><code>outputwavelengthdependentprofile</code></td><td>Also write I(Q) per wavelength bin</td></tr>
 <tr><td><code>usemaskbacktubes</code></td><td>Mask the back tube bank as well</td></tr>
@@ -149,7 +149,13 @@ outputwavelengthdependentprofile  True</code></pre>
 <h2 id="combination-experiments">Combination experiments<a class="anchor" href="#combination-experiments">#</a></h2>
 <p>A 4 m 10 Å + 2.5 m 2.5 Å pair is the common low-Q/high-Q combination, stitched into one profile afterwards (<code>stitching.md</code>). Each configuration keeps its own <code>standardabsolutescale</code> from a standard measured in that configuration (protocol <a href="protocol.html#rule-SCL-02" class="rule-ref">SCL-02</a>) — for the pair above, values near 0.2276 (4 m 10 Å, 2025-05-05) and 0.2473 × 1.078 × 0.7183 (2.5 m 2.5 Å) have been used; the multipliers there were experiment-specific corrections, not a general rule.</p>
 <h2 id="parameters-normally-left-alone">Parameters normally left alone<a class="anchor" href="#parameters-normally-left-alone">#</a></h2>
-<p><code>elasticreference*</code> / <code>elasticreferencebkgd*</code> — elastic reference corrections are not often used. <code>incohfit_factor</code>, <code>incohfit_intensityweighted</code> — only with the incoherent inelastic correction, and rarely.</p></div>
+<p><code>elasticreference*</code> / <code>elasticreferencebkgd*</code> — elastic reference corrections are not often used. <code>incohfit_factor</code>, <code>incohfit_intensityweighted</code> — only with the incoherent inelastic correction, and rarely.</p>
+<h2 id="incoherent-fit-in-frame-skipping-30-hz-mode">Incoherent fit in frame-skipping (30 Hz) mode<a class="anchor" href="#incoherent-fit-in-frame-skipping-30-hz-mode">#</a></h2>
+<p>drtsans fits and subtracts b(λ) <strong>separately for each frame</strong> (<code>tof/eqsans/reduction_api.py</code>): frame 0 is the skip frame (long wavelengths, low Q — <code>…_frame_0_Iq.dat</code>), frame 1 the lead frame (short wavelengths, high Q — <code>…_frame_1_Iq.dat</code>). Each of <code>fitinelasticincoh</code>, <code>incohfit_qmin</code>, <code>incohfit_qmax</code>, <code>incohfit_factor</code>, <code>incohfit_intensityweighted</code> is one value for both frames or a pair <code>[frame 0, frame 1]</code>; <code>selectminincoh</code> is one value for both. Within a frame: with both <code>incohfit_qmin</code> and <code>incohfit_qmax</code> set, the fit uses the Q bins between them; otherwise the widest Q range present at every wavelength of that frame; <code>incohfit_factor</code> then raises the lower edge until I(qmin) ≤ factor·I(qmax). b(λ) is each wavelength&#x27;s offset from a reference wavelength (the frame&#x27;s shortest; with <code>selectminincoh</code>, the one with least b), averaged over the window. Because the frames cover different Q, <strong>one window for both frames is usually wrong for one of them</strong> — give two:</p>
+<pre><code>/set config 4m2.5a30hz fitinelasticincoh true
+/set config 4m2.5a30hz incohfit_qmin 0.02,0.10     # frame 0, frame 1
+/set config 4m2.5a30hz incohfit_qmax 0.04,0.25</code></pre>
+<p><code>none</code> clears one frame (<code>0.02,none</code>) so that frame uses its widest common range; values must be &gt; 0. The window drtsans actually used is printed per frame in the <code>.out</code> log (&quot;Incoherent correction using xmin=… xmax=…&quot;), and b(λ) is written to <code>info/inelastic_incoh/&lt;name&gt;/&lt;slice&gt;/frame_&lt;N&gt;/</code>.</p></div>
 <h2 id="kb-instrument-files">instrument-files<a class="anchor" href="#kb-instrument-files">#</a></h2>
 <p class="summary">How mask, flood, dark current, flux and the AgBe offsets are chosen for a run.</p>
 <div class="kb"><h1 id="instrument-calibration-files">Instrument calibration files<a class="anchor" href="#instrument-calibration-files">#</a></h1>

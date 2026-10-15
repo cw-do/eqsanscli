@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.53.0</div>
+          data reduction tool &middot; v0.53.1</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -203,7 +203,7 @@
 </section>
 <section class="cmd" id="cmd-set-config">
 <h3>/set config<a class="anchor" href="#cmd-set-config">#</a><span class="src">config.py</span></h3>
-<p class="summary">Set a config parameter</p>
+<p class="summary">Set a config parameter. Frame-skipping per-frame params (<code>fitinelasticincoh</code>, <code>incohfit_qmin</code>, <code>incohfit_qmax</code>, <code>incohfit_factor</code>, <code>incohfit_intensityweighted</code>) take one value for both frames or <code>a,b</code> = frame 0 (long λ, low Q), frame 1 (short λ, high Q), stored as a real list; <code>none</code> clears one frame; numbers must be &gt; 0</p>
 <div class="table-wrap"><table><thead><tr><th>Form</th><th>What it does</th></tr></thead><tbody>
 <tr><td><code>/set drtsans</code></td><td>Set drtsans version: default, dev, qa</td></tr>
 <tr><td><code>/set outputdir</code></td><td>Set the session-wide output directory (propagates to all configs)</td></tr>

@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.53.1 | 2026-10-15 | Fix: **per-frame incoherent-fit parameters in frame-skipping mode.** drtsans takes `fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted` as one value (both frames) or `[frame 0, frame 1]` (frame 0 = skip frame, long λ, low Q). `/set config` stored `0.02,0.10` / `[0.02, 0.10]` as a **string** — drtsans rejects it (`is not a number or a list`), so the reduction failed — and `true,false` for the flag as **False** (correction silently off for both frames). Now `a,b`, `[a, b]` or `a b` become a real two-element list, one value stays a scalar, `none` clears one frame, numbers must be > 0 (schema). Checked in drtsans: the new JSON validates (`reduction_parameters`, as `eqsans_reduction.py` loads it) and parses to per-frame windows. |
 | 0.53.0 | 2026-10-15 | **`/export script` reproduces the reduction** (sansbook review B8). It wrote a fixed list of ~25 parameters, so any other non-default value (log Q binning, normalization, wedges, time-slice offset…) was silently lost; it now writes every top-level parameter that differs from the template default (EQVar takes any `_<key>` of its Default.json), names files as the CLI does (`2.5m2.5a`, not `2o5m2o5a`), re-resolves instrument files first, notes each config's scale origin, and `--stitch` appends a `drtsans.stitch.stitch_profiles` block from the session's stitch table. Verified on IPTS-38269 (24 rows): the exported script, run in drtsans with `reduceNow` replaced by EQVar's `updateJsonFile`, produced jsons identical to eqsanscli's own bar output dir and timestamp. |
 | 0.52.0 | 2026-10-15 | **Headless mode for a driving agent** (sansbook review B5). `--events`: progress as JSON lines on stderr (`row_start`, `row_done` with outputs/note/error, `slice`, `batch_done`). One JSON reply per command always — the reduction/autopilot runners were outside the `try`, so an exception ended the process with no reply. SIGTERM during `/reduce` terminates the drtsans job, marks the row `cancelled`, saves, replies and exits; idle SIGTERM saves and exits. **One writer per folder**: a session lock (`_autosave.lock`, pid/host; stale if the holder is dead, or after 24 h from another node) — a second TUI or headless on the folder runs **read-only** (no autosave, `/reduce`/`/autopilot` refused); `--readonly` asks for it. Reduction summary adds `ok`, `cancelled`; first reply is `{"type": "ready", "read_only", "events"}`. |
 | 0.51.0 | 2026-10-15 | **Records of what was done** (sansbook review B1–B3, B6, B7, B9, B10). Merged files get a `#` header: eqsanscli version, target, per pair overlap/factor/points in the window, input sha256s, unit (`1/cm` or `a.u.` from the scale origin); a stitch factor outside 0.01–1000 warns (STC-05, now enforced). One function (`stitch_and_save`) produces the file, the `/stitch run` data (`type: stitch_result`) and the stitch-table record, so they agree; autopilot stores the target/overlaps/factors it actually used; the stitch table is saved in the session. NOTE.md logs results (`→` lines: calibration, stitch factors, check counts, matchruns pairing, reduction done/failed) and each day's eqsanscli version. Headless `data` is markup-free (Rich's parser — labels like `[4m2.5a30hz]` survive). Rows keep every output file and the rescue note. `/version` returns data incl. drtsans/Mantid (`--probe`, cached). `overlap auto` defaults to 6 as documented. |
@@ -286,6 +287,43 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: per-frame incoherent-fit parameters for frame skipping (v0.53.1)
+
+Asked how `incohfit_qmin`/`incohfit_qmax` work in frame-skipping mode. From the
+drtsans 1.35.0 source: `correction_api.listify_incohfit_parameter` turns each of
+`fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`,
+`incohfit_intensityweighted` into `[frame 0, frame 1]` (a scalar is used for
+both; `selectMinIncoh` is not per frame); `split_by_frame` puts the skip frame
+(long wavelengths, low Q) at index 0 and the lead frame at 1; `reduction_api`
+runs `inelastic_correction` per frame with that frame's values; within a frame
+`calculate_incoherence_correction_factors` uses the Q bins between qmin and qmax
+when both are set, else the widest range common to every wavelength,
+`incohfit_factor` then tunes the lower edge, and b(λ) is the offset from the
+frame's reference wavelength averaged over the window. One window for both
+frames is therefore usually wrong for one of them.
+
+eqsanscli could not express two values: `/set config … incohfit_qmin 0.02,0.10`
+(or `[0.02, 0.10]`) was stored and written to the json as a string, which
+drtsans's validator rejects ("is not a number or a list") — verified in the
+drtsans env — and `fitinelasticincoh true,false` was parsed as a bool and became
+False. `config_manager.PER_FRAME_PARAMS` / `_parse_per_frame` now accept one
+value or two (`a,b`, `[a, b]`, `a b`, `(a,b)`), store a real list, allow `none`
+for one frame, and refuse ≤ 0, more than two values or text; the confirmation
+names which frame is which. Verified: the json eqsanscli now builds passes
+`drtsans.tof.eqsans.reduction_parameters(…, permissible=True)` (as
+`eqsans_reduction.py` loads it) and `parse_correction_config` yields
+qmin [0.02, 0.1], qmax [0.04, 0.25].
+
+Also: the LLM context listed a non-existent `doincoherentinelasticcorrection`
+key instead of the real incoherent-fit parameters; knowledge (configurations.md
+section on frame skipping, CFG-02 per frame), SKILL.md and the LLM reference
+updated. `tests/test_per_frame_params.py` (+6). 432 tests.
+
+**Files changed:** `services/config_manager.py`, `services/llm_handler.py`,
+`knowledge/configurations.md`, `knowledge/protocol.md`, SKILL.md,
+`tests/test_per_frame_params.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: /export script reproduces every parameter; --stitch (v0.53.0)
 
 From the sansbook planning review (item B8). `services/script_exporter.py` wrote
@@ -458,54 +496,4 @@ files use their own event loop (another test's `asyncio.run()` leaves none).
 `models/session_state.py`, `services/autopilot.py`, `app.py`, `headless.py`,
 `services/llm_handler.py`, `knowledge/protocol.md`, SKILL.md,
 `tests/test_records.py`, `tests/test_autopilot_tostep.py`, tests (event loops),
-CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: dash displacement series pair; unused transmissions reported; /check (v0.49.0)
-
-From the sansbook planning review (items A5, B4), with the owner's change: a
-missing transmission must **not** stop a reduction ("one can reduce data without
-transmission if needed") — so it is reported, not enforced.
-
-**Pairing.** IPTS-37953's samples were titled `S-sebs-5wt-SiNPs--d26 4m 2.5Afs
-5mmsa` (dash displacement) and its transmissions `T-sebs-5wt-SiNPs …`; `_match_base`
-stripped only `_d<N>`, the sole-transmission fallback did not apply (7 plain
-transmissions), and all 56 rows were reduced without a transmission. Now
-`-d<N>`/`--d<N>` is ignored for transmission lookup **only for a series** —
-two or more rows of the configuration with the same name and different N
-(`_dash_series_bases`) — because dashes collide with deuteration labels (`PS-d8`,
-`toluene-d8`); `d2o` never matches. Re-run on 37953's catalog (from its saved
-autopilot session): 0 of the 56 without a transmission, every series paired with
-its own sample's run (189212 → 23 SiNPs rows, 189198 → 5 sinp rows, …); the one
-row left is a different config with none measured. Condition-token matches
-(displacement, shear rate, temperature) are now reported per config.
-
-**Report.** An "unused transmission" list existed but came after a row-by-row
-list of every row without one (56 lines). `/matchruns` now leads with "N row(s)
-without one; M transmission run(s) unused", puts each unused run beside the rows
-whose loosened name (`loose_base`) starts with its own, caps the row list at 15,
-and returns `transmission_report` (`rows_without`, `unused` with `closest_rows`)
-in `data`.
-
-**/check** (new, `commands/check.py`): the registered protocol validators,
-EMP-01 (no empty beam, blocking), TBL-02/03/05 (warnings), unused transmissions,
-SCL-03/04 (scale range, unknown origin). Returns `{"type": "check", "findings":
-[{rule, severity, message, rows}], "unenforced": [...]}`. `/reduce` now also
-refuses on *protocol* blocking findings (`--force` overrides) — never on a
-missing transmission.
-
-**TBL-06 was wrong.** Run on IPTS-37681's real session it gave 8 blocking
-findings, all legitimate: an empty cup is its own sample row and the others'
-background, its transmission their background transmission. The code comment
-said that was allowed; the code only allowed empty-beam + transmission. Now
-three cross-row pairings are allowed and a row that is its own background still
-fails. Fixed before `/reduce` started relying on it.
-
-`protocol.md` was trimmed to stay under the 20 000-character always-loaded
-budget (`test_always_loaded_text_stays_small`; 19 281). `tests/
-test_transmission_pairing.py` (+8). 405 tests.
-
-**Files changed:** `services/matching_service.py`, `services/protocol.py`,
-`commands/matching.py`, `commands/check.py` (new), `commands/reduction.py`,
-`commands/registry.py`, `services/llm_handler.py`, `app.py`,
-`knowledge/protocol.md`, SKILL.md, `tests/test_transmission_pairing.py`,
 CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.

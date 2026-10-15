@@ -335,6 +335,13 @@ before the run. Sensitivity is chosen per detector distance (1.3 m → 1o3m, 2.5
     "my dark current file is missing" → /instrument check
   CHAT MODE, not commands: "why did it pick the 4m flood for 8m data" → explain the distance mapping.
 /set config <id> <param> <val>  - Set config parameter for a SPECIFIC config (id like 4m10a, 2.5m2.5a). REQUIRES knowing which configs exist.
+  Frame-skipping (…30hz) incoherent fit: fitinelasticincoh, incohfit_qmin, incohfit_qmax,
+  incohfit_factor, incohfit_intensityweighted take ONE value (both frames) or TWO comma-separated
+  values: frame 0 (long λ, low Q) then frame 1 (short λ, high Q).
+    "incoherent fit window 0.02-0.04 for frame 0 and 0.1-0.25 for frame 1 on 4m2.5a30hz"
+        → /set config 4m2.5a30hz incohfit_qmin 0.02,0.1
+          /set config 4m2.5a30hz incohfit_qmax 0.04,0.25
+    "turn on incoherent correction only for the high-Q frame" → /set config <id> fitinelasticincoh false,true
 /set config all <param> <val>   - Set parameter on EVERY config in the current table, AND save as a sticky default for any future configs.
 /set <row> cfg <name>           - Reassign a row to a different config (e.g. a cloned one). The target must exist (see /config list).
                                   'cfg' is canonical; 'config'/'configuration' also accepted but prefer 'cfg' to avoid confusion with the /set config sub-command.
@@ -565,7 +572,8 @@ def _build_context(state: SessionState) -> str:
     _KEY_PARAMS = [
         "usedefaultmask", "usemask", "usedarkfilename", "usethetadependenttransmission",
         "usesensitivityfilename", "fitframeskipping", "useslicer",
-        "doazimuthalaverage1d", "doincoherentinelasticcorrection",
+        "doazimuthalaverage1d", "fitinelasticincoh", "incohfit_qmin", "incohfit_qmax",
+        "incohfit_factor", "selectminincoh",
         "absolutescalemethod", "standardabsolutescale",
         "qmin", "qmax", "numqbins", "qstep",
         "annularbeginradius", "annularendradius",

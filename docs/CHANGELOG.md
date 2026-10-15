@@ -7,6 +7,56 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: dash displacement series pair; unused transmissions reported; /check (v0.49.0)
+
+From the sansbook planning review (items A5, B4), with the owner's change: a
+missing transmission must **not** stop a reduction ("one can reduce data without
+transmission if needed") — so it is reported, not enforced.
+
+**Pairing.** IPTS-37953's samples were titled `S-sebs-5wt-SiNPs--d26 4m 2.5Afs
+5mmsa` (dash displacement) and its transmissions `T-sebs-5wt-SiNPs …`; `_match_base`
+stripped only `_d<N>`, the sole-transmission fallback did not apply (7 plain
+transmissions), and all 56 rows were reduced without a transmission. Now
+`-d<N>`/`--d<N>` is ignored for transmission lookup **only for a series** —
+two or more rows of the configuration with the same name and different N
+(`_dash_series_bases`) — because dashes collide with deuteration labels (`PS-d8`,
+`toluene-d8`); `d2o` never matches. Re-run on 37953's catalog (from its saved
+autopilot session): 0 of the 56 without a transmission, every series paired with
+its own sample's run (189212 → 23 SiNPs rows, 189198 → 5 sinp rows, …); the one
+row left is a different config with none measured. Condition-token matches
+(displacement, shear rate, temperature) are now reported per config.
+
+**Report.** An "unused transmission" list existed but came after a row-by-row
+list of every row without one (56 lines). `/matchruns` now leads with "N row(s)
+without one; M transmission run(s) unused", puts each unused run beside the rows
+whose loosened name (`loose_base`) starts with its own, caps the row list at 15,
+and returns `transmission_report` (`rows_without`, `unused` with `closest_rows`)
+in `data`.
+
+**/check** (new, `commands/check.py`): the registered protocol validators,
+EMP-01 (no empty beam, blocking), TBL-02/03/05 (warnings), unused transmissions,
+SCL-03/04 (scale range, unknown origin). Returns `{"type": "check", "findings":
+[{rule, severity, message, rows}], "unenforced": [...]}`. `/reduce` now also
+refuses on *protocol* blocking findings (`--force` overrides) — never on a
+missing transmission.
+
+**TBL-06 was wrong.** Run on IPTS-37681's real session it gave 8 blocking
+findings, all legitimate: an empty cup is its own sample row and the others'
+background, its transmission their background transmission. The code comment
+said that was allowed; the code only allowed empty-beam + transmission. Now
+three cross-row pairings are allowed and a row that is its own background still
+fails. Fixed before `/reduce` started relying on it.
+
+`protocol.md` was trimmed to stay under the 20 000-character always-loaded
+budget (`test_always_loaded_text_stays_small`; 19 281). `tests/
+test_transmission_pairing.py` (+8). 405 tests.
+
+**Files changed:** `services/matching_service.py`, `services/protocol.py`,
+`commands/matching.py`, `commands/check.py` (new), `commands/reduction.py`,
+`commands/registry.py`, `services/llm_handler.py`, `app.py`,
+`knowledge/protocol.md`, SKILL.md, `tests/test_transmission_pairing.py`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: absolute-scale provenance and a correct /calibrate (v0.48.0)
 
 From the sansbook planning review (2026-10-15, items A2, A3, B10-calibrate), each

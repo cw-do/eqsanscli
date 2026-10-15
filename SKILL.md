@@ -505,7 +505,7 @@ before sign-in returns "Not signed in to ONCat".
 | `/config clone <src> <dst>` | Copy a config to a new name (editable independently). `<dst>` must contain `<src>`'s config ID |
 | `/config rows <id>` | List rows referencing `<id>` |
 | `/show config <id>` | Show all parameters for a config |
-| `/set config <id> <param> <value>` | Set a config parameter |
+| `/set config <id> <param> <value>` | Set a config parameter. Frame-skipping per-frame params (`fitinelasticincoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted`) take one value for both frames or `a,b` = frame 0 (long λ, low Q), frame 1 (short λ, high Q), stored as a real list; `none` clears one frame; numbers must be > 0 |
 | `/set config all <param> <value>` | Apply to every config + sticky default for future ones |
 | `/set <row> cfg <name>` | Reassign a row to a different (typically cloned) config; `none` clears (aliases: `config`, `configuration`) |
 | `/set --sample <name> cfg <new>` | Bulk-reassign rows matching `<name>` |

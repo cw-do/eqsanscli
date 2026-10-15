@@ -302,7 +302,8 @@ measure.
 **CFG-02** · warning · unenforced
 When `fitinelasticincoh` is on, `incohfit_qmin`/`incohfit_qmax` lie inside the
 configuration's Q range and away from its edges — every wavelength bin must
-produce Q values within that window.
+produce Q values within that window. In frame-skipping mode that holds **per
+frame**: each frame is fitted on its own, so give two values (frame 0, frame 1).
 
 **CFG-03** · info · enforced (`config_manager`, `instrument_files`)
 Parameters resolve in four tiers: drtsans template defaults < JSON preset <

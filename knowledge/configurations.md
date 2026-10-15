@@ -44,7 +44,7 @@ script written by `/export script`.
 | `scalecomponents.detector1` | `[x, y, z]` scale of the detector geometry — from AgBe calibration |
 | `fitinelasticincoh` | Whether to fit and remove incoherent inelastic scattering |
 | `selectminincoh` | Used only when `fitinelasticincoh` is on |
-| `incohfit_qmin` / `incohfit_qmax` | Q window that fit uses; must lie inside the configuration's range (CFG-02) |
+| `incohfit_qmin` / `incohfit_qmax` | Q window that fit uses; must lie inside the configuration's range (CFG-02). Frame skipping: one value per frame, see below |
 | `useerrorweighting` | Weight by uncertainty when binning |
 | `outputwavelengthdependentprofile` | Also write I(Q) per wavelength bin |
 | `usemaskbacktubes` | Mask the back tube bank as well |
@@ -136,3 +136,30 @@ experiment-specific corrections, not a general rule.
 `elasticreference*` / `elasticreferencebkgd*` — elastic reference corrections are
 not often used. `incohfit_factor`, `incohfit_intensityweighted` — only with the
 incoherent inelastic correction, and rarely.
+
+## Incoherent fit in frame-skipping (30 Hz) mode
+
+drtsans fits and subtracts b(λ) **separately for each frame**
+(`tof/eqsans/reduction_api.py`): frame 0 is the skip frame (long wavelengths,
+low Q — `…_frame_0_Iq.dat`), frame 1 the lead frame (short wavelengths, high Q —
+`…_frame_1_Iq.dat`). Each of `fitinelasticincoh`, `incohfit_qmin`,
+`incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted` is one value for
+both frames or a pair `[frame 0, frame 1]`; `selectminincoh` is one value for
+both. Within a frame: with both `incohfit_qmin` and `incohfit_qmax` set, the fit
+uses the Q bins between them; otherwise the widest Q range present at every
+wavelength of that frame; `incohfit_factor` then raises the lower edge until
+I(qmin) ≤ factor·I(qmax). b(λ) is each wavelength's offset from a reference
+wavelength (the frame's shortest; with `selectminincoh`, the one with least b),
+averaged over the window. Because the frames cover different Q, **one window
+for both frames is usually wrong for one of them** — give two:
+
+```
+/set config 4m2.5a30hz fitinelasticincoh true
+/set config 4m2.5a30hz incohfit_qmin 0.02,0.10     # frame 0, frame 1
+/set config 4m2.5a30hz incohfit_qmax 0.04,0.25
+```
+
+`none` clears one frame (`0.02,none`) so that frame uses its widest common
+range; values must be > 0. The window drtsans actually used is printed per frame
+in the `.out` log ("Incoherent correction using xmin=… xmax=…"), and b(λ) is
+written to `info/inelastic_incoh/<name>/<slice>/frame_<N>/`.

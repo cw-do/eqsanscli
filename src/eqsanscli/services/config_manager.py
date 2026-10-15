@@ -234,6 +234,49 @@ def get_config(config_id: str, user_configs: dict[str, dict]) -> dict[str, objec
     return result
 
 
+# drtsans reads these as one value for both frames, or a two-element list
+# [frame 0, frame 1] in frame-skipping mode (correction_api.
+# listify_incohfit_parameter; frame 0 = skip frame, long wavelengths, low Q;
+# frame 1 = lead frame, short wavelengths, high Q). Before v0.53.1 `/set config`
+# stored "0.02,0.10" or "[0.02, 0.10]" as a *string*, which drtsans cannot use,
+# and "true,false" for the flag as False.
+PER_FRAME_PARAMS = {
+    "incohfit_qmin": float, "incohfit_qmax": float, "incohfit_factor": float,
+    "incohfit_intensityweighted": bool, "fitinelasticincoh": bool,
+}
+
+
+def _parse_per_frame(param: str, value: str) -> tuple[bool, object]:
+    """'0.05' → 0.05; '0.02,0.10' / '[0.02, 0.10]' / '0.02 0.10' → [0.02, 0.1];
+    'none' (or 'none,0.1') clears a frame. (ok, parsed) — ok False on bad input."""
+    import re
+    kind = PER_FRAME_PARAMS[param]
+    parts = [p for p in re.split(r"[,\s]+", value.strip().strip("[]()")) if p]
+    if not 1 <= len(parts) <= 2:
+        return False, None
+
+    def one(tok: str):
+        t = tok.strip().strip("'\"").lower()
+        if t in ("none", "null"):
+            return None
+        if kind is bool:
+            if t in ("true", "1", "yes", "on"):
+                return True
+            if t in ("false", "0", "no", "off"):
+                return False
+            raise ValueError(tok)
+        f = float(t)
+        if f <= 0:      # drtsans schema: safeStringPositiveFloat, exclusiveMinimum 0
+            raise ValueError(tok)
+        return f
+
+    try:
+        vals = [one(p) for p in parts]
+    except ValueError:
+        return False, None
+    return True, (vals[0] if len(vals) == 1 else vals)
+
+
 def set_config_param(
     config_id: str, param: str, value: str, user_configs: dict[str, dict]
 ) -> tuple[bool, str]:
@@ -259,6 +302,12 @@ def set_config_param(
     # Sentinel values that clear a param back to None (drtsans treats null as "not set")
     if value.strip().lower() in ("none", "null"):
         parsed: object = None
+    elif param_lower in PER_FRAME_PARAMS:
+        ok, parsed = _parse_per_frame(param_lower, value)
+        if not ok:
+            want = "true/false" if PER_FRAME_PARAMS[param_lower] is bool else "a number"
+            return False, (f"Invalid value for {param}: {value} — give {want} for both frames, "
+                           f"or two values (frame 0, frame 1) like 'a,b'")
     elif param_lower in _FLOAT_PARAMS:
         # Always float, regardless of what `current` happens to be.
         try:
@@ -295,6 +344,9 @@ def set_config_param(
         user_configs[config_id] = {}
     user_configs[config_id][param_lower] = parsed
 
+    if isinstance(parsed, list):
+        return True, (f"Set {param}={parsed} for config {config_id} "
+                      f"(frame 0 = long-λ/low-Q: {parsed[0]}, frame 1 = short-λ/high-Q: {parsed[1]}).")
     return True, f"Set {param}={parsed} for config {config_id}."
 
 
