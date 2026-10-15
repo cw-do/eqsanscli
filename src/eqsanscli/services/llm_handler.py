@@ -147,6 +147,11 @@ WORKING TABLE:
 /trim <file|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out|--inplace] - Remove first/last N points (or a Q range) from finished I(Q) files; writes <name>_trim beside them
   "remove the first 3 and last 5 points of the merged data" → /trim merged_*_Iq.txt --first 3 --last 5
   "drop the last 5 points of 4m2.5a before stitching" → /stitch set all trim 4m2.5a --last 5   (then /stitch run)
+  "stitch … while trimming q<0.006" / "cut Q below 0.006 before merging" → /stitch set <sample|all> trim all --qmin 0.006
+  FRAME SKIPPING (…30hz): stitch groups hold <cfg>_frame0 (low Q) and <cfg>_frame1 (high Q), e.g.
+  4m2.5a30hz_frame0. For --qmin/--qmax use the frame name, the base cfg or "all" (all frames). For
+  --first/--last name the frame: "last 5 points of the high-Q frame" → trim 4m2.5a30hz_frame1 --last 5.
+  Several samples: one /stitch set per sample (or "all" when it is every sample in the table).
   "cut everything above Q 0.4 in s1" → /trim s1_*_Iq.dat --qmax 0.4
 /check                          - Run protocol checks (missing empty beam/transmission, unused transmissions, run-role clashes, scale origin). "check the table", "anything wrong?", "validate" → /check
 /reclass <runs> <class>         - Override run classification by run number (scatt/trans/bkg/bkgtrans/empty/sample/background/ignore)

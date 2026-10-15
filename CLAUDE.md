@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.54.2 | 2026-10-15 | Fix: **trim before stitching skipped frame-skipping groups.** Their configs are `<cfg>_frame0` (low Q) / `<cfg>_frame1` (high Q); "stitch … while trimming q<0.006" became `/stitch set a06 trim 4m2.5a30hz --qmin 0.006`, which matched nothing and was skipped for every sample (IPTS-38077). Now a base config (`4m2.5a30hz`) or `all` reaches every frame for `--qmin/--qmax` (a Q limit means the same on either frame); `--first/--last` with a name that covers several curves is refused as ambiguous, pointing to `_frame0`/`_frame1`. LLM reference explains frame names and routes "trim q<x" to `trim all --qmin x`. Checked on IPTS-38077 a06 (frame 0: 70 → 69, merged starts at 0.0066). |
 | 0.54.1 | 2026-10-15 | Fix: **`/stitch build` threw away the overlaps/target you set.** IPTS-38077: after `/stitch set all overlap 0.05 0.06`, new runs were reduced and "stitch the newly reduced data" ran `/stitch build`, which rebuilt every group with auto-suggested overlaps. A rebuild now keeps a sample's overlaps, target and trims when its configs are unchanged, and gives a new sample the overlaps/target last set with `/stitch set all …` for that configuration sequence (`state.stitch_defaults`, saved with the session); only otherwise auto-suggests. The message says which samples were kept / given your values / auto. `/stitch set all overlap auto` forgets the remembered overlaps. |
 | 0.54.0 | 2026-10-15 | **New `/trim`, and per-config trim before stitching.** `/trim <files|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out | --inplace]` removes edge points from finished I(Q) files (reduced or merged); "points" are real ones (NaN/empty edge rows don't count); writes `<name>_trim<ext>` beside the original (not matched by `*_Iq.dat` globs) with a `# trimmed:` header line, or `--inplace` keeping `<name>.untrimmed`. `/stitch set <idx|sample|all> trim <config> --first/--last/--qmin/--qmax` (or `none`) trims a configuration's curve before stitching — kept in the stitch table (saved, survives `/stitch build`), applied by `/stitch run`, recorded in the merged header and data, reproduced by `/export script --stitch`. Fix: that exported stitch block (v0.53.0) could not run — drtsans's `load_iqmod` defaults to a pandas header, not the tab MantidAscii `_Iq.dat`; now it reads/writes MantidAscii. Checked in drtsans: exported trimmed stitch == eqsanscli's (IPTS-38269 porsil, 128 rows, Δ=0). Also: headless "ready" reply moved inside the `try` (a SIGTERM right after it could kill the process silently). |
 | 0.53.2 | 2026-10-15 | Default OpenRouter model `openai/gpt-6-luna-pro` → **`openai/gpt-6-luna`** (owner's choice; checked listed on OpenRouter). Code default, first in `/models` (luna-pro stays selectable), `.env.example`; the local dev and `eqsanscli-stable` `.env` files, which override the code default, updated too (not in git). |
@@ -290,6 +291,30 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: trim before stitching works for frame-skipping groups (v0.54.2)
+
+Reported from IPTS-38077: "stitch a06, eq1-0, … using overlap range 0.04,0.05
+while trimming q<0.006" set the overlaps but every trim was "skipped": the
+assistant wrote `/stitch set <sample> trim 4m2.5a30hz --qmin 0.006`, while a
+30 Hz group's configs are `4m2.5a30hz_frame0` / `4m2.5a30hz_frame1`, and the
+v0.54.0 trim matched config names exactly. The LLM reference never mentioned
+the frame names.
+
+`commands/stitch._trim_targets`: the exact config, `all`, or a base config's
+frames. A Q limit applies to each addressed curve (a Q cut is the same on
+either frame); `--first/--last` addressed to more than one curve is refused as
+ambiguous (which frame's "first 3 points"?) with the frame names to use. LLM
+reference: frame naming, "trim q<x" → `trim all --qmin x`. Usage text updated.
+
+Checked on copies of IPTS-38077's a06 frame files, overlap 0.04–0.05: frame 0
+70 → 69 points (the 0.0048 point), frame 1 unchanged, merged file from 0.0066,
+both trims in its header.
+
+`tests/test_trim.py` (+2). 443 tests.
+
+**Files changed:** `commands/stitch.py`, `services/llm_handler.py`,
+`tests/test_trim.py`, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: /stitch build keeps the overlaps you set (v0.54.1)
 
 Reported from IPTS-38077: the overlap range was changed, the catalog refreshed,
@@ -412,38 +437,3 @@ updated. `tests/test_per_frame_params.py` (+6). 432 tests.
 `knowledge/configurations.md`, `knowledge/protocol.md`, SKILL.md,
 `tests/test_per_frame_params.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: /export script reproduces every parameter; --stitch (v0.53.0)
-
-From the sansbook planning review (item B8). `services/script_exporter.py` wrote
-a fixed map of ~25 parameters; a non-default value of anything else
-(`logqbinsperdecade`, `1dqbintype`, `uselogqbins*`, `incohfit_factor`,
-`normalization`, `usedefaultmask`, `timesliceoffset`/`period`, wedges, …) was
-silently not reproduced. EQVar (eqsanstools/eqsans_drtsans_script.py) creates an
-attribute `_<key>` for every top-level key of its Default.json configuration and
-`updateJsonFile` copies each into the drtsans json, so the exporter now adds
-every top-level parameter whose value differs from the template default
-(`config_manager._load_json_defaults`), skipping output dir/name, nested and
-elastic-reference keys (EQVar handles those itself). File names are the CLI's
-(`2.5m2.5a`; the legacy `.`→`o` spelling is gone), so script and CLI write the
-same files. `/export script` re-resolves the instrument calibration files first
-(`sync_state_configs`, as `/matchruns` does), puts each config's scale origin in
-a comment, returns `data` (`type: export_script`), and `--stitch` appends a block
-that re-creates the merged files with `drtsans.stitch.stitch_profiles` /
-`load_iqmod` / `save_iqmod` from the session's stitch table.
-
-**Verified, not assumed.** IPTS-38269's session (24 rows, 4m2.5a + 8m12a) was
-exported to scratch; the script was run in the drtsans env with `reduceNow`
-replaced by EQVar's `updateJsonFile`, `reduction_confirm` removed and the output
-dir pointed at scratch; the 24 jsons were compared field by field with
-`json_builder.build_reduction_json` for the same rows: identical except
-`dataDirectories` (the redirected output dir) and `schemaStamp`. The v0.52.0
-exporter on the same session differed only in `outputFileName` (`2o5`), because
-that session's non-defaults all happened to be in the old list — the new test
-pins a case that is not.
-
-`tests/test_export_complete.py` (+3). 426 tests.
-
-**Files changed:** `services/script_exporter.py`, `commands/export.py`,
-`services/llm_handler.py`, SKILL.md, `tests/test_export_complete.py`, CLAUDE.md,
-docs (regenerated), `src/eqsanscli/__init__.py`.

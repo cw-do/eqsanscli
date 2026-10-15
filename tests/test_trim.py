@@ -189,3 +189,39 @@ def test_rebuild_keeps_overlaps_and_gives_new_samples_the_all_choice(tmp_path, m
     _run(handle_stitch(["build"], st))
     g = {x.sample_name: x for x in st.stitch_groups}
     assert g["EQ2-0"].overlaps == [0.01, 0.02]                     # back to the builder's suggestion
+
+
+# --- frame-skipping groups (v0.54.2) ---------------------------------------------
+# IPTS-38077: "stitch … while trimming q<0.006" became
+# /stitch set a06 trim 4m2.5a30hz --qmin 0.006, and every group was skipped —
+# their configs are 4m2.5a30hz_frame0 / _frame1.
+
+def _frame_state(tmp: Path) -> SessionState:
+    q0, q1 = np.geomspace(0.004, 0.06, 40), np.geomspace(0.03, 0.4, 40)
+    f0 = _iq(tmp / "a06_4m2.5a30hz_frame_0_Iq.dat", q0, 1 / q0**2)
+    f1 = _iq(tmp / "a06_4m2.5a30hz_frame_1_Iq.dat", q1, 1.1 / q1**2)
+    st = SessionState(); st.output_directory = str(tmp)
+    st.stitch_groups = [StitchGroup(sample_name="a06", files=[str(f0), str(f1)],
+                                    configs=["4m2.5a30hz_frame0", "4m2.5a30hz_frame1"],
+                                    overlaps=[0.04, 0.05], output_file=str(tmp / "merged_a06_Iq.txt"))]
+    return st
+
+
+def test_base_config_q_limit_reaches_both_frames(tmp_path):
+    st = _frame_state(tmp_path)
+    res = _run(handle_stitch(["set", "a06", "trim", "4m2.5a30hz", "--qmin", "0.006"], st))
+    assert res.success and set(st.stitch_groups[0].trims) == {"4m2.5a30hz_frame0", "4m2.5a30hz_frame1"}
+    assert _run(handle_stitch(["run"], st)).success
+    d = np.loadtxt(tmp_path / "merged_a06_Iq.txt", comments="#")
+    assert d[:, 0].min() >= 0.006
+
+
+def test_all_and_ambiguous_first_last(tmp_path):
+    st = _frame_state(tmp_path)
+    _run(handle_stitch(["set", "all", "trim", "all", "--qmin", "0.006"], st))
+    assert len(st.stitch_groups[0].trims) == 2
+    st.stitch_groups[0].trims = {}
+    res = _run(handle_stitch(["set", "a06", "trim", "4m2.5a30hz", "--last", "5"], st))
+    assert st.stitch_groups[0].trims == {} and "ambiguous" in res.message
+    _run(handle_stitch(["set", "a06", "trim", "4m2.5a30hz_frame1", "--last", "5"], st))
+    assert st.stitch_groups[0].trims == {"4m2.5a30hz_frame1": {"last": 5}}

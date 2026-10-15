@@ -7,6 +7,41 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: /export script reproduces every parameter; --stitch (v0.53.0)
+
+From the sansbook planning review (item B8). `services/script_exporter.py` wrote
+a fixed map of ~25 parameters; a non-default value of anything else
+(`logqbinsperdecade`, `1dqbintype`, `uselogqbins*`, `incohfit_factor`,
+`normalization`, `usedefaultmask`, `timesliceoffset`/`period`, wedges, …) was
+silently not reproduced. EQVar (eqsanstools/eqsans_drtsans_script.py) creates an
+attribute `_<key>` for every top-level key of its Default.json configuration and
+`updateJsonFile` copies each into the drtsans json, so the exporter now adds
+every top-level parameter whose value differs from the template default
+(`config_manager._load_json_defaults`), skipping output dir/name, nested and
+elastic-reference keys (EQVar handles those itself). File names are the CLI's
+(`2.5m2.5a`; the legacy `.`→`o` spelling is gone), so script and CLI write the
+same files. `/export script` re-resolves the instrument calibration files first
+(`sync_state_configs`, as `/matchruns` does), puts each config's scale origin in
+a comment, returns `data` (`type: export_script`), and `--stitch` appends a block
+that re-creates the merged files with `drtsans.stitch.stitch_profiles` /
+`load_iqmod` / `save_iqmod` from the session's stitch table.
+
+**Verified, not assumed.** IPTS-38269's session (24 rows, 4m2.5a + 8m12a) was
+exported to scratch; the script was run in the drtsans env with `reduceNow`
+replaced by EQVar's `updateJsonFile`, `reduction_confirm` removed and the output
+dir pointed at scratch; the 24 jsons were compared field by field with
+`json_builder.build_reduction_json` for the same rows: identical except
+`dataDirectories` (the redirected output dir) and `schemaStamp`. The v0.52.0
+exporter on the same session differed only in `outputFileName` (`2o5`), because
+that session's non-defaults all happened to be in the old list — the new test
+pins a case that is not.
+
+`tests/test_export_complete.py` (+3). 426 tests.
+
+**Files changed:** `services/script_exporter.py`, `commands/export.py`,
+`services/llm_handler.py`, SKILL.md, `tests/test_export_complete.py`, CLAUDE.md,
+docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: headless events, cancel, read-only, session lock, one reply per command (v0.52.0)
 
 From the sansbook planning review (item B5), for an agent driving

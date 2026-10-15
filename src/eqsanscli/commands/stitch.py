@@ -304,6 +304,22 @@ async def _handle_show(args: list[str], state: SessionState) -> CommandResult:
     )
 
 
+def _trim_targets(cfg_arg: str, configs: list[str]) -> list[str]:
+    """Configs of a stitch group that `/stitch set … trim <cfg_arg>` addresses:
+    the exact config; "all"; or a base config's frames (4m2.5a30hz →
+    4m2.5a30hz_frame0, 4m2.5a30hz_frame1)."""
+    import re
+    from eqsanscli.models.config_id import normalize_config_id
+    if cfg_arg.lower() == "all":
+        return list(configs)
+    want = normalize_config_id(cfg_arg)
+    exact = [c for c in configs if normalize_config_id(c) == want]
+    if exact:
+        return exact
+    return [c for c in configs
+            if normalize_config_id(re.sub(r"_frame\d$", "", c, flags=re.IGNORECASE)) == want]
+
+
 def _cfg_key(configs: list[str]) -> str:
     """The stitch-defaults key for a configuration sequence ('8m12a|4m2.5a')."""
     return "|".join(configs)
@@ -362,7 +378,9 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             message="Usage: /stitch set <idx|sample|all> overlap <q1 q2 ...>\n"
             "       /stitch set <idx|sample|all> overlap auto [n=6]\n"
             "       /stitch set <idx|sample|all> target <index|config_id>\n"
-            "       /stitch set <idx|sample|all> trim <config> [--first N] [--last N] [--qmin Q] [--qmax Q]\n"
+            "       /stitch set <idx|sample|all> trim <config|all> [--first N] [--last N] [--qmin Q] [--qmax Q]\n"
+            "         (frame skipping: configs are <cfg>_frame0 (low Q) / <cfg>_frame1 (high Q);\n"
+            "          a Q limit given for <cfg> or 'all' applies to every frame)\n"
             "       /stitch set <idx|sample|all> trim <config> none      — clear\n"
             "       /stitch set --sample <name> target <index|config_id>",
         )
@@ -469,20 +487,33 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
                     "Usage: /stitch set <idx|sample|all> trim <config> [--first N] [--last N] "
                     "[--qmin Q] [--qmax Q]   (or: trim <config> none)"))
         results = []
+        refused = []
         for group in target_groups:
-            match = next((c for c in group.configs
-                          if normalize_config_id(c) == normalize_config_id(cfg_arg)), None)
-            if match is None:
+            matches = _trim_targets(cfg_arg, group.configs)
+            if not matches:
                 results.append(f"  [dim]{group.sample_name}: no {cfg_arg} in {group.configs} — skipped[/dim]")
                 continue
-            if clear:
-                group.trims.pop(match, None)
-                results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim cleared")
-            else:
-                group.trims[match] = spec.to_dict()
-                results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim {spec.describe()}")
+            # A frame-skipping group has <cfg>_frame0 / _frame1. A Q limit means the
+            # same on either frame, so the base name (or "all") reaches both; "first
+            # / last N points" of a base name could mean either frame — refuse.
+            exact = len(matches) == 1 and normalize_config_id(matches[0]) == normalize_config_id(cfg_arg)
+            if not clear and not exact and (spec.first or spec.last):
+                refused.append(group.sample_name)
+                continue
+            for match in matches:
+                if clear:
+                    group.trims.pop(match, None)
+                    results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim cleared")
+                else:
+                    group.trims[match] = spec.to_dict()
+                    results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim {spec.describe()}")
             if group.status == "done":
                 group.status = "ready"      # the merged file no longer matches the table
+        if refused:
+            results.append(
+                f"  [yellow]⚠ --first/--last with '{cfg_arg}' is ambiguous for {', '.join(refused)}: "
+                f"it names several curves. Give one (e.g. {cfg_arg}_frame0 for the low-Q frame, "
+                f"{cfg_arg}_frame1 for the high-Q frame), use --qmin/--qmax, or /trim the merged file.[/yellow]")
         return CommandResult(success=True, message=(
             "Trim before stitching (applied by /stitch run):\n" + "\n".join(results)))
 
