@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from eqsanscli.paths import app_root
 
-DEFAULT_MODEL = "openai/gpt-6-luna-pro"
+DEFAULT_MODEL = "openai/gpt-6-luna"
 FALLBACK_MODEL = "openai/gpt-5-mini"
 
 

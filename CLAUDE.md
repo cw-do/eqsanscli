@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.53.2 | 2026-10-15 | Default OpenRouter model `openai/gpt-6-luna-pro` → **`openai/gpt-6-luna`** (owner's choice; checked listed on OpenRouter). Code default, first in `/models` (luna-pro stays selectable), `.env.example`; the local dev and `eqsanscli-stable` `.env` files, which override the code default, updated too (not in git). |
 | 0.53.1 | 2026-10-15 | Fix: **per-frame incoherent-fit parameters in frame-skipping mode.** drtsans takes `fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted` as one value (both frames) or `[frame 0, frame 1]` (frame 0 = skip frame, long λ, low Q). `/set config` stored `0.02,0.10` / `[0.02, 0.10]` as a **string** — drtsans rejects it (`is not a number or a list`), so the reduction failed — and `true,false` for the flag as **False** (correction silently off for both frames). Now `a,b`, `[a, b]` or `a b` become a real two-element list, one value stays a scalar, `none` clears one frame, numbers must be > 0 (schema). Checked in drtsans: the new JSON validates (`reduction_parameters`, as `eqsans_reduction.py` loads it) and parses to per-frame windows. |
 | 0.53.0 | 2026-10-15 | **`/export script` reproduces the reduction** (sansbook review B8). It wrote a fixed list of ~25 parameters, so any other non-default value (log Q binning, normalization, wedges, time-slice offset…) was silently lost; it now writes every top-level parameter that differs from the template default (EQVar takes any `_<key>` of its Default.json), names files as the CLI does (`2.5m2.5a`, not `2o5m2o5a`), re-resolves instrument files first, notes each config's scale origin, and `--stitch` appends a `drtsans.stitch.stitch_profiles` block from the session's stitch table. Verified on IPTS-38269 (24 rows): the exported script, run in drtsans with `reduceNow` replaced by EQVar's `updateJsonFile`, produced jsons identical to eqsanscli's own bar output dir and timestamp. |
 | 0.52.0 | 2026-10-15 | **Headless mode for a driving agent** (sansbook review B5). `--events`: progress as JSON lines on stderr (`row_start`, `row_done` with outputs/note/error, `slice`, `batch_done`). One JSON reply per command always — the reduction/autopilot runners were outside the `try`, so an exception ended the process with no reply. SIGTERM during `/reduce` terminates the drtsans job, marks the row `cancelled`, saves, replies and exits; idle SIGTERM saves and exits. **One writer per folder**: a session lock (`_autosave.lock`, pid/host; stale if the holder is dead, or after 24 h from another node) — a second TUI or headless on the folder runs **read-only** (no autosave, `/reduce`/`/autopilot` refused); `--readonly` asks for it. Reduction summary adds `ok`, `cancelled`; first reply is `{"type": "ready", "read_only", "events"}`. |
@@ -287,6 +288,19 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: default LLM model gpt-6-luna (v0.53.2)
+
+Asked to use `openai/gpt-6-luna` instead of `openai/gpt-6-luna-pro` (set in
+v0.47.0). Checked that the id is in OpenRouter's model list. Changed
+`config/settings.py:DEFAULT_MODEL`, put it first in `/models` (luna-pro kept as
+an option) and in `.env.example`. The `.env` files in the dev tree and in
+`eqsanscli-stable` pin `OPENROUTER_MODEL` and override the code default, so both
+were updated as well (local config, not in git; the stable one takes effect on
+the next launch, independent of this release).
+
+**Files changed:** `config/settings.py`, `commands/models.py`, `.env.example`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: per-frame incoherent-fit parameters for frame skipping (v0.53.1)
 
 Asked how `incohfit_qmin`/`incohfit_qmax` work in frame-skipping mode. From the
@@ -453,47 +467,3 @@ Mantid 6.16.1.2) and cached in `~/.eqsanscli/drtsans_versions.json`.
 `version_info.py` (new), `headless.py`, `app.py`, `knowledge/protocol.md`,
 SKILL.md, `tests/test_stitch_records.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: stale calibrations flagged; the state behind each reduction kept (v0.50.0)
-
-From the sansbook planning review (items A4, A6).
-
-**A4 — stale calibration.** A calibration fits only the reduction it came from;
-change the mask or the Q binning and the porsil curve changes, but nothing said
-the scale was out of date (IPTS-38269 was recalibrated by hand three times in
-one afternoon). Rather than hooking `/set config` (which misses presets and the
-instrument resolver), the calibrate record now stores `physics`: the values of
-21 I(Q)-shaping parameters (`scale_service.CALIBRATION_PHYSICS`) **as the
-standard was reduced**, read from its input json — only those the json states,
-so a partial json cannot look stale. `stale_reason()` compares them with the
-config's current values whenever the scale is shown: `/show config`
-("STALE: maskfilename changed since the standard was reduced — recalibrate"),
-`/check` (SCL-05, warning) and a one-line `/reduce` warning. Recalibrating
-writes a new snapshot and clears it. Checked on IPTS-38269's real session: all
-21 parameters match both porsil jsons, no false alarm.
-
-**A6 — state kept.** `_autosave.json` was the only full copy of a session and
-was rewritten after every command; IPTS-37953's 56-row session was found
-replaced by an empty one. Now: (1) the autosave rotates to `_autosave.1…5.json`
-when the session's *shape* changes (IPTS, tables and row counts, config ids) —
-ordinary edits don't churn the history, and a session with rows is never
-overwritten by one without a copy surviving; (2) every reduction writes the
-exact state it runs with to `<outputdir>/.eqsanscli_reduce/<UTC>.json` — at the
-start of the TUI worker, the headless runner (`data.state_snapshot`) and
-autopilot's `_reduce_phase` (into the phase's own output dir), not in `/reduce`'s
-planning step; (3) `/continue` warns when it resumes another folder's autosave
-or an IPTS other than the folder's, and refuses to replace a session that has
-rows with another folder's state unless `--force`.
-
-Test hygiene: an existing autopilot test ran with the default `./output/` and
-would have written snapshots into the repo; it now uses `tmp_path`. My new test
-files use their own event loop (another test's `asyncio.run()` leaves none).
-
-`tests/test_records.py` (+5). 410 tests.
-
-**Files changed:** `services/scale_service.py`, `commands/calibrate.py`,
-`commands/check.py`, `commands/reduction.py`, `commands/session.py`,
-`models/session_state.py`, `services/autopilot.py`, `app.py`, `headless.py`,
-`services/llm_handler.py`, `knowledge/protocol.md`, SKILL.md,
-`tests/test_records.py`, `tests/test_autopilot_tostep.py`, tests (event loops),
-CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.

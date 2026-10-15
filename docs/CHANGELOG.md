@@ -7,6 +7,50 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: stale calibrations flagged; the state behind each reduction kept (v0.50.0)
+
+From the sansbook planning review (items A4, A6).
+
+**A4 — stale calibration.** A calibration fits only the reduction it came from;
+change the mask or the Q binning and the porsil curve changes, but nothing said
+the scale was out of date (IPTS-38269 was recalibrated by hand three times in
+one afternoon). Rather than hooking `/set config` (which misses presets and the
+instrument resolver), the calibrate record now stores `physics`: the values of
+21 I(Q)-shaping parameters (`scale_service.CALIBRATION_PHYSICS`) **as the
+standard was reduced**, read from its input json — only those the json states,
+so a partial json cannot look stale. `stale_reason()` compares them with the
+config's current values whenever the scale is shown: `/show config`
+("STALE: maskfilename changed since the standard was reduced — recalibrate"),
+`/check` (SCL-05, warning) and a one-line `/reduce` warning. Recalibrating
+writes a new snapshot and clears it. Checked on IPTS-38269's real session: all
+21 parameters match both porsil jsons, no false alarm.
+
+**A6 — state kept.** `_autosave.json` was the only full copy of a session and
+was rewritten after every command; IPTS-37953's 56-row session was found
+replaced by an empty one. Now: (1) the autosave rotates to `_autosave.1…5.json`
+when the session's *shape* changes (IPTS, tables and row counts, config ids) —
+ordinary edits don't churn the history, and a session with rows is never
+overwritten by one without a copy surviving; (2) every reduction writes the
+exact state it runs with to `<outputdir>/.eqsanscli_reduce/<UTC>.json` — at the
+start of the TUI worker, the headless runner (`data.state_snapshot`) and
+autopilot's `_reduce_phase` (into the phase's own output dir), not in `/reduce`'s
+planning step; (3) `/continue` warns when it resumes another folder's autosave
+or an IPTS other than the folder's, and refuses to replace a session that has
+rows with another folder's state unless `--force`.
+
+Test hygiene: an existing autopilot test ran with the default `./output/` and
+would have written snapshots into the repo; it now uses `tmp_path`. My new test
+files use their own event loop (another test's `asyncio.run()` leaves none).
+
+`tests/test_records.py` (+5). 410 tests.
+
+**Files changed:** `services/scale_service.py`, `commands/calibrate.py`,
+`commands/check.py`, `commands/reduction.py`, `commands/session.py`,
+`models/session_state.py`, `services/autopilot.py`, `app.py`, `headless.py`,
+`services/llm_handler.py`, `knowledge/protocol.md`, SKILL.md,
+`tests/test_records.py`, `tests/test_autopilot_tostep.py`, tests (event loops),
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: dash displacement series pair; unused transmissions reported; /check (v0.49.0)
 
 From the sansbook planning review (items A5, B4), with the owner's change: a
