@@ -25,6 +25,9 @@ class StitchGroup:
     # the full record — what produced output_file, also in its header.
     factors: list[float] = field(default_factory=list)
     pairs: list[dict] = field(default_factory=list)
+    # Per-config trim applied to that curve before stitching:
+    # {config: {"first": N, "last": M, "qmin": q, "qmax": q}} (trim_service.TrimSpec).
+    trims: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -37,6 +40,7 @@ class StitchGroup:
             "status": self.status,
             "factors": self.factors,
             "pairs": self.pairs,
+            "trims": self.trims,
         }
 
     @classmethod
@@ -494,7 +498,8 @@ def _auto_suggest_overlaps(files: list[str]) -> list[float]:
 
 
 def stitch_and_save(files: list[str], configs: list[str], overlaps: list[float],
-                    target_index: int, output_file: str, unit: str | None = None) -> dict:
+                    target_index: int, output_file: str, unit: str | None = None,
+                    trims: dict | None = None) -> dict:
     """Stitch, write the merged file with a header saying how, return that record.
 
     The record — target, per-pair overlap / factor / points in the window,
@@ -508,7 +513,17 @@ def stitch_and_save(files: list[str], configs: list[str], overlaps: list[float],
     from eqsanscli.services.calibration_service import sha256
     from eqsanscli.services.scale_service import STITCH_PLAUSIBLE
 
+    from eqsanscli.services.trim_service import TrimSpec, trim_profile
+
     profiles = [load_iq_native(f) for f in files]
+    trim_records: dict[str, dict] = {}
+    for k, cfg in enumerate(configs):
+        spec = TrimSpec.from_dict((trims or {}).get(cfg))
+        if spec.is_empty():
+            continue
+        profiles[k], res = trim_profile(profiles[k], spec)
+        trim_records[cfg] = {**spec.to_dict(), "n_before": res.n_before, "n_after": res.n_after,
+                             "removed_low": res.removed_low, "removed_high": res.removed_high}
     pairs: list[dict] = []
     stitched = stitch_profiles(profiles, overlaps, target_index, record=pairs)
     pairs.sort(key=lambda p: p["pair"][0])
@@ -525,6 +540,12 @@ def stitch_and_save(files: list[str], configs: list[str], overlaps: list[float],
                       f"{p['overlap'][1]:.5g}  factor {p['factor']:.6g}  points {configs[a]} "
                       f"{p['points_target'] if a == target_index else p['points_other']} / "
                       f"{configs[b]} {p['points_target'] if b == target_index else p['points_other']}")
+    for cfg, t in trim_records.items():
+        spec = TrimSpec.from_dict(t)
+        ends = [f"low-Q {t['removed_low'][0]:.4g}–{t['removed_low'][1]:.4g}"] if t["removed_low"] else []
+        ends += [f"high-Q {t['removed_high'][0]:.4g}–{t['removed_high'][1]:.4g}"] if t["removed_high"] else []
+        header.append(f"trim {cfg} before stitching: {spec.describe()} "
+                      f"({t['n_before']} → {t['n_after']} points; removed {', '.join(ends) or 'none'})")
     inputs = [{"file": os.path.abspath(f), "sha256": sha256(f)} for f in files]
     header.append("inputs: " + "; ".join(f"{os.path.basename(i['file'])} sha256 {i['sha256'][:16]}…"
                                          for i in inputs))
@@ -537,13 +558,14 @@ def stitch_and_save(files: list[str], configs: list[str], overlaps: list[float],
             "overlaps": [float(v) for v in overlaps],
             "factors": [p["factor"] for p in pairs], "pairs": pairs, "inputs": inputs,
             "unit": unit_label, "output_file": os.path.abspath(output_file),
-            "warnings": warnings}
+            "trims": trim_records, "warnings": warnings}
 
 
 def run_stitch(group: StitchGroup, unit: str | None = None) -> str:
     """Execute stitching for a single group. Returns output file path."""
     rec = stitch_and_save(group.files, group.configs, group.overlaps,
-                          group.target_profile_index, group.output_file, unit=unit)
+                          group.target_profile_index, group.output_file, unit=unit,
+                          trims=group.trims)
     group.factors = rec["factors"]
     group.pairs = rec["pairs"]
     group.status = "done"

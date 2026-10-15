@@ -81,6 +81,12 @@ async def _handle_build(args: list[str], state: SessionState) -> CommandResult:
             "  Check /set outputdir or /list iq to verify files exist.",
         )
 
+    # A rebuild keeps the per-config trims already set for a sample.
+    old = {g.sample_name: g.trims for g in (getattr(state, "stitch_groups", None) or [])
+           if getattr(g, "trims", None)}
+    for g in groups:
+        if g.sample_name in old:
+            g.trims = {c: t for c, t in old[g.sample_name].items() if c in g.configs}
     state.stitch_groups = groups
     stitchable = [g for g in groups if g.status != "1 config"]
     single = [g for g in groups if g.status == "1 config"]
@@ -255,9 +261,16 @@ async def _handle_show(args: list[str], state: SessionState) -> CommandResult:
     if not groups:
         return CommandResult(success=False, message="No stitch table. Use /stitch build first.")
 
+    from eqsanscli.services.trim_service import TrimSpec
+    trims = [f"  {g.sample_name}: " + "; ".join(f"{c} {TrimSpec.from_dict(t).describe()}"
+                                               for c, t in g.trims.items())
+             for g in groups if getattr(g, "trims", None)]
+    msg = f"Stitch table ({len(groups)} groups):"
+    if trims:
+        msg += "\n[bold]Trimmed before stitching:[/bold]\n" + "\n".join(trims)
     return CommandResult(
         success=True,
-        message=f"Stitch table ({len(groups)} groups):",
+        message=msg,
         data={"type": "stitch_table", "groups": [g.to_dict() for g in groups]},
     )
 
@@ -315,6 +328,8 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             message="Usage: /stitch set <idx|sample|all> overlap <q1 q2 ...>\n"
             "       /stitch set <idx|sample|all> overlap auto [n=6]\n"
             "       /stitch set <idx|sample|all> target <index|config_id>\n"
+            "       /stitch set <idx|sample|all> trim <config> [--first N] [--last N] [--qmin Q] [--qmax Q]\n"
+            "       /stitch set <idx|sample|all> trim <config> none      — clear\n"
             "       /stitch set --sample <name> target <index|config_id>",
         )
 
@@ -396,6 +411,39 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             return CommandResult(success=True, message=f"Set target for {len(target_groups)} samples:\n" + "\n".join(results))
         return CommandResult(success=True, message="\n".join(results))
 
+    if field == "trim":
+        # /stitch set <sel> trim <config> [--first N] [--last N] [--qmin Q] [--qmax Q] | none
+        from eqsanscli.commands.trim import parse_trim_flags
+        from eqsanscli.models.config_id import normalize_config_id
+        cfg_arg = args[2]
+        rest = args[3:]
+        clear = len(rest) == 1 and rest[0].lower() in ("none", "off", "clear")
+        spec = None
+        if not clear:
+            spec, extra_pos, extra, err = parse_trim_flags(rest)
+            if err or extra_pos or extra["out"] or extra["inplace"] or spec.is_empty():
+                return CommandResult(success=False, message=(
+                    (f"{err}\n" if err else "") +
+                    "Usage: /stitch set <idx|sample|all> trim <config> [--first N] [--last N] "
+                    "[--qmin Q] [--qmax Q]   (or: trim <config> none)"))
+        results = []
+        for group in target_groups:
+            match = next((c for c in group.configs
+                          if normalize_config_id(c) == normalize_config_id(cfg_arg)), None)
+            if match is None:
+                results.append(f"  [dim]{group.sample_name}: no {cfg_arg} in {group.configs} — skipped[/dim]")
+                continue
+            if clear:
+                group.trims.pop(match, None)
+                results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim cleared")
+            else:
+                group.trims[match] = spec.to_dict()
+                results.append(f"  [green]✓[/green] {group.sample_name}: {match} trim {spec.describe()}")
+            if group.status == "done":
+                group.status = "ready"      # the merged file no longer matches the table
+        return CommandResult(success=True, message=(
+            "Trim before stitching (applied by /stitch run):\n" + "\n".join(results)))
+
     if field == "output":
         for group in target_groups:
             group.output_file = args[2]
@@ -403,7 +451,7 @@ async def _handle_set(args: list[str], state: SessionState) -> CommandResult:
             return CommandResult(success=True, message=f"Set output file for all {len(target_groups)} samples: {args[2]}")
         return CommandResult(success=True, message=f"Set output file for {selector}: {args[2]}")
 
-    return CommandResult(success=False, message=f"Unknown stitch field: {field}. Use 'overlap', 'target', or 'output'.")
+    return CommandResult(success=False, message=f"Unknown stitch field: {field}. Use 'overlap', 'target', 'trim', or 'output'.")
 
 
 async def _handle_run(args: list[str], state: SessionState) -> CommandResult:
@@ -431,7 +479,8 @@ async def _handle_run(args: list[str], state: SessionState) -> CommandResult:
         try:
             rec = stitch_and_save(group.files, group.configs, group.overlaps,
                                   group.target_profile_index, group.output_file,
-                                  unit=scale_service.unit_for_configs(state, group.configs))
+                                  unit=scale_service.unit_for_configs(state, group.configs),
+                                  trims=group.trims)
             group.factors, group.pairs, group.status = rec["factors"], rec["pairs"], "done"
             n_ok += 1
             fac = ", ".join(f"{f:.4g}" for f in rec["factors"])

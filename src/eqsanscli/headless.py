@@ -351,10 +351,10 @@ def run_headless(argv: list[str] | None = None) -> None:
     ready = "eqsanscli headless mode ready"
     if SessionState.READ_ONLY:
         ready += f" (READ-ONLY: {SessionState.READ_ONLY_REASON})"
-    _emit({"success": True, "message": ready,
-           "data": {"type": "ready", "read_only": SessionState.READ_ONLY, "events": _EVENTS}})
-
     try:
+        # Inside the try: a SIGTERM right after "ready" must still save and reply.
+        _emit({"success": True, "message": ready,
+               "data": {"type": "ready", "read_only": SessionState.READ_ONLY, "events": _EVENTS}})
         for line in sys.stdin:
             cmd = line.strip()
             if not cmd:

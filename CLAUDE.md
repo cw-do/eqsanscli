@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.54.0 | 2026-10-15 | **New `/trim`, and per-config trim before stitching.** `/trim <files|pattern> [--first N] [--last N] [--qmin Q] [--qmax Q] [-o out | --inplace]` removes edge points from finished I(Q) files (reduced or merged); "points" are real ones (NaN/empty edge rows don't count); writes `<name>_trim<ext>` beside the original (not matched by `*_Iq.dat` globs) with a `# trimmed:` header line, or `--inplace` keeping `<name>.untrimmed`. `/stitch set <idx|sample|all> trim <config> --first/--last/--qmin/--qmax` (or `none`) trims a configuration's curve before stitching — kept in the stitch table (saved, survives `/stitch build`), applied by `/stitch run`, recorded in the merged header and data, reproduced by `/export script --stitch`. Fix: that exported stitch block (v0.53.0) could not run — drtsans's `load_iqmod` defaults to a pandas header, not the tab MantidAscii `_Iq.dat`; now it reads/writes MantidAscii. Checked in drtsans: exported trimmed stitch == eqsanscli's (IPTS-38269 porsil, 128 rows, Δ=0). Also: headless "ready" reply moved inside the `try` (a SIGTERM right after it could kill the process silently). |
 | 0.53.2 | 2026-10-15 | Default OpenRouter model `openai/gpt-6-luna-pro` → **`openai/gpt-6-luna`** (owner's choice; checked listed on OpenRouter). Code default, first in `/models` (luna-pro stays selectable), `.env.example`; the local dev and `eqsanscli-stable` `.env` files, which override the code default, updated too (not in git). |
 | 0.53.1 | 2026-10-15 | Fix: **per-frame incoherent-fit parameters in frame-skipping mode.** drtsans takes `fitInelasticIncoh`, `incohfit_qmin`, `incohfit_qmax`, `incohfit_factor`, `incohfit_intensityweighted` as one value (both frames) or `[frame 0, frame 1]` (frame 0 = skip frame, long λ, low Q). `/set config` stored `0.02,0.10` / `[0.02, 0.10]` as a **string** — drtsans rejects it (`is not a number or a list`), so the reduction failed — and `true,false` for the flag as **False** (correction silently off for both frames). Now `a,b`, `[a, b]` or `a b` become a real two-element list, one value stays a scalar, `none` clears one frame, numbers must be > 0 (schema). Checked in drtsans: the new JSON validates (`reduction_parameters`, as `eqsans_reduction.py` loads it) and parses to per-frame windows. |
 | 0.53.0 | 2026-10-15 | **`/export script` reproduces the reduction** (sansbook review B8). It wrote a fixed list of ~25 parameters, so any other non-default value (log Q binning, normalization, wedges, time-slice offset…) was silently lost; it now writes every top-level parameter that differs from the template default (EQVar takes any `_<key>` of its Default.json), names files as the CLI does (`2.5m2.5a`, not `2o5m2o5a`), re-resolves instrument files first, notes each config's scale origin, and `--stitch` appends a `drtsans.stitch.stitch_profiles` block from the session's stitch table. Verified on IPTS-38269 (24 rows): the exported script, run in drtsans with `reduceNow` replaced by EQVar's `updateJsonFile`, produced jsons identical to eqsanscli's own bar output dir and timestamp. |
@@ -288,6 +289,55 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: /trim, and trimming a configuration before stitching (v0.54.0)
+
+Asked for a command to remove the first N or last N points of I(Q) data,
+"like from the merged or stitched data", and then for both options: finished
+files, and per configuration before stitching.
+
+`services/trim_service.py` holds one rule used everywhere: `TrimSpec(first,
+last, qmin, qmax)`; "first/last N" count *real* points (finite, non-zero
+intensity) after the Q limits, and everything beyond a cut edge goes with it
+(drtsans's NaN edge rows included); trimming that would leave nothing is an
+error. `trim_file` keeps any column count and the `#` header, adds a
+`# trimmed: first 3, last 5 (100 → 92 points; low-Q removed …, high-Q removed …)`
+line, and writes `<name>_trim<ext>` (outside `*_Iq.dat` globs, so the stitch
+table never picks it up) or, with `--inplace`, rewrites the file after saving
+`<name>.untrimmed` once.
+
+`/trim` (new, `commands/trim.py`): files or patterns (cwd, then the output
+dir), strict flags, `-o` only for one file, never re-trims `_trim` outputs or
+backups, `data` `{"type": "trim", …}`, NOTE.md result line.
+
+Before stitching: `StitchGroup.trims` ({config: spec}); `/stitch set <sel> trim
+<config> …` / `… none`; `stitch_and_save(…, trims=)` trims each curve before
+`stitch_profiles` and records it (header line per config, `trims` in the record
+and `/stitch run` data); `/stitch show` lists active trims; `/stitch build` keeps
+a sample's trims; the session saves them. `/export script --stitch` writes a
+`_trim` helper (IQmod slices) and per-config trims.
+
+**Found while checking in drtsans:** v0.53.0's exported stitch block called
+`load_iqmod(f)`, whose default format is a space-separated pandas header — it
+cannot read drtsans's own tab-separated MantidAscii `_Iq.dat`, so the block
+failed on any real file (the v0.53.0 test only compiled the script). It now
+uses `load_iqmod(f, sep='\t', header_type='MantidAscii')` and
+`save_iqmod(…, sep='\t')`, as eqsanstools does. Verified end to end on
+IPTS-38269's porsil (8m12a first 2, 4m2.5a last 5): the exported block run in
+drtsans and eqsanscli's `/stitch run` gave identical merged files (128 rows,
+intensity difference 0).
+
+Also fixed: headless emitted its "ready" reply before entering the `try` that
+handles termination, so a SIGTERM right after "ready" could end the process
+with no reply (the idle-SIGTERM test caught it intermittently).
+
+`tests/test_trim.py` (+8). 440 tests.
+
+**Files changed:** `services/trim_service.py` (new), `commands/trim.py` (new),
+`commands/stitch.py`, `commands/registry.py`, `services/merge_service.py`,
+`services/script_exporter.py`, `services/note_service.py`,
+`services/llm_handler.py`, `headless.py`, `app.py`, SKILL.md,
+`tests/test_trim.py`, CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: default LLM model gpt-6-luna (v0.53.2)
 
 Asked to use `openai/gpt-6-luna` instead of `openai/gpt-6-luna-pro` (set in
@@ -416,54 +466,4 @@ SIGTERM, runner exception still replies, SIGTERM mid-reduce cancels and exits).
 **Files changed:** `headless.py`, `services/session_lock.py` (new),
 `models/session_state.py`, `commands/reduction.py`, `commands/autopilot.py`,
 `app.py`, SKILL.md, `tests/test_headless.py`, CLAUDE.md, docs (regenerated),
-`src/eqsanscli/__init__.py`.
-
-### 2026-10-15: stitch records, NOTE.md results, plain headless data, /version data (v0.51.0)
-
-From the sansbook planning review (items B1, B2, B3, B6, B7, B9, B10).
-
-**Stitch (B1, B2, B9).** The factor was computed in `_scaling_factor`, applied
-and discarded; the merged file said `# I(Q)` and nothing else; `/stitch run`
-returned only a message; `stitch_groups` was never saved; and autopilot stored a
-default target while it stitched with the smart plan's (and widened overlaps on
-retry), so the state disagreed with the file. Now `stitch_profiles` can record
-each pair, and `merge_service.stitch_and_save` is the one place that stitches,
-writes the header (version, UTC, target, per-pair overlap / factor / points of
-each profile in the window, inputs with sha256, unit) and returns the record —
-used by `/stitch run` (now `data: {"type": "stitch_result", "groups": […]}`) and
-by the smart planner (`StitchPlan.record`), from which autopilot's
-`_record_stitch` updates the stored group. `StitchGroup` gains `factors` and
-`pairs`, and the session saves `stitch_groups`. Units come from
-`scale_service.unit_for_configs` (a.u. when uncalibrated). Factors outside
-0.01–1000 warn (STC-05 enforced). Verified on IPTS-38269's porsil: identical to
-the old stitch to the file's 6 significant digits; factor 1.0045.
-
-**NOTE.md (B3).** `note_service.result_summary` adds an indented `→` line after
-`/calibrate`, `/stitch run`, `/check`, `/matchruns`, scale changes, and at the
-end of each reduction (TUI worker and headless runner). Day headers name the
-eqsanscli version and commit; session files record `eqsanscli_version`.
-
-**Headless (B6).** `_emit` strips Rich markup from `data` too; `_strip_markup`
-now uses Rich's own parser, so labels like `[4m2.5a30hz]` (which the old regex
-deleted from messages) survive. Rows store `outputs` (every file the reduction
-wrote) and `note`; `/show table` data adds `output_dir`, `output_override`,
-`outputs`, `note`.
-
-**/version (B7).** Already existed; it now returns data (`version_info`:
-eqsanscli, commit from the release's VERSION or git, root, drtsans channel,
-drtsans and Mantid versions). drtsans is asked only on `/version --probe`
-(runs a two-line script through the drtsans wrapper; 6 s here: drtsans 1.35.0,
-Mantid 6.16.1.2) and cached in `~/.eqsanscli/drtsans_versions.json`.
-
-**B10.** `/stitch set … overlap auto` defaulted to 4 points; its usage and
-`_auto_overlap_centered` said 6. Now 6.
-
-`tests/test_stitch_records.py` (+8). 418 tests.
-
-**Files changed:** `services/merge_service.py`, `services/smart_stitch.py`,
-`services/autopilot.py`, `services/scale_service.py`, `services/note_service.py`,
-`services/reduction_service.py`, `commands/stitch.py`, `commands/router.py`,
-`commands/catalog.py`, `models/session_state.py`, `models/working_table.py`,
-`version_info.py` (new), `headless.py`, `app.py`, `knowledge/protocol.md`,
-SKILL.md, `tests/test_stitch_records.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.

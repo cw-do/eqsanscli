@@ -293,13 +293,39 @@ def _emit_stitch_block(lines: list[str], groups: list) -> None:
     lines.append(f"# {'=' * 60}")
     lines.append("# Stitching — from the session's stitch table (target index, overlaps)")
     lines.append(f"# {'=' * 60}")
+    any_trim = any(getattr(g, "trims", None) for g in todo)
+    if any_trim:
+        lines.append("from drtsans.dataobjects import IQmod")
+        lines.append("import numpy as np")
+        lines.append("def _trim(p, t):")
+        lines.append("    # eqsanscli's /stitch set … trim: first/last N real (finite, non-zero) points, Q limits")
+        lines.append("    if not t:")
+        lines.append("        return p")
+        lines.append("    q, i = np.asarray(p.mod_q), np.asarray(p.intensity)")
+        lines.append("    keep = np.ones(len(q), bool)")
+        lines.append("    if t.get('qmin') is not None: keep &= q >= t['qmin']")
+        lines.append("    if t.get('qmax') is not None: keep &= q <= t['qmax']")
+        lines.append("    real = sorted(np.where(np.isfinite(i) & (i != 0) & keep)[0], key=lambda k: q[k])")
+        lines.append("    if t.get('first'): keep &= q > q[real[:t['first']][-1]]")
+        lines.append("    if t.get('last'): keep &= q < q[real[-t['last']:][0]]")
+        lines.append("    sub = lambda a: None if a is None else np.asarray(a)[keep]")
+        lines.append("    return IQmod(intensity=sub(p.intensity), error=sub(p.error), mod_q=sub(p.mod_q),")
+        lines.append("                 delta_mod_q=sub(p.delta_mod_q), wavelength=sub(p.wavelength))")
+        lines.append("")
     lines.append("stitch_table = [")
     for g in todo:
+        trims = [dict((getattr(g, "trims", {}) or {}).get(c, {})) for c in g.configs]
         lines.append(f"    ({g.files!r}, {list(g.overlaps)!r}, {int(g.target_profile_index)}, "
-                     f"{g.output_file!r}),")
+                     f"{g.output_file!r}, {trims!r}),")
     lines.append("]")
-    lines.append("for files, overlaps, target, merged_file in stitch_table:")
-    lines.append("    profiles = [load_iqmod(f) for f in files]")
+    lines.append("for files, overlaps, target, merged_file, trims in stitch_table:")
+    if any_trim:
+        lines.append("    profiles = [_trim(load_iqmod(f, sep='\\t', header_type='MantidAscii'), t)"
+                     " for f, t in zip(files, trims)]")
+    else:
+        lines.append("    profiles = [load_iqmod(f, sep='\\t', header_type='MantidAscii') for f in files]")
     lines.append("    merged = stitch_profiles(profiles, overlaps, target_profile_index=target)")
-    lines.append("    save_iqmod(merged, merged_file)")
+    # drtsans writes _Iq.dat as tab-separated MantidAscii; load_iqmod's default is a
+    # space-separated pandas header, which cannot read them (v0.53.0 used it).
+    lines.append("    save_iqmod(merged, merged_file, sep='\\t', float_format='%.6E')")
     lines.append("")

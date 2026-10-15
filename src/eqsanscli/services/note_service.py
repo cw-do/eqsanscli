@@ -159,6 +159,11 @@ def result_summary(cmd_name: str, result) -> str | None:
                             for p in g["pairs"])
             parts.append(f"{g['sample']} (target {g['target_config']}, {g['unit']}): {ovl}")
         return " | ".join(parts) if parts else None
+    if kind == "trim":
+        ok = [f for f in d.get("files", []) if "output" in f]
+        spec = ", ".join(f"{k} {v}" for k, v in (d.get("spec") or {}).items())
+        return (f"trimmed {spec} on {len(ok)} file(s): "
+                + "; ".join(f"{os.path.basename(f['output'])} {f['n_before']}→{f['n_after']}" for f in ok[:6]))
     if kind == "check":
         f = d.get("findings", [])
         nb = sum(x["severity"] == "blocking" for x in f)

@@ -7,6 +7,56 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: stitch records, NOTE.md results, plain headless data, /version data (v0.51.0)
+
+From the sansbook planning review (items B1, B2, B3, B6, B7, B9, B10).
+
+**Stitch (B1, B2, B9).** The factor was computed in `_scaling_factor`, applied
+and discarded; the merged file said `# I(Q)` and nothing else; `/stitch run`
+returned only a message; `stitch_groups` was never saved; and autopilot stored a
+default target while it stitched with the smart plan's (and widened overlaps on
+retry), so the state disagreed with the file. Now `stitch_profiles` can record
+each pair, and `merge_service.stitch_and_save` is the one place that stitches,
+writes the header (version, UTC, target, per-pair overlap / factor / points of
+each profile in the window, inputs with sha256, unit) and returns the record —
+used by `/stitch run` (now `data: {"type": "stitch_result", "groups": […]}`) and
+by the smart planner (`StitchPlan.record`), from which autopilot's
+`_record_stitch` updates the stored group. `StitchGroup` gains `factors` and
+`pairs`, and the session saves `stitch_groups`. Units come from
+`scale_service.unit_for_configs` (a.u. when uncalibrated). Factors outside
+0.01–1000 warn (STC-05 enforced). Verified on IPTS-38269's porsil: identical to
+the old stitch to the file's 6 significant digits; factor 1.0045.
+
+**NOTE.md (B3).** `note_service.result_summary` adds an indented `→` line after
+`/calibrate`, `/stitch run`, `/check`, `/matchruns`, scale changes, and at the
+end of each reduction (TUI worker and headless runner). Day headers name the
+eqsanscli version and commit; session files record `eqsanscli_version`.
+
+**Headless (B6).** `_emit` strips Rich markup from `data` too; `_strip_markup`
+now uses Rich's own parser, so labels like `[4m2.5a30hz]` (which the old regex
+deleted from messages) survive. Rows store `outputs` (every file the reduction
+wrote) and `note`; `/show table` data adds `output_dir`, `output_override`,
+`outputs`, `note`.
+
+**/version (B7).** Already existed; it now returns data (`version_info`:
+eqsanscli, commit from the release's VERSION or git, root, drtsans channel,
+drtsans and Mantid versions). drtsans is asked only on `/version --probe`
+(runs a two-line script through the drtsans wrapper; 6 s here: drtsans 1.35.0,
+Mantid 6.16.1.2) and cached in `~/.eqsanscli/drtsans_versions.json`.
+
+**B10.** `/stitch set … overlap auto` defaulted to 4 points; its usage and
+`_auto_overlap_centered` said 6. Now 6.
+
+`tests/test_stitch_records.py` (+8). 418 tests.
+
+**Files changed:** `services/merge_service.py`, `services/smart_stitch.py`,
+`services/autopilot.py`, `services/scale_service.py`, `services/note_service.py`,
+`services/reduction_service.py`, `commands/stitch.py`, `commands/router.py`,
+`commands/catalog.py`, `models/session_state.py`, `models/working_table.py`,
+`version_info.py` (new), `headless.py`, `app.py`, `knowledge/protocol.md`,
+SKILL.md, `tests/test_stitch_records.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: stale calibrations flagged; the state behind each reduction kept (v0.50.0)
 
 From the sansbook planning review (items A4, A6).

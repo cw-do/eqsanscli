@@ -955,6 +955,8 @@ class EQSANSApp(App):
             "[bold cyan]Working Table:[/]\n"
             "  /show table                   — Show current working table\n"
             "  /show table --sample <name>   — Filter by sample name (read-only)\n"
+            "  /trim <files> --first N --last N — Drop edge points of finished I(Q) files (→ <name>_trim)\n"
+            "  /stitch set <s|all> trim <cfg> --last N — Drop a config's edge points before stitching\n"
             "  /check                        — Protocol checks: missing runs, unused transmissions, clashes, scale origin\n"
             "  /reclass <runs> <class>       — Override run class (scatt/trans/bkg/bkgtrans/empty/sample/background/ignore)\n"
             "  /reclass --sample <name> <class> — Reclass all runs whose title contains <name>\n"
