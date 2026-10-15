@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.51.0</div>
+          data reduction tool &middot; v0.52.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,11 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-10-15-plot-never-uploads-by-itself-v0476">2026-10-15: /plot never uploads by itself (v0.47.6)<a class="anchor" href="#2026-10-15-plot-never-uploads-by-itself-v0476">#</a></h3>
+<p>From the sansbook planning review (2026-10-15, item A1), verified in code: <code>handle_plot</code> auto-saved the figure when <code>DISPLAY</code> was unset and then called <code>share_files([result_path])</code>, uploading it anonymously to here.now — a public URL, valid 24 h — with no flag and no prompt. That covered every headless run, every SSH session without X, and autopilot&#x27;s step 13. NOTE.md logs commands, not their messages, so whether earlier experiments&#x27; figures were uploaded cannot be told from the records (the links have expired either way).</p>
+<p>Now: the PNG is saved and the message points to it, with a hint that <code><a href="commands.html#cmd-share">/share</a></code> exists. <code><a href="commands.html#cmd-share">/share</a></code> is unchanged in reach — an explicit request uploads, in the TUI and in headless mode (owner: &quot;when requested explicitly, you can share&quot;) — and its reply says the link is public. The LLM prompt restricts <code><a href="commands.html#cmd-share">/share</a></code> to explicit share/upload/publish requests. SKILL.md and README say the same.</p>
+<p><code>tests/test_plot_share.py</code> (+2): no-display <code><a href="commands.html#cmd-plot">/plot</a></code> writes a PNG with <code>share_files</code> patched to fail the test; <code><a href="commands.html#cmd-share">/share</a></code> names the link as public.</p>
+<p><strong>Files changed:</strong> <code>commands/data.py</code>, <code>commands/share.py</code>, <code>services/llm_handler.py</code>, SKILL.md, README.md, <code>tests/test_plot_share.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-10-02-banner-recommends-a-12035-window-v0475">2026-10-02: banner recommends a 120×35 window (v0.47.5)<a class="anchor" href="#2026-10-02-banner-recommends-a-12035-window-v0475">#</a></h3>
 <p>Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible only as a request to the terminal (<code>ESC[8;rows;cols t</code>, what <code>resize -s</code> sends), honoured by VTE terminals (the analysis-cluster desktop), macOS Terminal and PuTTY, but ignored by xterm (allowWindowOps off by default), Windows Terminal, VS Code, tmux/screen and maximized windows — and a resize outlives the program. The user preferred an instruction: the Getting Started banner now ends with &quot;Best viewed in a terminal window of at least 120×35 — enlarge it for readable tables.&quot; Text only.</p>
 <p><strong>Files changed:</strong> <code>app.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>

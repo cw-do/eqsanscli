@@ -226,6 +226,8 @@ class SessionState:
             "command_history": self.command_history[-500:],  # keep last 500
         }
         if os.path.basename(path) == "_autosave.json":
+            if SessionState.READ_ONLY:
+                return path
             self._rotate_autosave(path, data)
         with open(path, "w") as f:
             json.dump(data, f, indent=2, default=str)
@@ -243,6 +245,10 @@ class SessionState:
         return path
 
     AUTOSAVE_GENERATIONS = 5
+    # Read-only process (headless --readonly, or another process holds this
+    # folder's session lock — services/session_lock): never autosave.
+    READ_ONLY: bool = False
+    READ_ONLY_REASON: str = ""
 
     @staticmethod
     def _shape(data: dict) -> tuple:

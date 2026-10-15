@@ -74,8 +74,27 @@ You are now connected — send `/commands` to stdin and read JSON responses from
   ```json
   {"success": true, "message": "Loaded 120 runs", "data": null}
   ```
-- **Progress:** long-running commands (`/reduce`, `/autopilot`) stream progress lines to stderr prefixed with `progress:`
-- **Session:** state is auto-saved after every command. On restart, previous session is auto-resumed.
+- **Progress:** long-running commands (`/reduce`, `/autopilot`) stream progress lines to stderr prefixed with `progress:`.
+  With `eqsanscli-headless --events`, progress is JSON lines on stderr instead:
+  `{"event": "row_start", "row", "sample", "config", "index", "total"}`,
+  `{"event": "row_done", "row", "status", "elapsed", "outputs", "note"|"error"}`,
+  `{"event": "slice", "row", "n"}` (time-sliced rows), `{"event": "batch_done", "total",
+  "success", "failed", "cancelled", "elapsed"}`.
+- **One reply per command**, always — an exception (even inside a reduction) becomes
+  `{"success": false, "message": "Error: …", "data": {"type": "error", "traceback": …}}`
+  and the process carries on.
+- **Ready:** the first reply after start is `{"data": {"type": "ready", "read_only", "events"}}`.
+- **Reduction summary** `data` (`type: reduction_complete`) has `ok` (true only when no row
+  failed and nothing was cancelled), `cancelled`, `state_snapshot` (the exact state used,
+  under `<outputdir>/.eqsanscli_reduce/`) — `success` stays true for compatibility.
+- **Cancel:** SIGTERM during `/reduce` terminates the drtsans job, marks that row
+  `cancelled` (the rest unchanged), autosaves, replies, and exits. SIGTERM while idle
+  saves and exits.
+- **One writer per folder:** the first eqsanscli (TUI or headless) on a working folder takes
+  `.eqsanscli/sessions/_autosave.lock`; a second one starts **read-only** (`ready.read_only`
+  true, no autosave, `/reduce` and `/autopilot` refused). `--readonly` asks for that
+  explicitly — use it for queries while another process works on the session.
+- **Session:** state is auto-saved after every command (not when read-only). On restart, previous session is auto-resumed.
 
 #### Response Schema
 

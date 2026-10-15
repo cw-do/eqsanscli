@@ -7,6 +7,29 @@ the version it shipped in.
 
 ---
 
+### 2026-10-15: /plot never uploads by itself (v0.47.6)
+
+From the sansbook planning review (2026-10-15, item A1), verified in code:
+`handle_plot` auto-saved the figure when `DISPLAY` was unset and then called
+`share_files([result_path])`, uploading it anonymously to here.now — a public
+URL, valid 24 h — with no flag and no prompt. That covered every headless run,
+every SSH session without X, and autopilot's step 13. NOTE.md logs commands, not
+their messages, so whether earlier experiments' figures were uploaded cannot be
+told from the records (the links have expired either way).
+
+Now: the PNG is saved and the message points to it, with a hint that `/share`
+exists. `/share` is unchanged in reach — an explicit request uploads, in the TUI
+and in headless mode (owner: "when requested explicitly, you can share") — and
+its reply says the link is public. The LLM prompt restricts `/share` to explicit
+share/upload/publish requests. SKILL.md and README say the same.
+
+`tests/test_plot_share.py` (+2): no-display `/plot` writes a PNG with
+`share_files` patched to fail the test; `/share` names the link as public.
+
+**Files changed:** `commands/data.py`, `commands/share.py`,
+`services/llm_handler.py`, SKILL.md, README.md, `tests/test_plot_share.py`,
+CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-10-02: banner recommends a 120×35 window (v0.47.5)
 
 Asked whether eqsanscli could enlarge a too-small terminal to 120×35. Possible

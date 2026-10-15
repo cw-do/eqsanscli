@@ -181,6 +181,22 @@ class EQSANSApp(App):
         )
         log.write(Text.from_markup(logo))
 
+        # One writer per folder (services/session_lock): if another eqsanscli
+        # holds this folder's session, run read-only rather than race its autosave.
+        try:
+            from eqsanscli.services import session_lock
+            ok, other = session_lock.acquire("tui")
+            if not ok:
+                SessionState.READ_ONLY = True
+                SessionState.READ_ONLY_REASON = (
+                    f"Another eqsanscli holds this folder's session ({session_lock.describe(other)}).")
+                log.write(Text.from_markup(
+                    f"  [bold yellow]🔒 Read-only:[/bold yellow] {SessionState.READ_ONLY_REASON}\n"
+                    "  Nothing you do here is autosaved, and /reduce and /autopilot are off. "
+                    "Close the other session (or run from another folder) to work here.\n"))
+        except Exception:
+            pass
+
         autosave = SessionState.auto_save_path()
         if os.path.exists(autosave):
             log.write(Text.from_markup(

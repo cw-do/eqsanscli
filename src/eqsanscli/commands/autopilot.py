@@ -83,6 +83,10 @@ _USAGE = (
 
 
 async def handle_autopilot(args: list[str], state: SessionState) -> CommandResult:
+    from eqsanscli.models.session_state import SessionState as _SS
+    if _SS.READ_ONLY:
+        return CommandResult(success=False, message=(
+            f"Read-only session — /autopilot is disabled. {_SS.READ_ONLY_REASON}"))
     if not args:
         return CommandResult(success=False, message=_USAGE)
 

@@ -42,6 +42,10 @@ def _summarize_error(out_file: str, err_file: str, fallback: str = "") -> str:
 
 
 async def handle_reduce(args: list[str], state: SessionState) -> CommandResult:
+    from eqsanscli.models.session_state import SessionState as _SS
+    if _SS.READ_ONLY:
+        return CommandResult(success=False, message=(
+            f"Read-only session — /reduce is disabled. {_SS.READ_ONLY_REASON}"))
     if not args or args[0].lower() == "help":
         return CommandResult(
             success=False,

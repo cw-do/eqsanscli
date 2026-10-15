@@ -47,9 +47,33 @@ def _emit(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
+# --events: progress as JSON lines on stderr ({"event": "row_start", …}) instead
+# of "progress: …" text, so a caller can follow a long /reduce (sansbook B5).
+_EVENTS = False
+# Set by SIGTERM: cancels a running reduction (drtsans child terminated, row
+# marked cancelled), then the loop autosaves, replies and exits.
+_TERMINATE = threading.Event()
+_REDUCING = threading.Event()
+
+
+def _on_sigterm(*_: Any) -> None:
+    """During a reduction: cancel it (the runner replies and the loop exits).
+    Idle: leave now, through the same save-and-reply path as end of input."""
+    _TERMINATE.set()
+    if not _REDUCING.is_set():
+        raise KeyboardInterrupt
+
+
+def _event(**fields: Any) -> None:
+    if _EVENTS:
+        sys.stderr.write(json.dumps(fields, default=str) + "\n")
+        sys.stderr.flush()
+
+
 def _progress(msg: str) -> None:
-    """Write a progress line to stderr."""
-    sys.stderr.write(f"progress: {msg}\n")
+    """Write a progress line to stderr (suppressed in --events mode)."""
+    if not _EVENTS:
+        sys.stderr.write(f"progress: {msg}\n")
     sys.stderr.flush()
 
 
@@ -113,6 +137,7 @@ def _run_reduction_sync(
     total = len(indices)
     n_success = 0
     n_fail = 0
+    n_cancelled = 0
     results_detail: list[dict] = []
 
     _progress(f"Reducing {total} run(s) -> {output_dir}")
@@ -136,14 +161,28 @@ def _run_reduction_sync(
             bkg_info = " no_bkg"
         _progress(f"[{i+1}/{total}] reducing {row.sample_name} ({row.configuration}){bkg_info} {remaining} left{eta_str}")
 
+        if _TERMINATE.is_set():
+            break
+        _event(event="row_start", row=idx, sample=row.sample_name, config=row.configuration,
+               index=i + 1, total=total)
         row.status = "reducing"
         result = reduce_row(
             row=row, ipts=state.ipts,
             user_configs=state.configurations, output_dir=output_dir,
             drtsans_version=state.drtsans_version,
+            cancel_event=_TERMINATE,
+            progress_cb=_slice_events(idx) if _EVENTS else None,
         )
 
         elapsed_times.append(result.elapsed_seconds)
+
+        if getattr(result, "cancelled", False):
+            n_cancelled += 1
+            results_detail.append({"row": idx, "sample": row.sample_name,
+                                   "config": row.configuration, "status": "cancelled",
+                                   "elapsed": result.elapsed_seconds})
+            _event(event="row_done", row=idx, status="cancelled", elapsed=result.elapsed_seconds)
+            break
 
         if result.success:
             n_success += 1
@@ -158,6 +197,8 @@ def _run_reduction_sync(
             results_detail.append(detail)
             note_suffix = f" ({result.note})" if result.note else ""
             _progress(f"[{i+1}/{total}] done {row.sample_name} ({row.configuration}) {_format_time(result.elapsed_seconds)}{note_suffix}")
+            _event(event="row_done", row=idx, status="done", elapsed=result.elapsed_seconds,
+                   outputs=list(row.outputs or []), note=result.note or "")
         else:
             n_fail += 1
             err = _summarize_error(result.log_file, result.err_file, result.stderr)
@@ -167,14 +208,39 @@ def _run_reduction_sync(
                 "elapsed": result.elapsed_seconds,
             })
             _progress(f"[{i+1}/{total}] FAILED {row.sample_name} ({row.configuration}) {err}")
+            _event(event="row_done", row=idx, status="error", elapsed=result.elapsed_seconds,
+                   error=err)
 
     total_time = sum(elapsed_times)
+    cancelled = _TERMINATE.is_set()
+    _event(event="batch_done", total=total, success=n_success, failed=n_fail,
+           cancelled=cancelled, elapsed=total_time)
     return {
         "type": "reduction_complete",
         "total": total, "success": n_success, "failed": n_fail,
+        "cancelled": cancelled, "n_cancelled": n_cancelled,
+        # `success` in the reply stays true even when rows failed (compatibility);
+        # `ok` says whether every row reduced.
+        "ok": n_fail == 0 and not cancelled,
         "elapsed_seconds": total_time,
         "results": results_detail,
     }
+
+
+def _slice_events(row_idx: int):
+    """progress_cb emitting {"event": "slice", "row", "n"} for time-sliced rows."""
+    import re
+    marker = re.compile(r"savenexus.*processed\.nxs", re.IGNORECASE)
+    st = {"n": 0, "t": 0.0}
+
+    def cb(line: str) -> None:
+        if marker.search(line):
+            st["n"] += 1
+            now = time.time()
+            if now - st["t"] >= 5 or st["n"] % 10 == 0:
+                st["t"] = now
+                _event(event="slice", row=row_idx, n=st["n"])
+    return cb
 
 
 def _run_autopilot_sync(
@@ -239,8 +305,28 @@ def _run_autopilot_sync(
     }
 
 
-def run_headless() -> None:
-    """Main headless loop — read commands from stdin, write JSON to stdout."""
+def run_headless(argv: list[str] | None = None) -> None:
+    """Main headless loop — read commands from stdin, write JSON to stdout.
+
+    Flags: --events (JSON progress events on stderr), --readonly (never write
+    the session; /reduce and /autopilot refused).
+    """
+    global _EVENTS
+    import signal
+    from eqsanscli.services import session_lock
+    argv = list(sys.argv[2:] if argv is None else argv)
+    _EVENTS = "--events" in argv
+    if "--readonly" in argv:
+        SessionState.READ_ONLY = True
+        SessionState.READ_ONLY_REASON = "Started with --readonly."
+    else:
+        ok, other = session_lock.acquire("headless")
+        if not ok:
+            SessionState.READ_ONLY = True
+            SessionState.READ_ONLY_REASON = (f"Another eqsanscli holds this folder's session "
+                                             f"({session_lock.describe(other)}).")
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     state = SessionState()
     state.output_directory = os.path.abspath(state.output_directory)
     router = CommandRouter()
@@ -262,7 +348,11 @@ def run_headless() -> None:
         except Exception:
             pass
 
-    _emit({"success": True, "message": "eqsanscli headless mode ready", "data": None})
+    ready = "eqsanscli headless mode ready"
+    if SessionState.READ_ONLY:
+        ready += f" (READ-ONLY: {SessionState.READ_ONLY_REASON})"
+    _emit({"success": True, "message": ready,
+           "data": {"type": "ready", "read_only": SessionState.READ_ONLY, "events": _EVENTS}})
 
     try:
         for line in sys.stdin:
@@ -270,101 +360,118 @@ def run_headless() -> None:
             if not cmd:
                 continue
 
+            # One JSON reply per command, whatever happens — the reduction and
+            # autopilot runners used to sit outside the try, so an exception
+            # there ended the process with no reply (sansbook B5).
             try:
-                result = loop.run_until_complete(router.dispatch(cmd, state))
-            except Exception as exc:
-                _emit({"success": False, "message": f"Error: {exc}", "data": None})
-                continue
-
-            # Handle special data payloads that need synchronous execution
-            if result.data:
-                data_type = result.data.get("type")
-
-                if data_type == "oncat_login":
-                    # A device browser sign-in can't happen mid-JSON. Point at the
-                    # console login (or env credentials) instead of blocking.
-                    _emit({
-                        "success": False,
-                        "message": "ONCat sign-in can't run in headless mode. Run "
-                        "'eqsanscli-oncat-login' in a terminal (approve in a browser) "
-                        "to cache a token, or set ONCAT_USERNAME/ONCAT_PASSWORD/"
-                        "ONCAT_CLIENT_ID/ONCAT_CLIENT_SECRET for unattended use.",
-                        "data": None,
-                    })
-                    _autosave(state)
-                    continue
-
-                if data_type == "start_reduction":
-                    snapshot = state.snapshot_for_reduction()
-                    reduction_result = _run_reduction_sync(
-                        state, result.data["indices"], loop, router,
-                    )
-                    if isinstance(reduction_result, dict) and snapshot:
-                        reduction_result["state_snapshot"] = snapshot
-                    try:
-                        from eqsanscli.services.note_service import log_result, result_summary
-                        log_result(state, result_summary("reduce", CommandResult(
-                            success=True, data=reduction_result)))
-                    except Exception:
-                        pass
-                    _emit({
-                        "success": True,
-                        "message": _strip_markup(result.message) if result.message else "",
-                        "data": reduction_result,
-                    })
-                    _autosave(state)
-                    continue
-
-                if data_type == "start_autopilot":
-                    autopilot_result = _run_autopilot_sync(
-                        state,
-                        ipts=result.data["ipts"],
-                        samples=result.data.get("samples"),
-                        excludes=result.data.get("excludes"),
-                        thickness=result.data.get("thickness"),
-                        bkg_sample=result.data.get("bkg_sample"),
-                        config_filter=result.data.get("config_filter"),
-                        force=result.data.get("force", False),
-                        continue_mode=result.data.get("continue_mode", False),
-                        standard_sample=result.data.get("standard_sample"),
-                        from_step=result.data.get("from_step", 1),
-                        fresh=result.data.get("fresh", False),
-                        to_step=result.data.get("to_step"),
-                        loop=loop,
-                        router=router,
-                    )
-                    _emit({
-                        "success": True,
-                        "message": "",
-                        "data": autopilot_result,
-                    })
-                    _autosave(state)
-                    continue
-
-            # Check for exit
-            if result.message == "exit":
-                _autosave(state)
-                _emit({"success": True, "message": "Session saved. Goodbye.", "data": None})
-                break
-
-            # Normal result
-            clean_message = _strip_markup(result.message) if result.message else ""
-            # Serialize data, stripping any non-JSON-serializable parts
-            data_out = None
-            if result.data:
                 try:
-                    json.dumps(result.data, default=str)
-                    data_out = result.data
-                except (TypeError, ValueError):
-                    data_out = {"type": result.data.get("type", "unknown")}
+                    result = loop.run_until_complete(router.dispatch(cmd, state))
+                except Exception as exc:
+                    _emit({"success": False, "message": f"Error: {exc}", "data": None})
+                    continue
 
-            _emit({
-                "success": result.success,
-                "message": clean_message,
-                "data": data_out,
-            })
-            _autosave(state)
+                # Handle special data payloads that need synchronous execution
+                if result.data:
+                    data_type = result.data.get("type")
 
+                    if data_type == "oncat_login":
+                        # A device browser sign-in can't happen mid-JSON. Point at the
+                        # console login (or env credentials) instead of blocking.
+                        _emit({
+                            "success": False,
+                            "message": "ONCat sign-in can't run in headless mode. Run "
+                            "'eqsanscli-oncat-login' in a terminal (approve in a browser) "
+                            "to cache a token, or set ONCAT_USERNAME/ONCAT_PASSWORD/"
+                            "ONCAT_CLIENT_ID/ONCAT_CLIENT_SECRET for unattended use.",
+                            "data": None,
+                        })
+                        _autosave(state)
+                        continue
+
+                    if data_type == "start_reduction":
+                        snapshot = state.snapshot_for_reduction()
+                        _REDUCING.set()
+                        try:
+                            reduction_result = _run_reduction_sync(
+                                state, result.data["indices"], loop, router,
+                            )
+                        finally:
+                            _REDUCING.clear()
+                        if isinstance(reduction_result, dict) and snapshot:
+                            reduction_result["state_snapshot"] = snapshot
+                        try:
+                            from eqsanscli.services.note_service import log_result, result_summary
+                            log_result(state, result_summary("reduce", CommandResult(
+                                success=True, data=reduction_result)))
+                        except Exception:
+                            pass
+                        _emit({
+                            "success": True,
+                            "message": _strip_markup(result.message) if result.message else "",
+                            "data": reduction_result,
+                        })
+                        _autosave(state)
+                        continue
+
+                    if data_type == "start_autopilot":
+                        autopilot_result = _run_autopilot_sync(
+                            state,
+                            ipts=result.data["ipts"],
+                            samples=result.data.get("samples"),
+                            excludes=result.data.get("excludes"),
+                            thickness=result.data.get("thickness"),
+                            bkg_sample=result.data.get("bkg_sample"),
+                            config_filter=result.data.get("config_filter"),
+                            force=result.data.get("force", False),
+                            continue_mode=result.data.get("continue_mode", False),
+                            standard_sample=result.data.get("standard_sample"),
+                            from_step=result.data.get("from_step", 1),
+                            fresh=result.data.get("fresh", False),
+                            to_step=result.data.get("to_step"),
+                            loop=loop,
+                            router=router,
+                        )
+                        _emit({
+                            "success": True,
+                            "message": "",
+                            "data": autopilot_result,
+                        })
+                        _autosave(state)
+                        continue
+
+                # Check for exit
+                if result.message == "exit":
+                    _autosave(state)
+                    _emit({"success": True, "message": "Session saved. Goodbye.", "data": None})
+                    break
+
+                # Normal result
+                clean_message = _strip_markup(result.message) if result.message else ""
+                # Serialize data, stripping any non-JSON-serializable parts
+                data_out = None
+                if result.data:
+                    try:
+                        json.dumps(result.data, default=str)
+                        data_out = result.data
+                    except (TypeError, ValueError):
+                        data_out = {"type": result.data.get("type", "unknown")}
+
+                _emit({
+                    "success": result.success,
+                    "message": clean_message,
+                    "data": data_out,
+                })
+                _autosave(state)
+
+            except Exception as exc:
+                import traceback
+                _emit({"success": False, "message": f"Error: {type(exc).__name__}: {exc}",
+                       "data": {"type": "error", "traceback": traceback.format_exc()[-2000:]}})
+                _autosave(state)
+            if _TERMINATE.is_set():
+                _autosave(state)
+                _emit({"success": True, "message": "Terminated (SIGTERM): session saved.", "data": None})
+                break
     except (KeyboardInterrupt, EOFError):
         _autosave(state)
         _emit({"success": True, "message": "Session saved.", "data": None})

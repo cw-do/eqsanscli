@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.52.0 | 2026-10-15 | **Headless mode for a driving agent** (sansbook review B5). `--events`: progress as JSON lines on stderr (`row_start`, `row_done` with outputs/note/error, `slice`, `batch_done`). One JSON reply per command always — the reduction/autopilot runners were outside the `try`, so an exception ended the process with no reply. SIGTERM during `/reduce` terminates the drtsans job, marks the row `cancelled`, saves, replies and exits; idle SIGTERM saves and exits. **One writer per folder**: a session lock (`_autosave.lock`, pid/host; stale if the holder is dead, or after 24 h from another node) — a second TUI or headless on the folder runs **read-only** (no autosave, `/reduce`/`/autopilot` refused); `--readonly` asks for it. Reduction summary adds `ok`, `cancelled`; first reply is `{"type": "ready", "read_only", "events"}`. |
 | 0.51.0 | 2026-10-15 | **Records of what was done** (sansbook review B1–B3, B6, B7, B9, B10). Merged files get a `#` header: eqsanscli version, target, per pair overlap/factor/points in the window, input sha256s, unit (`1/cm` or `a.u.` from the scale origin); a stitch factor outside 0.01–1000 warns (STC-05, now enforced). One function (`stitch_and_save`) produces the file, the `/stitch run` data (`type: stitch_result`) and the stitch-table record, so they agree; autopilot stores the target/overlaps/factors it actually used; the stitch table is saved in the session. NOTE.md logs results (`→` lines: calibration, stitch factors, check counts, matchruns pairing, reduction done/failed) and each day's eqsanscli version. Headless `data` is markup-free (Rich's parser — labels like `[4m2.5a30hz]` survive). Rows keep every output file and the rescue note. `/version` returns data incl. drtsans/Mantid (`--probe`, cached). `overlap auto` defaults to 6 as documented. |
 | 0.50.0 | 2026-10-15 | **Stale calibrations flagged; session state kept** (sansbook review A4/A6). A calibration now stores the 21 I(Q)-shaping parameters the standard was actually reduced with (from its input json: mask, Q binning, incoherent fit, TOF cuts, wavelength step, flood, flux, normalization); when the config's current values differ — by any route, `/set`, preset or instrument resolver — the scale is **STALE** in `/show config`, `/check` (SCL-05) and a `/reduce` warning, until recalibrated. Verified no false alarms on IPTS-38269. Session state: the autosave keeps 5 generations, rotated when the session's shape changes (IPTS, tables, row counts, configs), so a session emptied by mistake survives in `_autosave.1.json`; every reduction (TUI, headless, autopilot) writes its exact state to `<outputdir>/.eqsanscli_reduce/<UTC>.json`; `/continue` warns on another folder/IPTS and won't replace a non-empty session with another folder's state without `--force`. |
 | 0.49.0 | 2026-10-15 | **Transmission pairing for dash-written displacement series + a `/check` command** (sansbook review A5/B4). `/matchruns` pairs `-d<N>`/`--d<N>` series (`S-sebs-5wt-SiNPs--d26` → `T-sebs-5wt-SiNPs`) — only when ≥2 rows share the name with different N, so a lone `PS-d8` (deuteration) never borrows `PS`'s transmission; condition-token matches are reported. On IPTS-37953's catalog the 56 rows reduced without a transmission now all pair, each to its own sample. `/matchruns` leads with "N rows without a transmission; M runs unused", each unused run beside its likely rows, and returns `transmission_report` in `data`. A missing transmission still **never blocks** (owner). New `/check` (findings as `data`): protocol validators, missing empty beam/transmission/background, unused transmissions, scale origin/range. `/reduce` refuses on blocking protocol findings (`--force` overrides). TBL-06 fixed: it flagged legitimate background-cell roles (8 false blocking findings on IPTS-37681). |
@@ -283,6 +284,51 @@ read it when you need the history of a decision.
 
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
+
+### 2026-10-15: headless events, cancel, read-only, session lock, one reply per command (v0.52.0)
+
+From the sansbook planning review (item B5), for an agent driving
+`eqsanscli-headless`.
+
+**Before.** Progress was free text on stderr; `/reduce` ran serially with no
+way to cancel; the `start_reduction` / `start_autopilot` runners sat outside the
+per-command `try`, so an exception there ended the process with no JSON reply;
+and two processes on one folder both autosaved, the last to exit winning (a
+`/show` during a long `/reduce` could overwrite its row statuses).
+
+**Now.** `run_headless(argv)` takes `--events` (JSON events on stderr:
+`row_start`, `row_done` with `outputs`/`note`/`error`, `slice` from drtsans's
+per-slice `SaveNexus` lines, `batch_done`) and `--readonly`. The whole
+per-command body is in one `try`: any exception becomes a reply with
+`data.type = "error"` and a traceback tail, and the loop carries on. SIGTERM:
+during a reduction it sets the cancel event `reduce_row` already honours
+(drtsans child terminated, row `cancelled`, the rest untouched), the summary
+reports `cancelled`, the session is saved and the process exits after replying;
+idle, it saves and exits through the end-of-input path. The reduction summary
+adds `ok` (no failures, not cancelled) beside `success` (kept true for
+compatibility). The first reply carries `{"type": "ready", "read_only", "events"}`.
+
+`services/session_lock.py`: the first eqsanscli (TUI or headless) on a folder
+writes `.eqsanscli/sessions/_autosave.lock` ({pid, host, started, kind}),
+released at exit; a lock is honoured while its pid lives on this host, or for
+24 h from another node. A second process runs read-only:
+`SessionState.READ_ONLY` makes autosave a no-op and `/reduce` / `/autopilot`
+refuse with the reason; the TUI says so in a 🔒 line at startup.
+
+A test of mine saved a fake session before changing into its temp folder and
+overwrote the repo's own `.eqsanscli/sessions/_autosave.json` (an empty
+September session); the v0.50.0 autosave history kept the original as
+`_autosave.1.json`, which was restored. Subprocess tests run the app venv's
+python (HOME moved to tmp hides system python's user-site packages).
+
+`tests/test_headless.py` (+5: events/ready, second process read-only, idle
+SIGTERM, runner exception still replies, SIGTERM mid-reduce cancels and exits).
+423 tests.
+
+**Files changed:** `headless.py`, `services/session_lock.py` (new),
+`models/session_state.py`, `commands/reduction.py`, `commands/autopilot.py`,
+`app.py`, SKILL.md, `tests/test_headless.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
 
 ### 2026-10-15: stitch records, NOTE.md results, plain headless data, /version data (v0.51.0)
 
@@ -495,26 +541,3 @@ without a standard are labelled relative.
 `knowledge/protocol.md`, `knowledge/absolute-scale.md`, SKILL.md,
 `docs/pages/guide.md`, `tests/test_scale.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-10-15: /plot never uploads by itself (v0.47.6)
-
-From the sansbook planning review (2026-10-15, item A1), verified in code:
-`handle_plot` auto-saved the figure when `DISPLAY` was unset and then called
-`share_files([result_path])`, uploading it anonymously to here.now — a public
-URL, valid 24 h — with no flag and no prompt. That covered every headless run,
-every SSH session without X, and autopilot's step 13. NOTE.md logs commands, not
-their messages, so whether earlier experiments' figures were uploaded cannot be
-told from the records (the links have expired either way).
-
-Now: the PNG is saved and the message points to it, with a hint that `/share`
-exists. `/share` is unchanged in reach — an explicit request uploads, in the TUI
-and in headless mode (owner: "when requested explicitly, you can share") — and
-its reply says the link is public. The LLM prompt restricts `/share` to explicit
-share/upload/publish requests. SKILL.md and README say the same.
-
-`tests/test_plot_share.py` (+2): no-display `/plot` writes a PNG with
-`share_files` patched to fail the test; `/share` names the link as public.
-
-**Files changed:** `commands/data.py`, `commands/share.py`,
-`services/llm_handler.py`, SKILL.md, README.md, `tests/test_plot_share.py`,
-CLAUDE.md, docs (regenerated), `src/eqsanscli/__init__.py`.
