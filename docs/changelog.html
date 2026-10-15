@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.47.6</div>
+          data reduction tool &middot; v0.48.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -41,6 +41,11 @@
     <h1 id="eqsanscli-change-log">eqsanscli change log<a class="anchor" href="#eqsanscli-change-log">#</a></h1>
 <p>Full history, newest first. The most recent entries also appear in <code>CLAUDE.md</code>; everything older lives only here, so the file loaded into every session stays small. Same format: one <code>###</code> heading per revision, tagged with the version it shipped in.</p>
 <hr>
+<h3 id="2026-09-29-compact-configuration-in-titles-no-longer-blocks-stitching-v0472">2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)<a class="anchor" href="#2026-09-29-compact-configuration-in-titles-no-longer-blocks-stitching-v0472">#</a></h3>
+<p>Reported after a full autopilot on IPTS-37681: &quot;28 reduced … ⚠ No stitchable groups found&quot;. Titles wrote the configuration as one word (<code>S-CTAB 1,3_0.1shear 4m2.5a</code>). <code>_extract_sample_name</code> strips <code>\d+m\s+\d+a</code>, i.e. only the spaced form, so the sample name kept <code>_4m2.5a</code>; <code>output_stem</code> appended the config again (<code>CTAB_1,3_0.1shear_4m2.5a_4m2.5a_Iq.dat</code>); and <code>build_stitch_table</code>, which groups by <code>row.sample_name</code>, saw <code>…_4m2.5a</code> and <code>…_8m10a</code> as two samples. I had noticed the leftover config in v0.47.0 and called it harmless for matching — true, but it broke stitching.</p>
+<p>Two fixes. Root: <code>_extract_sample_name</code> also removes a configuration written as a whole word (<code>_CFG_WORD_RE</code>: distance <code>m</code> wavelength <code>a</code>, <code>.</code> or <code>p</code> decimal, optional <code>fs</code>/<code>&lt;n&gt;hz</code>, delimited by whitespace/<code>_</code>/ends — <code>sample2m5a</code> is left alone). Compatibility: <code>build_stitch_table</code> keys groups by <code>strip_config_tokens(row.sample_name)</code>, so an existing session (rows named before the fix, files already on disk with the doubled stem) stitches without re-matching or re-reducing. <code>_CFG_TOKEN_RE</code> (<a href="protocol.html#rule-CAT-09" class="rule-ref">CAT-09</a>&#x27;s token filter) now shares the same pattern body.</p>
+<p>Verified read-only on the real <code>autopilot_session.json</code>: 14 groups, all stitchable (12 CTAB + 2 EmptyCupBob), each ordered 8m10a → 4m2.5a, files found under their existing names. <a href="protocol.html#rule-STC-01" class="rule-ref">STC-01</a> extended. <code>tests/test_rheo_matching.py</code> (+2). 380 tests.</p>
+<p><strong>Files changed:</strong> <code>services/matching_service.py</code>, <code>services/merge_service.py</code>, <code>knowledge/protocol.md</code>, <code>tests/test_rheo_matching.py</code>, CLAUDE.md, docs (regenerated), <code>src/eqsanscli/__init__.py</code>.</p>
 <h3 id="2026-09-29-command-forms-the-app-tells-you-to-type-now-work-v0471">2026-09-29: command forms the app tells you to type now work (v0.47.1)<a class="anchor" href="#2026-09-29-command-forms-the-app-tells-you-to-type-now-work-v0471">#</a></h3>
 <p>Reported: <code><a href="commands.html#cmd-session">/session load</a></code> lists sessions and ends &quot;Usage: /load session &lt;name&gt;&quot;; typing that answered &quot;Use /session load &lt;name&gt; or /session list instead.&quot; Asked to check the other usages for the same kind of error.</p>
 <p>Audit, three passes over every <code>/command</code> mention in the code&#x27;s string literals, SKILL.md, README, <code>knowledge/</code> and <code>docs/pages/</code>:</p>

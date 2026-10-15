@@ -454,7 +454,9 @@ SHELL (read-only — never generate /sh, /rm, or /mv):
 /cp <src> <dst>                 - Copy file/directory
 
 CALIBRATION:
-/calibrate <porsil_file>        - Calculate absolute scale
+/calibrate <porsil_file>        - Calculate absolute scale (reports factor f, spread, neighbouring windows)
+/calibrate <file> --applynow    - Calibrate and set the config's scale to s0 × f (s0 = scale the porsil was reduced with); no reset to 1.0 needed
+/calibrate <file> --qmin 0.03 --qmax 0.1 - Other Q window (default 0.01–0.03; use 0.03–0.1 for 2.5m2.5a)
 /calibrate <file> --ref NG3|NG7 - Choose reference standard
 /calibrate --list-refs          - List available references
 

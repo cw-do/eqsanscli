@@ -165,6 +165,31 @@ async def handle_display(args: list[str], state: SessionState) -> CommandResult:
     )
 
 
+def _set_intensity_unit(opts, files: list[str], state: SessionState) -> None:
+    """Label the y axis a.u. when every plotted file's configuration is uncalibrated.
+
+    drtsans always writes "1/cm", but without a calibrated standard the numbers are
+    relative (scale_service, SCL-01). The configs are read off the file names
+    (merged files name several); unknown configs leave the default label.
+    """
+    import re
+    if getattr(opts, "ylabel", None) or any(getattr(opts, k, False) for k in ("kratky", "guinier", "porod")):
+        return
+    from eqsanscli.models.config_id import normalize_config_id
+    from eqsanscli.services import scale_service
+    known = {normalize_config_id(c): c for c in state.configurations}
+    units = set()
+    for f in files:
+        for tok in re.findall(r"\d+\.?\d*m\d+\.?\d*a(?:\d+hz)?", os.path.basename(f).lower()):
+            cfg = known.get(normalize_config_id(tok))
+            if cfg:
+                units.add(scale_service.unit(state, cfg))
+    if units == {"a.u."}:
+        opts.ylabel = r"$I(Q)$ (a.u.)"
+    elif "a.u." in units and len(units) > 1:
+        opts.ylabel = r"$I(Q)$ (mixed: a.u. and cm$^{-1}$)"
+
+
 async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
     if not args:
         return CommandResult(
@@ -228,6 +253,8 @@ async def handle_plot(args: list[str], state: SessionState) -> CommandResult:
     elif opts.save and os.path.dirname(opts.save) == "":
         save_dir = state.output_directory if os.path.isdir(state.output_directory) else "."
         opts.save = os.path.join(save_dir, opts.save)
+
+    _set_intensity_unit(opts, files, state)
 
     try:
         is_2d = any("iqxqy" in os.path.basename(f).lower() for f in files)

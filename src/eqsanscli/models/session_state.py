@@ -83,6 +83,10 @@ class SessionState:
     # re-applied after every catalog load/refresh, because /matchruns keys on the
     # title and a mislabeled transmission cannot be paired any other way.
     title_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Where each config's standardabsolutescale came from (services/scale_service):
+    # config_id -> {"kind": default|calibrate|user, "utc": …, + details}. A config
+    # with no entry predates v0.48.0 — its scale's origin is unknown.
+    scale_provenance: dict[str, dict] = field(default_factory=dict)
     llm_tokens_used: int = 0
     llm_calls: int = 0
 
@@ -212,6 +216,7 @@ class SessionState:
             "instrument_cycle_pin": self.instrument_cycle_pin,
             "instrument_provenance": self.instrument_provenance,
             "title_overrides": self.title_overrides,
+            "scale_provenance": self.scale_provenance,
             "command_history": self.command_history[-500:],  # keep last 500
         }
         with open(path, "w") as f:
@@ -263,6 +268,7 @@ class SessionState:
             auto_instrument_files=data.get("auto_instrument_files", True),
             instrument_cycle_pin=data.get("instrument_cycle_pin", ""),
             instrument_provenance=data.get("instrument_provenance", {}) or {},
+            scale_provenance=data.get("scale_provenance", {}) or {},
             command_history=data.get("command_history", []),
         )
         state.tables = {

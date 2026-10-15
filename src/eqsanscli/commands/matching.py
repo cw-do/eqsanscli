@@ -67,10 +67,14 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
     state.tables[state.active_table] = table
     table.name = state.active_table
 
-    from eqsanscli.services.config_manager import ALL_CONFIGS_KEY, _load_matching_preset
+    from eqsanscli.services.config_manager import (
+        ALL_CONFIGS_KEY, _load_matching_preset, matching_preset_info,
+    )
+    from eqsanscli.services import scale_service
     all_defaults = state.configurations.get(ALL_CONFIGS_KEY, {})
     preset_applied: list[str] = []
     preset_missing: list[str] = []
+    preset_inexact: list[str] = []
     for cfg in table.configurations:
         if cfg not in state.configurations:
             state.configurations[cfg] = {}
@@ -83,6 +87,9 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
         # overwrites a value the user already set, and None values were dropped).
         preset_params = _load_matching_preset(cfg)
         if preset_params:
+            pname, ptype = matching_preset_info(cfg)
+            if ptype not in ("exact", ""):
+                preset_inexact.append(f"{cfg} ← {pname} ({ptype} match)")
             n_filled = 0
             for k, v in preset_params.items():
                 if k not in cfg_dict:
@@ -92,6 +99,10 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
                 preset_applied.append(f"{cfg} ({n_filled})")
         else:
             preset_missing.append(cfg)
+        # A scale nobody set is the template's 1.0: say so explicitly (SCL-01).
+        if scale_service.provenance(state, cfg) is None and \
+                scale_service.is_relative(state, cfg):
+            scale_service.record(state, cfg, "default")
 
     configs = table.configurations
     matched_trans = sum(1 for r in table.rows if r.transmission_run)
@@ -141,6 +152,19 @@ async def handle_matchruns(args: list[str], state: SessionState) -> CommandResul
             f"— using drtsans defaults. Add a JSON preset to preset_configs/ or "
             f"use /set config to override."
         )
+    if preset_inexact:
+        summary += (
+            f"\n  ⚠ No exact preset (wavelength/frequency differ — check Q binning and "
+            f"TOF cuts): {'; '.join(preset_inexact)}"
+        )
+    # Absolute scale, per config (SCL-01): relative unless calibrated or set.
+    rel = [c for c in configs if scale_service.is_relative(state, c)]
+    unknown = scale_service.unknown_origin(state, configs)
+    if rel:
+        summary += (f"\n  Absolute scale: no standard calibrated for {', '.join(rel)} → "
+                    f"1.0, relative (a.u.). /calibrate <porsil file> --applynow to calibrate.")
+    for c in unknown:
+        summary += f"\n  ⚠ Absolute scale {c}: {scale_service.describe(state, c)}"
 
     # Instrument calibration files (dark/flood/flux + AgBe offsets) come from the
     # machine-physics cycle folders, chosen by run number — they are cycle-specific,

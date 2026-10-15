@@ -249,10 +249,18 @@ def find_closest_preset(config_id: str, preset_names: list[str]) -> tuple[str | 
     dist_match = re.search(r"(\d+\.?\d*m)", norm)
     if dist_match:
         config_dist = dist_match.group(1)
-        for name in preset_names:
-            n = normalize_config_id(name)
-            if config_dist in n:
-                return name, "distance"
+        same_dist = [name for name in preset_names
+                     if config_dist in normalize_config_id(name)]
+        # Prefer the preset with the same wavelength too: 4m2.5a30hz took the
+        # first 4 m preset in the list (conf_4m_10a_60hz) although
+        # conf_4m_2.5a_60hz existed (IPTS-37953).
+        wl = re.search(r"m(\d+\.?\d*)a", norm)
+        if wl:
+            for name in same_dist:
+                if re.search(rf"m{re.escape(wl.group(1))}a", normalize_config_id(name)):
+                    return name, "distance"
+        if same_dist:
+            return same_dist[0], "distance"
 
     return None, ""
 

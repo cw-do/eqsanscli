@@ -1177,7 +1177,11 @@ def run_autopilot_sync(
                 write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_todo)} remaining {std_label} runs (scale=1.0)...{parallel_label} ({porsil_already_done} already done)")
             else:
                 write(f"[bold]Step 6/13:[/bold] Reducing {len(porsil_rows)} {std_label} runs (scale=1.0)...{parallel_label}")
-            for cfg in table.configurations:
+            # Reset only the configs whose standard is about to be reduced and
+            # calibrated; a factor the user set on another config is theirs
+            # (policy 2). /calibrate --applynow compounds s0 × f, so this reset is
+            # for a clean standard reduction, not for correctness.
+            for cfg in sorted({row.configuration for row in porsil_todo}):
                 dispatch_sync(f"/set config {cfg} standardabsolutescale 1.0")
 
             _reduce_phase(
@@ -1204,37 +1208,39 @@ def run_autopilot_sync(
             if not os.path.exists(output_path):
                 write(f"  [yellow]⚠[/yellow] {row.configuration}: output file not found")
                 continue
-            r = dispatch_sync(f"/calibrate {output_path}")
-            if r.success and "Scale factor:" in r.message:
-                try:
-                    scale_line = [l for l in r.message.split("\n") if "Scale factor:" in l][0]
-                    scale_val = float(scale_line.split(":")[1].strip().split("[")[0].strip())
-                    calibrated_configs[row.configuration] = scale_val
-                    write(f"  [green]✓[/green] {row.configuration}: scale = {scale_val:.7f}")
-                except (IndexError, ValueError):
-                    write(f"  [yellow]⚠[/yellow] {row.configuration}: could not parse scale")
+            # --applynow sets s0 × f and records the calibration (scale_service);
+            # the result comes back as data, not parsed out of the message.
+            r = dispatch_sync(f"/calibrate {output_path} --applynow")
+            d = r.data if (r.success and isinstance(r.data, dict)) else {}
+            if d.get("type") == "calibration" and d.get("applied"):
+                scale_val = float(d["new_scale"])
+                calibrated_configs[row.configuration] = scale_val
+                write(f"  [green]✓[/green] {row.configuration}: f = {d['factor']:.7f}, "
+                      f"spread {d['std_rel']:.1%} → scale {scale_val:.7f}")
+                for w in d.get("warnings", []):
+                    write(f"    [yellow]⚠[/yellow] {w}")
             else:
-                write(f"  [yellow]⚠[/yellow] {row.configuration}: calibration failed")
+                why = (r.message or "").strip().splitlines()[-1][:160] if r.message else ""
+                write(f"  [yellow]⚠[/yellow] {row.configuration}: calibration not applied {why}")
         write("")
 
         # === Step 8: Apply scales ===
+        from eqsanscli.services import scale_service
         write("[bold]Step 8/13:[/bold] Applying absolute scale factors...")
         for cfg in table.configurations:
             if cfg in calibrated_configs:
-                scale = calibrated_configs[cfg]
-                r = dispatch_sync(f"/set config {cfg} standardabsolutescale {scale}")
-                if not r.success:
-                    write(f"  [red]✗[/red] {cfg}: failed to apply scale {scale:.7f} — {r.message}")
-                else:
-                    write(f"  [green]✓[/green] {cfg}: {scale:.7f}")
-                    if reference_config is None:
-                        reference_config = cfg
+                # Already applied by /calibrate --applynow in Step 7 (with its record).
+                write(f"  [green]✓[/green] {cfg}: {calibrated_configs[cfg]:.7f} (calibrated, 1/cm)")
+                if reference_config is None:
+                    reference_config = cfg
+            elif (scale_service.provenance(state, cfg) or {}).get("kind") == "user":
+                write(f"  [green]✓[/green] {cfg}: {scale_service.describe(state, cfg)} — kept")
             else:
                 r = dispatch_sync(f"/set config {cfg} standardabsolutescale 1.0")
                 if not r.success:
                     write(f"  [red]✗[/red] {cfg}: failed to set scale 1.0 — {r.message}")
                 else:
-                    write(f"  [dim]  {cfg}: 1.0 (no {std_label} calibration)[/dim]")
+                    write(f"  [dim]  {cfg}: 1.0 (no {std_label} calibration → relative, a.u.)[/dim]")
         write("")
     else:
         write(f"[bold]Step 6/13:[/bold] Reduce {std_label} standard — [dim]Skipped[/dim]")
@@ -1242,11 +1248,12 @@ def run_autopilot_sync(
         write(f"    Standard sample is used as an absolute intensity calibration standard.")
         write(f"[bold]Step 7/13:[/bold] Calibrate absolute scale — [dim]Skipped (no {std_label})[/dim]")
         write(f"[bold]Step 8/13:[/bold] Apply scale factors — [dim]Skipped (no {std_label})[/dim]")
-        # Report the standardabsolutescale that will actually be used (from preset)
-        write("    Reduction will use standardAbsoluteScale from applied preset(s):")
+        # Presets no longer carry a scale (v0.48.0): without a standard the
+        # data is relative unless the user set a factor explicitly (SCL-01).
+        from eqsanscli.services import scale_service
+        write("    Absolute scale used for the reduction:")
         for cfg in table.configurations:
-            scale = state.configurations.get(cfg, {}).get("standardabsolutescale", "not set")
-            write(f"      {cfg}: standardabsolutescale = {scale}")
+            write(f"      {cfg}: {scale_service.describe(state, cfg)}")
         write(f"    [dim]To calibrate, add a {std_label} sample and re-run, or use --standard <name> to specify a different standard.[/dim]\n")
 
     if _maybe_stop(8):

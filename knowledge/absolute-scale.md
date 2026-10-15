@@ -2,7 +2,7 @@
 topic: absolute-scale
 summary: Calibrating I(Q) to absolute intensity with a standard sample.
 load: on-demand
-updated: 2026-08-17
+updated: 2026-10-15
 ---
 
 # Absolute scale
@@ -12,12 +12,22 @@ measured in the same configuration against a known reference profile.
 
 ## Procedure
 
-1. Reduce the standard with `standardabsolutescale = 1.0`.
+1. Reduce the standard (at any scale s0 — 1.0 is customary).
 2. Compare the measured I(Q) against the reference over an overlap window,
    interpolating the measurement onto the reference's Q points and taking the mean
-   ratio (`services/calibration_service.py`, default window 0.01 ≤ Q ≤ 0.1).
-3. Apply the resulting factor as that configuration's `standardabsolutescale`.
-4. Reduce the samples.
+   ratio f (`services/calibration_service.py`, default window **0.01 ≤ Q ≤ 0.03**;
+   2.5 m / 2.5 Å curves start above it — use `--qmin 0.03 --qmax 0.1`).
+3. Check the fit: the report gives the ratio's spread and f in the windows
+   shifted by half a width either way; > 2 % means the curve does not follow the
+   reference there — move the window rather than trust the number.
+4. `--applynow` sets the configuration's scale to **s0 × f** (s0 read from the
+   standard's `<name>.json`) and records where it came from. Before v0.48.0 it
+   set f alone, which was wrong unless the standard had been reduced at 1.0.
+5. Reduce the samples.
+
+Each calibration is written to `calibration_<cfg>.json` and `.png` (reference vs
+measured × f, window shaded) and appended to `calibration_history.jsonl` in the
+output directory.
 
 Autopilot does this as Steps 6–8. Manually it is `/reduce --sample porsil`, then
 `/calibrate <file> --applynow` per configuration.
@@ -35,12 +45,14 @@ References live in `absscale_reference/`: `NG3_B1_1413_4col.dat` (default) and
 
 - Each configuration needs a standard measured **in that configuration** (protocol
   SCL-02). A factor from 4 m 10 Å does not apply to 2.5 m 2.5 Å.
-- Without a standard, output is on a **relative** scale. The preset's
-  `standardabsolutescale` is then whatever was inherited — often from another
-  experiment — so it must not be presented as absolute (protocol SCL-01).
-- A factor far from recent values suggests a bad fit or the wrong reference
-  (protocol SCL-03). Recent presets carry ≈0.19–0.23 for 4 m 10 Å; the acceptable
-  range is **TBD**.
+- Without a standard, the scale is **1.0 and the data is relative (a.u.)**
+  (protocol SCL-01). Presets no longer carry a scale — they held other
+  experiments' factors, which were inherited silently (SCL-04).
+- A factor you set yourself (`/set config <cfg> standardabsolutescale x`), even
+  one borrowed from another experiment, is taken as correct and the data as
+  absolute: that is your decision, and it is recorded as `user` (SCL-04).
+- `/show config <cfg>` shows the scale with its origin and unit.
+- A scale outside 0.01–50 is warned about (protocol SCL-03).
 - The scale factor is a config parameter, so changing it marks reduced rows
   `modified` — they need re-reducing, which autopilot and `/reduce --new` handle.
 

@@ -104,6 +104,12 @@ async def handle_show_config(args: list[str], state: SessionState) -> CommandRes
             "Src": source_marker,
         })
 
+    from eqsanscli.services import scale_service
+    scale_text = scale_service.describe(state, config_id)
+    for r in rows:
+        if r["Parameter"] == "standardabsolutescale":
+            r["Src"] = scale_service.unit(state, config_id)
+
     legend = "  [dim]Src: * = user override, d = default, (blank) = preset"
     if resolved:
         legend += ", mp:<cycle> = machine-physics calibration (/instrument show)"
@@ -111,8 +117,12 @@ async def handle_show_config(args: list[str], state: SessionState) -> CommandRes
 
     return CommandResult(
         success=True,
-        message=f"Configuration: {config_id}\n{legend}",
-        data={"type": "config_table", "rows": rows, "config_id": config_id},
+        message=f"Configuration: {config_id}\n  Absolute scale: {scale_text}\n{legend}",
+        data={"type": "config_table", "rows": rows, "config_id": config_id,
+              "scale": {"value": scale_service.current_scale(state, config_id),
+                        "unit": scale_service.unit(state, config_id),
+                        "source": scale_service.provenance(state, config_id),
+                        "text": scale_text}},
     )
 
 
@@ -155,6 +165,20 @@ def _resolved_cycle(state: SessionState, config_id: str) -> str:
     return ""
 
 
+def _record_scale_set(state: SessionState, cfg: str) -> str:
+    """After /set config … standardabsolutescale: record it as the user's (policy 2).
+
+    Exactly 1.0 means "no calibration" (how autopilot resets before reducing the
+    standard), so it is recorded as the relative default, not as a user factor.
+    """
+    from eqsanscli.services import scale_service
+    if abs(scale_service.current_scale(state, cfg) - 1.0) < 1e-12:
+        scale_service.record(state, cfg, "default")
+    else:
+        scale_service.record(state, cfg, "user")
+    return scale_service.describe(state, cfg)
+
+
 async def handle_set_config(args: list[str], state: SessionState) -> CommandResult:
     """Config ID is now a single underscore-delimited token: /set config 4.0m_2.5a_60hz qbintype linear"""
     if len(args) < 3:
@@ -191,7 +215,9 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
         for cfg in table_configs:
             ok, msg = set_config_param(cfg, param, value, state.configurations)
             if ok:
-                results.append(f"  [green]✓[/green] {cfg}")
+                scale_note = (f"  {_record_scale_set(state, cfg)}"
+                              if param.lower() == "standardabsolutescale" else "")
+                results.append(f"  [green]✓[/green] {cfg}{scale_note}")
                 # Mark done rows modified
                 for row in state.current_table.rows:
                     if row.status == "done" and normalize_config_id(row.configuration) == cfg:
@@ -242,6 +268,8 @@ async def handle_set_config(args: list[str], state: SessionState) -> CommandResu
                 n_reset += 1
         if n_reset:
             message += f"\n  ⚠ {n_reset} row(s) marked as modified — will be re-reduced."
+        if param.lower() == "standardabsolutescale":
+            message += f"\n  Absolute scale: {_record_scale_set(state, config_id)}"
 
     return CommandResult(success=ok, message=message)
 

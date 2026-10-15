@@ -195,10 +195,25 @@ def _load_matching_preset(config_id: str) -> dict[str, object]:
     for k, v in loaded.items():
         if v is None:
             continue
+        if k == "standardabsolutescale":
+            # Presets never carry a scale: theirs came from other experiments
+            # (SCL-02; scale_service). Without a standard it is 1.0, relative.
+            continue
         if k in _FLOAT_PARAMS and isinstance(v, (int, float)):
             v = float(v)
         out[k] = v
     return out
+
+
+def matching_preset_info(config_id: str) -> tuple[str | None, str]:
+    """(preset name, match type) that /matchruns would auto-apply to `config_id`."""
+    from eqsanscli.models.config_id import base_config_id
+    from eqsanscli.services.preset_service import find_closest_preset, list_presets
+    presets = list_presets()
+    if not presets:
+        return None, ""
+    return find_closest_preset(base_config_id(config_id) or config_id,
+                               [p["name"] for p in presets])
 
 
 def get_config(config_id: str, user_configs: dict[str, dict]) -> dict[str, object]:

@@ -86,22 +86,29 @@ Everything — reduced files, the merged I(Q), plots, `NOTE.md` — lands here.
 
 ## 5 · Calibrate the absolute scale
 
-If the experiment measured a standard (usually porsil), reduce it first with a
-scale of 1, then fit it against the reference:
+If the experiment measured a standard (usually porsil), reduce it, then fit it
+against the reference:
 
 ```
-/set config 4m10a standardabsolutescale 1.0
 /reduce --sample porsil
 /calibrate porsil_4m10a_Iq.dat --applynow
 ```
 
-`--applynow` reads the configuration out of the filename, applies the fitted
-factor to that configuration, and marks the affected rows for re-reduction. Repeat
-per configuration: **a scale factor belongs to the configuration it was measured
-in** and must not be borrowed from another.
+`--applynow` reads the configuration out of the filename and sets its scale to
+**s0 × f** — s0 being the scale the porsil was reduced with (from its `.json`), f
+the fitted factor — so the porsil can be reduced at any scale. It reports the
+ratio's spread and the factor in the neighbouring windows (over 2 % warns: move
+the window; 2.5 m / 2.5 Å needs `--qmin 0.03 --qmax 0.1`), writes
+`calibration_<cfg>.json`/`.png`, and marks the affected rows for re-reduction.
+Repeat per configuration: a calibrated factor belongs to the configuration its
+standard was measured in.
 
-With no standard in the experiment, the preset's `standardabsolutescale` is used
-and the result is scaled but not independently verified.
+With no standard in the experiment, the scale is **1.0 and the data is relative
+(a.u.)** — presets carry no scale. If you want to use a factor from elsewhere
+(another experiment's porsil, say), set it yourself with
+`/set config <cfg> standardabsolutescale <x>`: it is then taken as correct and the
+data as absolute. `/show config <cfg>` shows the scale, where it came from, and
+its unit.
 
 ## 6 · Reduce
 

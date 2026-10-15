@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.47.6</div>
+          data reduction tool &middot; v0.48.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -363,6 +363,15 @@ Autopilot steps (13 total):
 <h3>/calibrate<a class="anchor" href="#cmd-calibrate">#</a><span class="src">calibrate.py</span></h3>
 <p class="summary">Fit a measured standard against the reference and report the absolute scale factor</p>
 <pre class="example"><code>/calibrate porsil_4m10a_Iq.dat --applynow</code></pre>
+<details><summary>Full in-CLI help</summary><pre class="usage"><code>Usage: /calibrate &lt;porsil_iq_file&gt; [--ref NG3|NG7|&lt;file&gt;] [--qmin 0.01] [--qmax 0.03] [--applynow]
+       /calibrate --list-refs
+  Compares the measured standard&#x27;s I(Q) with the absolute-scale reference over
+  the Q window and reports the factor f, its spread and the neighbouring windows.
+  With --applynow: sets the config&#x27;s scale to s0 × f, where s0 is the scale the
+  standard was reduced with (read from its &lt;name&gt;.json) — correct whatever s0 was.
+  Every calibration is recorded in calibration_&lt;cfg&gt;.json / .png and
+  calibration_history.jsonl in the output directory.
+  2.5 m / 2.5 Å curves start above the default window: use --qmin 0.03 --qmax 0.1.</code></pre></details>
 </section>
 <section class="cmd" id="cmd-export-script">
 <h3>/export script<a class="anchor" href="#cmd-export-script">#</a><span class="src">export.py</span></h3>

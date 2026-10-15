@@ -196,6 +196,9 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
                 if resolved:
                     params = load_preset(resolved)
                     if params:
+                        # Presets never carry a scale (SCL-02, scale_service).
+                        params = {k: v for k, v in params.items()
+                                  if k != "standardabsolutescale"}
                         if cfg not in state.configurations:
                             state.configurations[cfg] = {}
                         existing = state.configurations[cfg]
@@ -224,10 +227,16 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
                         elif match_type == "partial":
                             lines.append(f"  [green]✓[/green] {cfg} ← {resolved} [dim](partial match)[/dim]{preserved_note}{reset_note}")
                         elif match_type == "distance":
-                            lines.append(f"  [yellow]~[/yellow] {cfg} ← {resolved} [dim](same distance, closest available)[/dim]{preserved_note}{reset_note}")
+                            lines.append(f"  [yellow]⚠[/yellow] {cfg} ← {resolved} [yellow](same distance only — wavelength/frequency differ; check Q binning and TOF cuts)[/yellow]{preserved_note}{reset_note}")
                         continue
             lines.append(f"  [yellow]⚠[/yellow] {cfg} — no matching preset found")
 
+        from eqsanscli.services import scale_service
+        for cfg in configs:
+            if scale_service.provenance(state, cfg) is None and scale_service.is_relative(state, cfg):
+                scale_service.record(state, cfg, "default")
+        lines.append("  [dim]Presets carry no absolute scale: uncalibrated configs stay at 1.0 "
+                     "(relative, a.u.) until /calibrate or /set config.[/dim]")
         header = f"Auto-applied presets to {applied}/{len(configs)} config(s):"
         if total_preserved and not force:
             header += f"  [dim](kept {total_preserved} user-set param(s); use --force to overwrite)[/dim]"
@@ -264,6 +273,14 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
             )
         return CommandResult(success=False, message=f"Preset not found: {preset_name}")
     source_desc = f"file '{resolved}'" if is_file else f"preset '{resolved}'"
+    from eqsanscli.services import scale_service
+    file_scale = None
+    if is_file:
+        # The user's own reduction JSON: its scale is the user's choice (policy 2).
+        file_scale = params.get("standardabsolutescale")
+    else:
+        # A preset's scale came from another experiment — never inherit it.
+        params = {k: v for k, v in params.items() if k != "standardabsolutescale"}
 
     # Apply preset params, preserving user-set values unless --force was given
     if config_id not in state.configurations:
@@ -285,6 +302,18 @@ async def handle_apply_preset(args: list[str], state: SessionState) -> CommandRe
 
     n_reset = _mark_config_rows_modified(state, config_id)
     msg = f"Applied {source_desc} to config '{config_id}' ({count} parameters)."
+    if file_scale is not None and existing.get("standardabsolutescale") == file_scale:
+        try:
+            relative = abs(float(file_scale) - 1.0) < 1e-12
+        except (TypeError, ValueError):
+            relative = False
+        if relative:
+            scale_service.record(state, config_id, "default")
+        else:
+            scale_service.record(state, config_id, "user", note=f"from {resolved}")
+        msg += f"\n  Absolute scale: {scale_service.describe(state, config_id)}"
+    elif scale_service.provenance(state, config_id) is None and scale_service.is_relative(state, config_id):
+        scale_service.record(state, config_id, "default")
     if preserved and not force:
         msg += (
             f"\n  Kept {preserved} user-set parameter(s) — pass --force to overwrite."

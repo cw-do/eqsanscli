@@ -97,6 +97,7 @@ TUI banner to tell which build is running.
 
 | Version | Date | Contents |
 |---|---|---|
+| 0.48.0 | 2026-10-15 | **Absolute scale gets an origin and a unit; `/calibrate` fixed** (sansbook review A2/A3). Every config's `standardabsolutescale` now records where it came from (`state.scale_provenance`, `services/scale_service.py`): `default` (1.0, nothing calibrated → **a.u.**), `calibrate`, or `user` (explicit `/set config`, assumed correct → 1/cm). **Presets no longer carry a scale** — 4 of 6 held another experiment's 0.19, inherited silently (IPTS-37953: no standard, 0.1917, written as 1/cm). **`--applynow` sets s0 × f** (s0 = scale the porsil was reduced with, from its json; refuses without it) — it set f alone before. `/calibrate` also: parses `…30hz_frame_0_Iq.dat`; unknown reference or flag is an error (was silent NG3 / ignored); reports spread + neighbouring-window factors (>2 % warns); returns `data` (`type: calibration`) and writes `calibration_<cfg>.json`/`.png` + `calibration_history.jsonl`; one default window 0.01–0.03. `/show config`, `/matchruns`, plots (`I (a.u.)`) show the unit. Inexact preset matches prefer the same wavelength and warn. Autopilot uses the data payload and keeps a user-set scale. SCL-01..03 updated, SCL-04 new, STC-05 0.01–1000. |
 | 0.47.6 | 2026-10-15 | **`/plot` no longer uploads figures by itself.** With `DISPLAY` unset it saved the PNG and then uploaded it to here.now — a public 24 h link — without being asked, from every headless run, SSH session and autopilot plot step (sansbook review A1). It now only saves the PNG and says so; uploading is an explicit `/share`, which still works everywhere (TUI and headless) and now says the link is public. LLM routing emits `/share` only when the user asks to share/upload/publish. |
 | 0.47.5 | 2026-10-02 | Startup banner: one line under Getting Started — *Best viewed in a terminal window of at least 120×35*. Chosen over auto-resizing the window (`ESC[8;35;120t`), which only some terminals honour (VTE, macOS Terminal, PuTTY; not xterm by default, Windows Terminal, VS Code, tmux/screen) and which would leave the user's window resized after exit. Text only. |
 | 0.47.4 | 2026-10-01 | Naming: the release folder is **`eqsanscli-stable`** (was `eqsanscli-safe`), matching `sansdir-stable`. Rebuilt fresh at the new path (a venv bakes its own path into its scripts, so it is not moved), `/SNS/EQSANS/shared/bin/eqsanscli` repointed, the old folder removed. Docstring and CLAUDE.md only in the repo. |
@@ -280,6 +281,74 @@ read it when you need the history of a decision.
 When adding an entry: put it here, and move the oldest one out to
 `docs/CHANGELOG.md` so this list stays at 5.
 
+### 2026-10-15: absolute-scale provenance and a correct /calibrate (v0.48.0)
+
+From the sansbook planning review (2026-10-15, items A2, A3, B10-calibrate), each
+claim re-checked in code and on disk, with the owner's policy: no standard →
+scale 1.0, relative (a.u.); an explicitly set factor is assumed correct (absolute,
+even if borrowed); plausible scale 0.01–50, stitch factor 0.01–1000 (warnings).
+
+**What was wrong.** (1) The scale was a bare float with no origin. Four of the six
+presets carried another experiment's factor (0.1916573, IPTS-36548) and every
+preset apply — `/matchruns` auto-apply and `/apply preset` — copied it in.
+IPTS-37953 (no porsil; autopilot applied `conf_4m_10a_60hz` to `4m2.5a30hz`)
+has all 56 rows at 0.1916573, labelled 1/cm. (2) `--applynow` set the raw factor
+f, but f is relative to the scale s0 the porsil was reduced with — IPTS-38269's
+porsil at 0.1917 gave 10.65 instead of 2.04, hence a manual reset ritual.
+(3) `_parse_config_from_filename` stripped `_Iq.dat` before `_frame_0_Iq.dat`, so
+30 Hz standards never applied. (4) An unknown or missing reference silently
+became NG3. (5) No spread, no record: the factor lived only in the message and
+autopilot parsed it back out. (6) qmax default 0.03 in the command, 0.1 in the
+service and the knowledge file. (7) `/calibrate` ignored unknown flags.
+
+**Now.** `services/scale_service.py` keeps `state.scale_provenance[cfg]`
+(`default` / `calibrate` with file, reference, window, spread, s0, sha256s /
+`user`), saved with the session; `describe()` / `unit()` drive `/show config`
+(line + `data.scale`), `/matchruns` (one line per relative config, unknown-origin
+flags for pre-0.48 sessions), and `/plot` (y label `I (a.u.)` when every plotted
+file's configs are uncalibrated, "mixed" when not). `_load_matching_preset` and
+`/apply preset` drop a named preset's scale; a user's own JSON keeps its scale
+as `user`. `/set config … standardabsolutescale x` records `user` (exactly 1.0
+records `default`); outside 0.01–50 warns. `find_closest_preset`'s same-distance
+tier prefers the same wavelength (4m2.5a30hz → conf_4m_2.5a_60hz, not 4m_10a)
+and inexact matches warn in `/matchruns` and `/apply preset auto`.
+
+`/calibrate`: strict flags; strict references; longest-suffix stem parsing
+(`calibration_service.output_stem`); s0 from `<stem>.json`; `--applynow` sets
+s0 × f and refuses without s0; spread `std/mean` and the factor in the windows
+shifted ±½ width, > 2 % warns; payload `{"type": "calibration", factor, std_rel,
+n_points, qmin, qmax, neighbour_factors, reference(+sha256), measured(+sha256),
+porsil_scale, new_scale, config, applied, previous_scale, warnings, utc}` as
+`data`, written to `calibration_<cfg>.json`, appended to
+`calibration_history.jsonl`, plotted to `calibration_<cfg>.png`. Default window
+0.01–0.03 everywhere. Autopilot Step 7 calls `--applynow` and reads `data`;
+Step 6 resets only configs whose standard it reduces; Step 8 keeps a `user`
+scale (policy 2) instead of overwriting it with 1.0; the no-standard branch
+reports each config's scale with its origin.
+
+Checked on IPTS-38269 (records written to scratch, not the experiment): both
+porsils (reduced at the hand-calibrated 2.0459 / 0.45599) give f = 1.00000 and
+new = s0, as they must; 8m12a's ratio spread over 0.01–0.03 is 2.2 % with the
+upper window at −2.2 %, so it warns — a real observation, not a failure.
+
+Protocol: SCL-01 (relative = a.u.), SCL-02 (calibrated factor from that
+config's standard, enforced by `--applynow`), SCL-03 (0.01–50 + flatness),
+new SCL-04 (provenance; presets carry no scale; s0 × f), STC-05 (0.01–1000).
+`knowledge/absolute-scale.md`, SKILL.md, the LLM reference and the guide updated.
+
+`tests/test_scale.py` (+11). 397 tests. **Users will notice:** presets stop
+setting a scale; `--applynow` compounds with the porsil's scale; experiments
+without a standard are labelled relative.
+
+**Files changed:** `services/scale_service.py` (new),
+`services/calibration_service.py`, `commands/calibrate.py`, `commands/config.py`,
+`commands/preset.py`, `commands/matching.py`, `commands/data.py`,
+`services/config_manager.py`, `services/preset_service.py`,
+`services/autopilot.py`, `models/session_state.py`, `services/llm_handler.py`,
+`knowledge/protocol.md`, `knowledge/absolute-scale.md`, SKILL.md,
+`docs/pages/guide.md`, `tests/test_scale.py`, CLAUDE.md, docs (regenerated),
+`src/eqsanscli/__init__.py`.
+
 ### 2026-10-15: /plot never uploads by itself (v0.47.6)
 
 From the sansbook planning review (2026-10-15, item A1), verified in code:
@@ -367,32 +436,3 @@ its own file. Release procedure documented under *Release channel* above.
 `services/calibration_service.py`, `services/smart_stitch.py`,
 `tests/test_paths.py`, CLAUDE.md, docs (regenerated),
 `src/eqsanscli/__init__.py`.
-
-### 2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)
-
-Reported after a full autopilot on IPTS-37681: "28 reduced … ⚠ No stitchable
-groups found". Titles wrote the configuration as one word (`S-CTAB 1,3_0.1shear
-4m2.5a`). `_extract_sample_name` strips `\d+m\s+\d+a`, i.e. only the spaced
-form, so the sample name kept `_4m2.5a`; `output_stem` appended the config again
-(`CTAB_1,3_0.1shear_4m2.5a_4m2.5a_Iq.dat`); and `build_stitch_table`, which groups
-by `row.sample_name`, saw `…_4m2.5a` and `…_8m10a` as two samples. I had noticed
-the leftover config in v0.47.0 and called it harmless for matching — true, but it
-broke stitching.
-
-Two fixes. Root: `_extract_sample_name` also removes a configuration written as a
-whole word (`_CFG_WORD_RE`: distance `m` wavelength `a`, `.` or `p` decimal,
-optional `fs`/`<n>hz`, delimited by whitespace/`_`/ends — `sample2m5a` is left
-alone). Compatibility: `build_stitch_table` keys groups by
-`strip_config_tokens(row.sample_name)`, so an existing session (rows named before
-the fix, files already on disk with the doubled stem) stitches without
-re-matching or re-reducing. `_CFG_TOKEN_RE` (CAT-09's token filter) now shares the
-same pattern body.
-
-Verified read-only on the real `autopilot_session.json`: 14 groups, all
-stitchable (12 CTAB + 2 EmptyCupBob), each ordered 8m10a → 4m2.5a, files found
-under their existing names. STC-01 extended. `tests/test_rheo_matching.py` (+2).
-380 tests.
-
-**Files changed:** `services/matching_service.py`, `services/merge_service.py`,
-`knowledge/protocol.md`, `tests/test_rheo_matching.py`, CLAUDE.md, docs
-(regenerated), `src/eqsanscli/__init__.py`.

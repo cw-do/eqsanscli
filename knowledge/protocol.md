@@ -315,19 +315,36 @@ full-band reduction. Convention: suffix `_tofcut`.
 
 See `absolute-scale.md`.
 
-**SCL-01** · warning · enforced (autopilot Steps 6–8 report it)
-Absolute intensity requires a standard sample (porsil by default) reduced at
-scale 1.0 and calibrated against the reference. Without one, output is on a
-relative scale — say so rather than implying absolute units.
+**SCL-01** · warning · enforced (`services/scale_service.py`; `/matchruns`, `/show config`, `/plot`, autopilot Steps 6–8)
+Absolute intensity requires a standard sample (porsil by default) calibrated
+against the reference. Without one the scale is **1.0 and intensities are
+relative (a.u.)** — say so rather than implying absolute units. drtsans always
+writes "1/cm"; eqsanscli's own outputs (plots, messages) carry the real unit.
 
-**SCL-02** · blocking · unenforced
-Each configuration's `standardabsolutescale` comes from a standard measured **in
-that configuration**.
+**SCL-02** · blocking · enforced (`/calibrate --applynow`)
+A *calibrated* `standardabsolutescale` comes from a standard measured **in that
+configuration**: `--applynow` applies only to the configuration named by the
+standard's own file. A factor set explicitly by the user is SCL-04's case.
 
-**SCL-03** · warning · unenforced
-A calibrated scale factor far from the values seen in recent cycles indicates a
-bad fit or the wrong reference. Plausible range: **TBD** (recent presets carry
-≈0.19–0.23 for 4 m 10 Å).
+**SCL-03** · warning · enforced (`/calibrate`, `/set config`, `/show config`)
+A scale outside **0.01–50** indicates a bad fit, the wrong reference, or a unit
+slip. Warned, never refused. The calibration also reports the spread of the
+reference/measured ratio over the window and the factor in the two neighbouring
+windows; more than 2 % either way warns that the curve does not follow the
+reference's shape there.
+
+**SCL-04** · warning · enforced (`services/scale_service.py`, `state.scale_provenance`)
+Every scale carries its origin: `default` (1.0, nothing calibrated → a.u.),
+`calibrate` (file, reference, window, spread, and the scale the standard was
+reduced with), or `user` (set explicitly → assumed correct, absolute, even when
+borrowed from another experiment — the user's decision). **Presets never carry a
+scale**: theirs came from other experiments and were silently inherited
+(IPTS-37953: a 4 m 10 Å preset's 0.1917 on a 4 m 2.5 Å 30 Hz config with no
+standard, written as 1/cm). `/calibrate --applynow` sets **s0 × f**, where s0 is
+the scale the standard was reduced with (from its input json), so calibrating
+is correct whatever the standard was reduced at; without s0 it refuses. A scale
+with no recorded origin (sessions from before this rule) other than 1.0 is
+flagged wherever it is shown.
 
 ---
 
@@ -359,14 +376,14 @@ never mixed with 60 Hz data for the same sample.
 **STC-05** · warning · unenforced
 Scale factors applied while stitching stay near 1 — a large factor means the
 configurations disagree, usually from a wrong background, transmission or
-absolute scale rather than a stitching problem. Threshold: **TBD**.
+absolute scale rather than a stitching problem. Plausible range: **0.01–1000**,
+warned, never refused.
 
 ---
 
 ## Open items for the instrument scientist
 
-Rules marked **TBD** need a number: CAT-07 (durations), SCL-03 (scale-factor
-range), STC-05 (stitch scale-factor tolerance). Rules marked `unenforced` are the
+Rules marked **TBD** need a number: CAT-07 (durations). Rules marked `unenforced` are the
 backlog, and `services/protocol.py:unenforced_rules()` lists them from code so the
 backlog cannot rot unnoticed. MSK-10 and MSK-11 are among them: both need a
 decision from the instrument scientist about what "reviewed" and "changed" should

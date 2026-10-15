@@ -263,22 +263,32 @@ If the working table contains porsil samples, calibrate absolute scale
 before reducing the real samples:
 
 ```
-# Reduce porsil with scale=1.0 first
-/set config 4m10a standardabsolutescale 1.0
-/set config 2.5m2.5a standardabsolutescale 1.0
 /reduce --sample porsil
 
-# Calibrate AND auto-apply scale factors in one step
+# Calibrate AND apply in one step
 /calibrate porsil_4m10a_Iq.dat --applynow
-/calibrate porsil_2.5m2.5a_Iq.dat --applynow
+/calibrate porsil_2.5m2.5a_Iq.dat --applynow --qmin 0.03 --qmax 0.1
 ```
 
-`--applynow` parses the config ID from the filename (e.g., `porsil_4m10a_Iq.dat` → `4m10a`),
-applies the scale factor to that config, and marks affected rows as "modified" so they'll
-be re-reduced.
+`--applynow` takes the config ID from the filename (`porsil_4m10a_Iq.dat` → `4m10a`,
+`…30hz_frame_0_Iq.dat` works too) and sets that config's scale to **s0 × f**: s0 is the
+scale the porsil was reduced with (read from `porsil_4m10a.json` beside the I(Q) file),
+f the fitted factor. So the porsil may be reduced at any scale — no reset to 1.0 needed
+(since v0.48.0; before, `--applynow` set f alone). It refuses if the json is missing.
+It marks the config's rows "modified" for re-reduction.
 
-If NO porsil is in the working table, skip this step — the preset's
-`standardabsolutescale` will be used as the fallback.
+The result also comes back as headless `data` (`{"type": "calibration", "factor",
+"std_rel", "n_points", "qmin", "qmax", "neighbour_factors", "porsil_scale",
+"new_scale", "applied", "config", "reference", "measured", … }`) and is written to
+`calibration_<cfg>.json` / `.png` and `calibration_history.jsonl` in the output
+directory. A ratio spread or neighbouring-window drift over 2 % is warned —
+move the window. Unknown flags and unknown references are errors.
+
+If NO porsil is in the working table, skip this step. The scale stays **1.0 and the
+data is relative (a.u.)** — presets no longer carry a scale. A factor you set
+explicitly (`/set config <cfg> standardabsolutescale x`, e.g. borrowed from another
+experiment) is taken as correct and recorded as `user`. `/show config <cfg>` shows
+the scale with its origin and unit.
 
 #### Step 5: Reduce
 
@@ -595,7 +605,7 @@ is discoverable. Needs drtsans for the Mantid read/write.
 | `/autopilot current --from <N>` | Start at step N (skip 1..N-1); needs catalog + table in session |
 | `/autopilot current --to <N>` | Stop after step N (aliases `--till`/`--until`); `--to 8` = reduce standard + find scale factor, then stop |
 | `/calibrate <iq_file>` | Fit a measured standard against the reference and report the absolute scale factor |
-| `/calibrate <iq_file> --applynow` | Same, and apply it to the config named in the filename, marking affected rows for re-reduction |
+| `/calibrate <iq_file> --applynow` | Same, and set the config named in the filename to s0 × f (s0 = the scale the standard was reduced with), recording the calibration and marking affected rows for re-reduction |
 | `/export script [file]` | Export standalone Python script (generated layout) |
 | `/export script --like <example.py> [-o <out>]` | Reproduce an existing script's style — keep its EQVar setup, config loops and stitching verbatim, refill only the run lists / sample names / thickness from the current table. Fails closed if the example's configurations don't match the table |
 | `/export script --like <example.py> --adapt` | Opt-in: when configs don't match, let an LLM revise the script (remove surplus config blocks, rewire stitch). Matched run arrays are still filled by code; the stitch call is marked `# attn.` and the output is review-required |

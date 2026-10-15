@@ -7,6 +7,35 @@ the version it shipped in.
 
 ---
 
+### 2026-09-29: compact configuration in titles no longer blocks stitching (v0.47.2)
+
+Reported after a full autopilot on IPTS-37681: "28 reduced … ⚠ No stitchable
+groups found". Titles wrote the configuration as one word (`S-CTAB 1,3_0.1shear
+4m2.5a`). `_extract_sample_name` strips `\d+m\s+\d+a`, i.e. only the spaced
+form, so the sample name kept `_4m2.5a`; `output_stem` appended the config again
+(`CTAB_1,3_0.1shear_4m2.5a_4m2.5a_Iq.dat`); and `build_stitch_table`, which groups
+by `row.sample_name`, saw `…_4m2.5a` and `…_8m10a` as two samples. I had noticed
+the leftover config in v0.47.0 and called it harmless for matching — true, but it
+broke stitching.
+
+Two fixes. Root: `_extract_sample_name` also removes a configuration written as a
+whole word (`_CFG_WORD_RE`: distance `m` wavelength `a`, `.` or `p` decimal,
+optional `fs`/`<n>hz`, delimited by whitespace/`_`/ends — `sample2m5a` is left
+alone). Compatibility: `build_stitch_table` keys groups by
+`strip_config_tokens(row.sample_name)`, so an existing session (rows named before
+the fix, files already on disk with the doubled stem) stitches without
+re-matching or re-reducing. `_CFG_TOKEN_RE` (CAT-09's token filter) now shares the
+same pattern body.
+
+Verified read-only on the real `autopilot_session.json`: 14 groups, all
+stitchable (12 CTAB + 2 EmptyCupBob), each ordered 8m10a → 4m2.5a, files found
+under their existing names. STC-01 extended. `tests/test_rheo_matching.py` (+2).
+380 tests.
+
+**Files changed:** `services/matching_service.py`, `services/merge_service.py`,
+`knowledge/protocol.md`, `tests/test_rheo_matching.py`, CLAUDE.md, docs
+(regenerated), `src/eqsanscli/__init__.py`.
+
 ### 2026-09-29: command forms the app tells you to type now work (v0.47.1)
 
 Reported: `/session load` lists sessions and ends "Usage: /load session <name>";

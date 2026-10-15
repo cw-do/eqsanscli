@@ -13,7 +13,7 @@
       <div class="brand">
         <a href="index.html"><div class="title">eqsans<b>cli</b></div></a>
         <div class="tagline">Spallation Neutron Source &middot; Beam Line 6 &middot;
-          data reduction tool &middot; v0.47.6</div>
+          data reduction tool &middot; v0.48.0</div>
       </div>
       <div class="spacer"></div>
       <div class="search-wrap">
@@ -71,12 +71,11 @@
 <pre><code>/set outputdir /SNS/EQSANS/IPTS-38681/shared/output/</code></pre>
 <p>Everything — reduced files, the merged I(Q), plots, <code>NOTE.md</code> — lands here.</p>
 <h2 id="5-calibrate-the-absolute-scale">5 · Calibrate the absolute scale<a class="anchor" href="#5-calibrate-the-absolute-scale">#</a></h2>
-<p>If the experiment measured a standard (usually porsil), reduce it first with a scale of 1, then fit it against the reference:</p>
-<pre><code>/set config 4m10a standardabsolutescale 1.0
-/reduce --sample porsil
+<p>If the experiment measured a standard (usually porsil), reduce it, then fit it against the reference:</p>
+<pre><code>/reduce --sample porsil
 /calibrate porsil_4m10a_Iq.dat --applynow</code></pre>
-<p><code>--applynow</code> reads the configuration out of the filename, applies the fitted factor to that configuration, and marks the affected rows for re-reduction. Repeat per configuration: <strong>a scale factor belongs to the configuration it was measured in</strong> and must not be borrowed from another.</p>
-<p>With no standard in the experiment, the preset&#x27;s <code>standardabsolutescale</code> is used and the result is scaled but not independently verified.</p>
+<p><code>--applynow</code> reads the configuration out of the filename and sets its scale to <strong>s0 × f</strong> — s0 being the scale the porsil was reduced with (from its <code>.json</code>), f the fitted factor — so the porsil can be reduced at any scale. It reports the ratio&#x27;s spread and the factor in the neighbouring windows (over 2 % warns: move the window; 2.5 m / 2.5 Å needs <code>--qmin 0.03 --qmax 0.1</code>), writes <code>calibration_&lt;cfg&gt;.json</code>/<code>.png</code>, and marks the affected rows for re-reduction. Repeat per configuration: a calibrated factor belongs to the configuration its standard was measured in.</p>
+<p>With no standard in the experiment, the scale is <strong>1.0 and the data is relative (a.u.)</strong> — presets carry no scale. If you want to use a factor from elsewhere (another experiment&#x27;s porsil, say), set it yourself with <code><a href="commands.html#cmd-set-config">/set config &lt;cfg&gt; standardabsolutescale &lt;x&gt;</a></code>: it is then taken as correct and the data as absolute. <code><a href="commands.html#cmd-show-config">/show config &lt;cfg&gt;</a></code> shows the scale, where it came from, and its unit.</p>
 <h2 id="6-reduce">6 · Reduce<a class="anchor" href="#6-reduce">#</a></h2>
 <pre><code>/reduce all</code></pre>
 <p>Each row is reduced through drtsans, writing <code>{sample}_{config}_Iq.dat</code>, the 2D <code>_Iqxqy.dat</code>, and the JSON that drove it. Failures are reported per row with the reason; fix and re-run just those with <code><a href="commands.html#cmd-reduce">/reduce --new</a></code>.</p>
